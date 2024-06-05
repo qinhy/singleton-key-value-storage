@@ -13,14 +13,18 @@ This project implements a key-value storage system in Python with a singleton de
 
 ### SingletonFirestoreStorage and SingletonFirestoreStorageController
 - require
+```python
     from google.cloud import firestore
     os.environ['GOOGLE_PROJECT_ID']
     os.environ['GOOGLE_FIRESTORE_COLLECTION']
+```
 
 ### SingletonRedisStorage and SingletonRedisStorageController
 - require
+```python
     import redis
     os.environ['REDIS_URL'] # 'redis://127.0.0.1:6379'
+```
 
 
 ### SingletonKeyValueStorage
