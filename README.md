@@ -90,5 +90,4 @@ storage.state.load('storage_dump.json')
 - Extensible to other backends like Redis and Firestore by implementing the corresponding storage controller classes.
 
 ## Limitations
-- Current implementation does not provide the Redis and Firestore backend implementations.
 - Error handling and data validation are minimal and should be enhanced for production use.
