@@ -171,29 +171,29 @@ class SingletonKeyValueStorage:
         self.python_backend()
     
     def python_backend(self):
-        self.state = SingletonPythonDictStorageController(SingletonPythonDictStorage())
+        self.client = SingletonPythonDictStorageController(SingletonPythonDictStorage())
         
     def redis_backend(self):
-        self.state = SingletonRedisStorageController(SingletonRedisStorage())
+        self.client = SingletonRedisStorageController(SingletonRedisStorage())
 
     def firestore_backend(self):
-        self.state = SingletonFirestoreStorageController(SingletonFirestoreStorage())
+        self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage())
 
         
     def add_slave(self, s):
-        self.state.add_slave(s)
+        self.client.add_slave(s)
 
     def exists(self, key: str):
-        return self.state.exists(key)
+        return self.client.exists(key)
 
     def set(self, key: str, value: dict):
-        self.state.set( key, value)
+        self.client.set( key, value)
 
     def get(self, key: str) -> dict:
-        return self.state.get( key)
+        return self.client.get( key)
 
     def delete(self, key: str):
-        self.state.delete(key)
+        self.client.delete(key)
 
     def keys(self, pattern: str):
-        return self.state.keys(pattern)
+        return self.client.keys(pattern)
