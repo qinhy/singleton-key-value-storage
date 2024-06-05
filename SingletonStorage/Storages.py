@@ -33,7 +33,7 @@ try:
             for s in self.model.slaves:
                 if hasattr(s, 'set'):
                     s.set(key, value)
-        def get(self, key: str):
+        def get(self, key: str) -> dict:
             doc = self.model.collection.document(key).get()
             return doc.to_dict() if doc.exists else None
         def delete(self, key: str):
@@ -78,14 +78,14 @@ try:
         def exists(self, key: str):
             return self.model.redis.exists(key)
 
-        def set(self, key: str, value: str):
-            self.model.redis.set(key, value)
+        def set(self, key: str, value: dict):
+            self.model.redis.set(key, json.dumps(value))
             for s in self.model.slaves:
                 if hasattr(s, 'set'):
                     s.set(key, value)
 
-        def get(self, key: str):
-            return self.model.redis.get(key)
+        def get(self, key: str) -> dict:
+            return json.loads(self.model.redis.get(key))
 
         def delete(self, key: str):
             self.model.redis.delete(key)
@@ -137,13 +137,13 @@ class SingletonPythonDictStorageController:
     def exists(self, key: str):
         return key in self.model.store
 
-    def set(self, key: str, value: str):
+    def set(self, key: str, value: dict):
         self.model.store[key] = value
         for s in self.model.slaves:
             if hasattr(s, 'set'):
                 s.set(key, value)
 
-    def get(self, key: str):
+    def get(self, key: str) -> dict:
         return self.model.store[key]
 
     def delete(self, key: str):
@@ -163,7 +163,6 @@ class SingletonPythonDictStorageController:
     def load(self,path="PythonDictStorage.json"):
         with open(path, "r") as tf:
             self.model.store = json.load(tf)
-
 
 
 class SingletonKeyValueStorage:
@@ -190,7 +189,7 @@ class SingletonKeyValueStorage:
     def set(self, key: str, value: dict):
         self.state.set( key, value)
 
-    def get(self, key: str):
+    def get(self, key: str) -> dict:
         return self.state.get( key)
 
     def delete(self, key: str):
