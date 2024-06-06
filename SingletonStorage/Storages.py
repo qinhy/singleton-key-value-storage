@@ -4,7 +4,29 @@ import json
 import os
 from urllib.parse import urlparse
 
-try:
+def get_error(func):
+    try:
+        func()
+        return None
+    except Exception as e:
+        return e
+
+# self checking
+es = []
+es.append({get_error(lambda:__import__('google.cloud.firestore'))       :'no google firestore support'})
+es.append({get_error(lambda:os.environ['GOOGLE_PROJECT_ID'])            :'no google firestore support'})
+es.append({get_error(lambda:os.environ['GOOGLE_FIRESTORE_COLLECTION'])  :'no google firestore support'})
+firestore_back = len(list(filter(lambda x:None not in x,es))) == 0
+
+es.append({get_error(lambda:__import__('redis'))                        :'no redis support'})
+es.append({get_error(lambda:os.environ['REDIS_URL'])                    :'no redis url (redis://127.0.0.1:6379)'})
+redis_back = len(list(filter(lambda x:None not in x,es))) == 0
+
+if len(list(filter(lambda x:None not in x,es))) != 0:
+    for i in list(filter(lambda x:None not in x,es)):print(i)
+
+
+if firestore_back:
     from google.cloud import firestore
     os.environ['GOOGLE_PROJECT_ID']
     os.environ['GOOGLE_FIRESTORE_COLLECTION']
@@ -45,13 +67,9 @@ try:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
             return fnmatch.filter(keys, pattern)
-        
-except Exception as e:
-    print('no google firestore support',e)
 
 
-
-try:
+if redis_back:
     import redis
     os.environ['REDIS_URL'] # 'redis://127.0.0.1:6379'
 
@@ -108,10 +126,6 @@ try:
             for key, value in data.items():
                 self.model.redis.set(key, value)
 
-except Exception as e:
-    print('no redis support',e)
-
-
 class SingletonPythonDictStorage:
     _instance = None
     store = {}
@@ -164,7 +178,6 @@ class SingletonPythonDictStorageController:
         with open(path, "r") as tf:
             self.model.store = json.load(tf)
 
-
 class SingletonKeyValueStorage:
 
     def __init__(self) -> None:
@@ -172,14 +185,15 @@ class SingletonKeyValueStorage:
     
     def python_backend(self):
         self.client = SingletonPythonDictStorageController(SingletonPythonDictStorage())
-        
-    def redis_backend(self):
-        self.client = SingletonRedisStorageController(SingletonRedisStorage())
+    
+    if redis_back:
+        def redis_backend(self):
+            self.client = SingletonRedisStorageController(SingletonRedisStorage())
 
-    def firestore_backend(self):
-        self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage())
+    if firestore_back:
+        def firestore_backend(self):
+            self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage())
 
-        
     def add_slave(self, s):
         self.client.add_slave(s)
 
