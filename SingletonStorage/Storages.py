@@ -51,7 +51,7 @@ if firestore_back:
             doc = self.model.collection.document(key).get()
             return doc.exists
         def set(self, key: str, value: dict):
-            self.model.collection.document(key).set(json.loads(value))
+            self.model.collection.document(key).set(value)
             for s in self.model.slaves:
                 if hasattr(s, 'set'):
                     s.set(key, value)
