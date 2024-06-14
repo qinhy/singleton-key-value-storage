@@ -108,7 +108,7 @@ class ChatRoom:
     
     def add_content_group_to_chatroom(self):
         gc:ContentGroupController = self.chatroom().controller
-        parent,child = gc.add_new_child_group()
+        child = gc.add_new_child_group()
         self._on_message_change()
         return child.id
     
@@ -182,21 +182,21 @@ class ChatRoom:
                 raise ValueError(f'Unknown type of {type}')
 
         if (group_id is None and not new_group) or (group_id == self.chatroom().id):
-            parent,tc = add_content(self.chatroom())(speaker.author.id, msg)
+            tc = add_content(self.chatroom())(speaker.author.id, msg)
             # message_id = self.add_message_to_chatroom(tc)
 
         elif group_id is not None and not new_group:
             if group_id not in self.chatroom().children_id:
                 raise ValueError(f'no such group {group_id}')
             group:ContentGroup = self.store.find(group_id)
-            parent,tc = add_content(group)(speaker.author.id, msg)
+            tc = add_content(group)(speaker.author.id, msg)
             # message_id = self.add_message_to_chatroom(tc.model,group.model)
             self._on_message_change()
 
         elif group_id is None and new_group:            
             controller:ContentGroupController = self.chatroom().controller
-            parent,group = controller.add_new_child_group()
-            parent,tc = add_content(group)(speaker.author.id, msg)
+            group = controller.add_new_child_group()
+            tc = add_content(group)(speaker.author.id, msg)
             # message_id = self.add_message_to_chatroom(tc,group)
         return tc
 

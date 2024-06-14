@@ -38,7 +38,7 @@ def openairequest(url,jsonstr):
     return response
 
 def openaimsg():
-    msgd = cr.msgsDict(todict = lambda c:c.controller.get_data_raw())
+    msgd = cr.msgsDict(True,todict = lambda c:c.controller.get_data_raw())
     def mergelist(l):
         name,role = l[0]['name'],l[0]['role']        
         return dict(name=name,role=role,content=[c['content'] for c in l])

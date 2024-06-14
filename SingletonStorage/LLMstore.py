@@ -166,10 +166,9 @@ class LLMstore(SingletonKeyValueStorage):
         group.controller = self.get_controller(group.id)(self,group)
         return group
     
-    def _add_new_content_to_group(self,group_id:str,content:AbstractObj,raw:str=None):
-        g:AbstractGroup = self.find(group_id)
-        g.children_id.append(content.id)
-        self._store_obj(g)
+    def _add_new_content_to_group(self,group:ContentGroup,content:AbstractObj,raw:str=None):
+        group.children_id.append(content.id)
+        self._store_obj(group)
         if raw is not None and 'ContentGroup' not in content.id:
             self._store_obj(content)
             self._store_obj(CommonData(id=f"CommonData:{content.id}", raw=raw))        
@@ -177,23 +176,35 @@ class LLMstore(SingletonKeyValueStorage):
             self._store_obj(content)
             
         content.controller = self.get_controller(content.id)(self,content)
-        return g,content
+        return group,content
     
-    def add_new_group_to_group(self,group_id:str,metadata={},rank=[0]):
-        parent,child = self._add_new_content_to_group(group_id, ContentGroup(rank=rank, metadata=metadata, parent_id=group_id))
+    def _add_new_content_to_group_byID(self,group_id:str,content:AbstractObj,raw:str=None):
+        g:AbstractGroup = self.find(group_id)
+        return self._add_new_content_to_group(g,content,raw)
+    
+    def add_new_group_to_group_byID(self,group_id:str,metadata={},rank=[0]):
+        parent,child = self._add_new_content_to_group_byID(group_id, ContentGroup(rank=rank, metadata=metadata, parent_id=group_id))
         return parent,child
 
-    def add_new_text_to_group(self,group_id:str,author_id:str,text:str):
-        parent,child = self._add_new_content_to_group(group_id,
+    def add_new_text_to_group_byID(self,group_id:str,author_id:str,text:str):
+        parent,child = self._add_new_content_to_group_byID(group_id,
                                                       TextContent(author_id=author_id, group_id=group_id),
                                                       raw=text)
         return parent,child
     
-    def add_new_embedding_to_group(self,group_id:str, author_id:str, content_id:str, vec:list[float]):
-        parent,child = self._add_new_content_to_group(group_id,
+    def add_new_embedding_to_group_byID(self,group_id:str, author_id:str, content_id:str, vec:list[float]):
+        parent,child = self._add_new_content_to_group_byID(group_id,
                                                       EmbeddingContent(author_id=author_id, 
                                                                        group_id=group_id,target_id=content_id),
                                                       raw=str(vec))
+        return parent,child
+    
+    def add_new_image_to_group_byID(self,group_id:str,author_id:str, filepath:str):
+        raw_bytes = self.read_image(filepath)
+        raw_base64 = self.encode_image(raw_bytes)
+        parent,child = self._add_new_content_to_group_byID(group_id,
+                                                      ImageContent(author_id=author_id,group_id=group_id),
+                                                      raw=raw_base64)
         return parent,child
     
 
@@ -207,14 +218,30 @@ class LLMstore(SingletonKeyValueStorage):
     def encode_image(self, image_bytes):
         return self.b64encode(image_bytes)
     
-    def add_new_image_to_group(self,group_id:str,author_id:str, filepath:str):
-        raw_bytes = self.read_image(filepath)
-        raw_base64 = self.encode_image(raw_bytes)
-        parent,child = self._add_new_content_to_group(group_id,
-                                                      ImageContent(author_id=author_id,group_id=group_id),
-                                                      raw=raw_base64)
+    def add_new_group_to_group(self,group:ContentGroup,metadata={},rank=[0]):
+        parent,child = self._add_new_content_to_group(group, ContentGroup(rank=rank, metadata=metadata, parent_id=group.id))
         return parent,child
 
+    def add_new_text_to_group(self,group:ContentGroup,author_id:str,text:str):
+        parent,child = self._add_new_content_to_group(group,
+                                                      TextContent(author_id=author_id, group_id=group.id),
+                                                      raw=text)
+        return parent,child
+    
+    def add_new_embedding_to_group(self,group:ContentGroup, author_id:str, content_id:str, vec:list[float]):
+        parent,child = self._add_new_content_to_group(group,
+                                                      EmbeddingContent(author_id=author_id, 
+                                                                       group_id=group.id,target_id=content_id),
+                                                      raw=str(vec))
+        return parent,child
+    
+    def add_new_image_to_group(self,group:ContentGroup,author_id:str, filepath:str):
+        raw_bytes = self.read_image(filepath)
+        raw_base64 = self.encode_image(raw_bytes)
+        parent,child = self._add_new_content_to_group(group,
+                                                      ImageContent(author_id=author_id,group_id=group.id),
+                                                      raw=raw_base64)
+        return parent,child
     # available for regx?
     def find(self,id:str) -> AbstractObj:
         data_dict = self.client.get(id)
@@ -380,27 +407,31 @@ class ContentGroupController(AbstractGroupController):
         self._store = store
 
     def add_new_child_group(self,metadata={},rank=[0]):
-        parent,child = self._store.add_new_group_to_group(self.model.id,metadata=metadata,rank=rank)
-        self.model.__dict__.update(parent.__dict__)
-        return parent,child
+        parent,child = self._store.add_new_group_to_group(group=self.model,metadata=metadata,rank=rank)
+        # self.model.__dict__.update(parent.__dict__)
+        # return parent,child
+        return child
 
     def add_new_text_content(self, author_id:str, text:str):
-        parent,child = self._store.add_new_text_to_group(group_id=self.model.id,author_id=author_id,
+        parent,child = self._store.add_new_text_to_group(group=self.model,author_id=author_id,
                                                  text=text)                             
-        self.model.__dict__.update(parent.__dict__)
-        return parent,child
+        # self.model.__dict__.update(parent.__dict__)
+        # return parent,child
+        return child
     
     def add_new_embeding_content(self, author_id:str, content_id:str, vec:list[float]):
-        parent,child = self._store.add_new_embedding_to_group(group_id=self.model.id,author_id=author_id,
+        parent,child = self._store.add_new_embedding_to_group(group=self.model,author_id=author_id,
                                                        content_id=content_id, vec=vec)                                   
-        self.model.__dict__.update(parent.__dict__)
-        return parent,child
+        # self.model.__dict__.update(parent.__dict__)
+        # return parent,child
+        return child
     
     def add_new_image_content(self,author_id:str, filepath:str):
-        parent,child = self._store.add_new_image_to_group(group_id=self.model.id,author_id=author_id,
+        parent,child = self._store.add_new_image_to_group(group=self.model,author_id=author_id,
                                                   filepath=filepath)                              
-        self.model.__dict__.update(parent.__dict__)
-        return parent,child
+        # self.model.__dict__.update(parent.__dict__)
+        # return parent,child
+        return child
         
 
     def remove_child(self, child_id:str):
