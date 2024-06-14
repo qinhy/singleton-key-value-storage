@@ -7,23 +7,14 @@ def get_error(func):
     try:
         func()
     except Exception as e:
+        print(e)
         return e
 
 # self checking
-es = []
-es.append({get_error(lambda:__import__('google.cloud.firestore'))       :'no google firestore support'})
-firestore_back = len(list(filter(lambda x:None not in x,es))) == 0
-
-es.append({get_error(lambda:__import__('redis'))                        :'no redis support'})
-redis_back = len(list(filter(lambda x:None not in x,es))) == 0
-
-if len(list(filter(lambda x:None not in x,es))) != 0:
-    for i in list(filter(lambda x:None not in x,es)):print(i)
-
+firestore_back = get_error(lambda:__import__('google.cloud.firestore')) is None
+redis_back = get_error(lambda:__import__('redis')) is None
 
 class SingletonStorageController:
-    def __init__(self, model):
-        self.model = model
 
     def add_slave(self, slave):
         self.model.slaves.append(slave)
@@ -34,26 +25,19 @@ class SingletonStorageController:
     def _delete_slaves(self, key: str):
         [s.delete(key) for s in self.model.slaves if hasattr(s, 'delete')]
 
-    def exists(self, key: str):
-        print('not implement')
+    def exists(self, key: str): print('not implement')
 
-    def set(self, key: str, value: dict):
-        print('not implement')
+    def set(self, key: str, value: dict): print('not implement')
 
-    def get(self, key: str) -> dict:
-        print('not implement')
+    def get(self, key: str) -> dict: print('not implement')
 
-    def delete(self, key: str):
-        print('not implement')
+    def delete(self, key: str): print('not implement')
 
-    def keys(self, pattern: str):
-        print('not implement')
+    def keys(self, pattern: str): print('not implement')
 
-    def dump(self, json_path=None):
-        print('not implement')
+    def dump(self, json_path=None): print('not implement')
 
-    def load(self, json_path=None):
-        print('not implement')
+    def load(self, json_path=None): print('not implement')
 
 if firestore_back:
     from google.cloud import firestore
@@ -210,12 +194,10 @@ class SingletonPythonDictStorageController(SingletonStorageController):
         return fnmatch.filter(self.model.store.keys(), pattern)
 
     def dump(self,path="PythonDictStorage.json"):
-        with open(path, "w") as tf:
-            json.dump(self.model.store, tf)
+        with open(path, "w") as tf: json.dump(self.model.store, tf)
 
     def load(self,path="PythonDictStorage.json"):
-        with open(path, "r") as tf:
-            self.model.store = json.load(tf)
+        with open(path, "r") as tf: self.model.store = json.load(tf)
 
 class SingletonKeyValueStorage(SingletonStorageController):
 
@@ -233,23 +215,16 @@ class SingletonKeyValueStorage(SingletonStorageController):
         def redis_backend(self,redis_URL=None):# 'redis://127.0.0.1:6379'
             self.client = SingletonRedisStorageController(SingletonRedisStorage(redis_URL))
 
-    def exists(self, key: str):
-        return self.client.exists(key)
+    def exists(self, key: str): return self.client.exists(key)
 
-    def set(self, key: str, value: dict):
-        self.client.set( key, value)
+    def set(self, key: str, value: dict): self.client.set( key, value)
 
-    def get(self, key: str) -> dict:
-        return self.client.get( key)
+    def get(self, key: str) -> dict: return self.client.get( key)
 
-    def delete(self, key: str):
-        self.client.delete(key)
+    def delete(self, key: str): self.client.delete(key)
 
-    def keys(self, pattern: str):
-        return self.client.keys(pattern)
+    def keys(self, pattern: str): return self.client.keys(pattern)
 
-    def dump(self,json_path):
-        self.client.dump(json_path)
+    def dump(self,json_path): self.client.dump(json_path)
 
-    def load(self,json_path):
-        self.client.load(json_path)
+    def load(self,json_path): self.client.load(json_path)
