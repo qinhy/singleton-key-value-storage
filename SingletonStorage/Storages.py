@@ -39,6 +39,11 @@ class SingletonStorageController:
 
     def load(self, json_path=None): print('not implement')
 
+    def dumps(self): print('not implement')
+
+    def loads(self, json_string=None): print('not implement')
+
+
 if firestore_back:
     from google.cloud import firestore
     class SingletonFirestoreStorage:
@@ -193,6 +198,12 @@ class SingletonPythonDictStorageController(SingletonStorageController):
     def keys(self, pattern: str):
         return fnmatch.filter(self.model.store.keys(), pattern)
 
+    def dumps(self):
+        return json.dumps(self.model.store)
+    
+    def loads(self, json_string=None):
+       self.model.store = json.loads(json_string)
+
     def dump(self,path="PythonDictStorage.json"):
         with open(path, "w") as tf: json.dump(self.model.store, tf)
 
@@ -206,14 +217,17 @@ class SingletonKeyValueStorage(SingletonStorageController):
     
     def python_backend(self):
         self.client = SingletonPythonDictStorageController(SingletonPythonDictStorage())
+        return self
     
     if firestore_back:
         def firestore_backend(self,google_project_id=None,google_firestore_collection=None):
             self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage(google_project_id,google_firestore_collection))
+            return self
 
     if redis_back:
         def redis_backend(self,redis_URL=None):# 'redis://127.0.0.1:6379'
             self.client = SingletonRedisStorageController(SingletonRedisStorage(redis_URL))
+            return self
 
     def exists(self, key: str): return self.client.exists(key)
 
