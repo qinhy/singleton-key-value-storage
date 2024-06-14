@@ -1,18 +1,11 @@
-import os
+
 import re
-import requests
-import numpy as np
-from typing import Any, Callable, List, Dict
-import json
-import threading
-import time
-import json
-import threading
-from LLMstore import AbstractContent, AbstractContentController, Author, ContentGroup, LLMstore
+from typing import List, Dict
+from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, Author, AuthorController, ContentGroup, ContentGroupController, EmbeddingContentController, ImageContentController, LLMstore, TextContent
 
 class Speaker:
-    def __init__(self,author) -> None:
-        self.author:Author = author
+    def __init__(self,author:Author) -> None:
+        self.author = author
         self.id = self.author.id
         self.name = self.author.name#self.id[-8:]
         self.room:ChatRoom = None
@@ -40,9 +33,10 @@ class Speaker:
         self.room:ChatRoom = room
         self.room.add_speaker(self)
         rooms = self.author.metadata.get('groups','')
-        if self.room.chatroom.model.id not in rooms:
-            rooms += self.room.chatroom.model.id
-            self.author.controller.update_metadata('groups',rooms)
+        if self.room.chatroom().id not in rooms:
+            rooms += self.room.chatroom().id
+            ac:AuthorController = self.author.controller
+            ac.update_metadata('groups',rooms)
         return self
     
     def new_group(self):
@@ -65,58 +59,70 @@ class Speaker:
         self.is_speaking -= 1
         return self
     
-    def speak_stream(self,stream,group_id:str=None,new_group=False):
-        self.is_speaking += 1
-        def callback():
-            self.is_speaking -= 1
-        if self.room is not None:
-            worker_thread = threading.Thread(target=self.room.speak_stream,args=(self.id,stream,callback,group_id,new_group))
-            worker_thread.start()
-        return self
+    # def speak_stream(self,stream,group_id:str=None,new_group=False):
+    #     self.is_speaking += 1
+    #     def callback():
+    #         self.is_speaking -= 1
+    #     if self.room is not None:
+    #         worker_thread = threading.Thread(target=self.room.speak_stream,args=(self.id,stream,callback,group_id,new_group))
+    #         worker_thread.start()
+    #     return self
     
 class ChatRoom:
     def __init__(self, store:LLMstore, chatroom_id:str=None, speakers:Dict[str,Speaker]={}) -> None:
         self.store=store
         self.speakers=speakers
-        self.chatroom:ContentGroup = None
+        chatroom:ContentGroup = None
         roots:List[ContentGroup] = self.store.find_all('ContentGroup:*')
         if chatroom_id is None:
             roots = [g for g in roots if len(g.parent_id)==0]
             if len(roots)==0:
-                raise ValueError('no valid root group in store')
+                print(f'no group({chatroom_id}) in store, make a new one')
+                roots = [self.store.add_new_root_group()]
         else:
             roots = [g for g in roots if g.id==chatroom_id]
             if len(roots)==0:
                 raise ValueError(f'no group({chatroom_id}) in store')        
-        self.chatroom = roots[0]
+        chatroom = roots[0]  
+        self.chatroom_id = chatroom.id
         self.msgs = []
+        
+        for a in self.store.find_all('Author:*'):
+            if self.chatroom_id in a.metadata.get('groups',''):
+                Speaker(a).entery_room(self)
     
+    def chatroom(self):return self.store.find(self.chatroom_id)
+
     def _on_message_change(self):
         self.msgs = self.get_messages_in_group()
 
-    def add_message_to_chatroom(self, message_content: AbstractContent, group:ContentGroup=None):
+    # def add_message_to_chatroom(self, message_content: AbstractContent, group:ContentGroup=None):
         
-        if group is not None and self.chatroom.model.id != group.id:
-            self.add_content_group_to_chatroom(group)
-        else:
-            group = self.chatroom.model
-        ContentGroupController(group).add_content(AbstractContentController(message_content))
-        self._on_message_change()
-        return message_content.id
+    #     if group is not None and self.chatroom().id != group.id:
+    #         self.add_content_group_to_chatroom(group)
+    #     else:
+    #         group = self.chatroom
+    #     self.store._add_new_content_to_group(group.id, message_content)
+    #     self._on_message_change()
+    #     return message_content.id
     
-    def add_content_group_to_chatroom(self, groupc: ContentGroup=None):
-        group = self.chatroom.add_new_group(groupc)
+    def add_content_group_to_chatroom(self):
+        gc:ContentGroupController = self.chatroom().controller
+        parent,child = gc.add_new_child_group()
         self._on_message_change()
-        return group.model.id
+        return child.id
     
-    def get_messages_in_group(self,id=None):
+    def get_messages_in_group(self,id=None)->List[AbstractContent]:
         if id is None:
-            return self.chatroom.get_children_content()
+            gc:ContentGroupController = self.chatroom().controller
+            return gc.get_children_content()
         else:
-            return ContentGroupController(ContentGroup(id=id)).load().get_children_content()
+            gc:ContentGroupController = self.store.find(id).controller
+            return gc.get_children_content()
     
     def get_messages_recursive_in_chatroom(self):
-        return self.chatroom.get_children_content_recursive()
+        gc:ContentGroupController = self.chatroom().controller
+        return gc.get_children_content_recursive()
     
     def traverse_nested_messages(self, nested_content_list=None):
         if nested_content_list is None:nested_content_list=self.get_messages_recursive_in_chatroom()
@@ -167,117 +173,121 @@ class ChatRoom:
     def _prepare_speak(self,speaker_id,group_id:str=None,new_group=False,type='Text',msg=''):
         speaker = self.get_speaker(speaker_id)
 
-        def new_content(obj,type=type):
+        def add_content(obj:AbstractContent,type=type):
             if 'Text' in type:
-                return getattr(obj,f'add_new_text_content')
+                return getattr(obj.controller,f'add_new_text_content',None)
             elif 'Image' in type:
-                return getattr(obj,f'add_new_image_content')
+                return getattr(obj.controller,f'add_new_image_content',None)
             else:
                 raise ValueError(f'Unknown type of {type}')
 
-        if (group_id is None and not new_group) or (group_id == self.chatroom.model.id):
-            tc:AbstractContentController = new_content(self.chatroom)(speaker.author.id, msg)#self.chatroom.add_new_text_content(speaker.author.id,'')
-            message_id = self.add_message_to_chatroom(tc.model)
+        if (group_id is None and not new_group) or (group_id == self.chatroom().id):
+            parent,tc = add_content(self.chatroom())(speaker.author.id, msg)
+            # message_id = self.add_message_to_chatroom(tc)
 
         elif group_id is not None and not new_group:
-            if group_id not in self.chatroom.model.children_id:
+            if group_id not in self.chatroom().children_id:
                 raise ValueError(f'no such group {group_id}')
-            group:ContentGroupController = ContentGroupController(ContentGroup(id=group_id)).load()
-            tc:AbstractContentController = new_content(group)(speaker.author.id, msg)#group.add_new_text_content(speaker.author.id,'')
+            group:ContentGroup = self.store.find(group_id)
+            parent,tc = add_content(group)(speaker.author.id, msg)
             # message_id = self.add_message_to_chatroom(tc.model,group.model)
             self._on_message_change()
 
         elif group_id is None and new_group:            
-            group:ContentGroupController = self.chatroom.add_new_group()
-            tc:AbstractContentController = new_content(group)(speaker.author.id, msg)#group.add_new_text_content(speaker.author.id,'')
-            message_id = self.add_message_to_chatroom(tc.model,group.model)
+            controller:ContentGroupController = self.chatroom().controller
+            parent,group = controller.add_new_child_group()
+            parent,tc = add_content(group)(speaker.author.id, msg)
+            # message_id = self.add_message_to_chatroom(tc,group)
         return tc
 
-    def speak_stream(self,speaker_id,stream,callback,group_id:str=None,new_group=False):
-        content:TextContentController = None#self._prepare_speak(speaker_id,group_id,new_group)
-        msg = ''
-        for i,r in enumerate(stream):
-            if r and i==0:
-                content = self._prepare_speak(speaker_id,group_id,new_group)
-            assert r is not None, f'can not prepare string reply in speak_stream! {r}'
-            content.append_data_raw(r)
-            msg += r
-        callback()
-        self.notify_new_message(content.model, self.speakers.keys())
-        self.notify_mention(content.model, self.speakers.keys())
+    # def speak_stream(self,speaker_id,stream,callback,group_id:str=None,new_group=False):
+    #     content:TextContent = None#self._prepare_speak(speaker_id,group_id,new_group)
+    #     msg = ''
+    #     for i,r in enumerate(stream):
+    #         if r and i==0:
+    #             content = self._prepare_speak(speaker_id,group_id,new_group)
+    #         assert r is not None, f'can not prepare string reply in speak_stream! {r}'
+    #         content.append_data_raw(r)
+    #         msg += r
+    #     callback()
+    #     self.notify_new_message(content, self.speakers.keys())
+    #     self.notify_mention(content, self.speakers.keys())
 
     def speak(self,speaker_id,msg:str,group_id:str=None,new_group=False):
-        content = self._prepare_speak(speaker_id,group_id,new_group)
-        content.update_data_raw(msg)
-        self.notify_new_message(content.model, self.speakers.keys())
-        self.notify_mention(content.model, self.speakers.keys())
+        content = self._prepare_speak(speaker_id,group_id,new_group,msg=msg)
+        self.notify_new_message(content, self.speakers.keys())
+        self.notify_mention(content, self.speakers.keys())
         return content
     
     def speak_img(self,speaker_id,imagpath:str,group_id:str=None,new_group=False):
         content = self._prepare_speak(speaker_id,group_id,new_group,type='Image',msg=imagpath)
-        self.notify_new_message(content.model, self.speakers.keys())
-        self.notify_mention(content.model, self.speakers.keys())
+        self.notify_new_message(content, self.speakers.keys())
+        self.notify_mention(content, self.speakers.keys())
         return content
     #######################################################################
 
     def msgsDict(self,refresh=False,msgs=None,todict=None):        
         if todict is None:
-            def todict(c:AbstractContentController):
-                n = c.__class__.__name__
+            def todict(v:AbstractContent):
+                c:AbstractContentController = v.controller
+                n = v.__class__.__name__
                 if 'Text' in n:
                     return {"type": "text","text": c.get_data_raw()}
-                
                 if 'Image' in n:
                     return {"type": "image_url","image_url": {
-                                "url": f"data:image/jpeg;base64,{c.get_data_raw()}"}}
-                
+                                "url": f"data:image/jpeg;base64,{c.get_data_raw()}"}}                
             # todict = lambda c:c.load().get_data_raw()
             
         if refresh:
-            self.msgs:List[AbstractContentController] = self.get_messages_in_group()
+            self.msgs:List[AbstractContent] = self.get_messages_in_group()
         if msgs is None:
             msgs = self.msgs
+
         res = []
-        for m in msgs:
-            if 'ContentGroup' not in m.__class__.__name__:
-                name = m.get_author().model.name
-                role = m.get_author().model.role
-                if 'EmbeddingContent' in m.__class__.__name__:
-                    m:EmbeddingContentController = m
-                    t = m.get_target().get_data_raw()[:10]
+        for v in msgs:
+            if 'ContentGroup' not in v.__class__.__name__:
+                mc:AbstractContentController = v.controller
+                name = mc.get_author().name
+                role = mc.get_author().role
+                if 'EmbeddingContent' in v.__class__.__name__:
+                    ec:EmbeddingContentController = v.controller
+                    mc:AbstractContentController = ec.get_target().controller
+                    t = mc.get_data_raw()[:10]
                     # print(f'{intents}{self.speakers[m.model.author_id].name}: "{t}"=>{m.load().get_data_raw()[:5]}...')
-                elif 'TextContent' in m.__class__.__name__:
-                    res.append(dict(name=name,role=role,content=todict(m)))
+                elif 'TextContent' in v.__class__.__name__:
+                    res.append(dict(name=name,role=role,content=todict(v)))
                 else:
-                    res.append(dict(name=name,role=role,content=todict(m)))
+                    res.append(dict(name=name,role=role,content=todict(v)))
             else:
-                res.append(self.msgsDict(False,self.get_messages_in_group(m.model.id)))
+                res.append(self.msgsDict(False,self.get_messages_in_group(v.id)))
         return res
 
 
-    def printMsgs(self,refresh=False,intent=0,msgs=None):
+    def printMsgs(self,refresh=False,intent=0,msgs:List[AbstractContent]=None):
         if refresh:
-            self.msgs:List[AbstractContentController] = self.get_messages_in_group()
+            self.msgs:List[AbstractContent] = self.get_messages_in_group()
         if msgs is None:
             msgs = self.msgs
         intents = "".join([' ']*intent)
         print("", flush=True)
         print(f'{intents}#############################################################')
         
-        for m in msgs:
+        for i,v in enumerate(msgs):
             print(f'{intents}-------------------------------------------------------------')
-            if 'ContentGroup' not in m.__class__.__name__:
-                if 'EmbeddingContent' in m.__class__.__name__:
-                    m:EmbeddingContentController = m
-                    t = m.get_target().get_data_raw()[:10]
-                    print(f'{intents}{self.speakers[m.model.author_id].name}: "{t}"=>{m.load().get_data_raw()[:5]}...')
-                elif 'ImageContent' in m.__class__.__name__:
-                    m:ImageContentController = m
-                    im = m.load().get_image()
-                    print(f'{intents}{self.speakers[m.model.author_id].name}: Image{im.size} of {im.info}')
+            if 'ContentGroup' not in v.__class__.__name__:
+                if 'EmbeddingContent' in v.__class__.__name__:
+                    econtroller:EmbeddingContentController = v.controller
+                    tcontroller:AbstractContentController = econtroller.get_target().controller
+                    t = tcontroller.get_data_raw()[:10]
+                    print(f'{intents}{self.speakers[econtroller.get_target().author_id].name}: "{t}"=>{econtroller.get_data_raw()[:5]}...')
+                elif 'ImageContent' in v.__class__.__name__:
+                    vcontroller:ImageContentController = v.controller
+                    im = vcontroller.get_image()
+                    print(f'{intents}{self.speakers[v.author_id].name}: Image{im.size} of {im.info}')
                 else:
-                    print(f'{intents}{self.speakers[m.model.author_id].name}: {m.load().get_data_raw()}')
+                    vcontroller:AbstractContentController = v.controller
+                    print(f'{intents}{self.speakers[v.author_id].name}: {vcontroller.get_data_raw()}')
             else:
-                self.printMsgs(False,intent+4,self.get_messages_in_group(m.model.id))
+                self.printMsgs(False,intent+4,self.get_messages_in_group(v.id))
         print(f'{intents}-------------------------------------------------------------')
         print(f'{intents}#############################################################')

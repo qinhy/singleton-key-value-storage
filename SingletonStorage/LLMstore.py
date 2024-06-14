@@ -9,10 +9,11 @@ from typing import Any, List
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
+
+from SingletonStorage.Storages import SingletonKeyValueStorage
 def get_current_datetime_with_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
 
-from Storages import SingletonKeyValueStorage
 
 class AbstractObj(BaseModel):
     id: str
@@ -169,27 +170,31 @@ class LLMstore(SingletonKeyValueStorage):
         g:AbstractGroup = self.find(group_id)
         g.children_id.append(content.id)
         self._store_obj(g)
-        if raw is not None:
+        if raw is not None and 'ContentGroup' not in content.id:
+            self._store_obj(content)
             self._store_obj(CommonData(id=f"CommonData:{content.id}", raw=raw))        
+        else:
+            self._store_obj(content)
+            
         content.controller = self.get_controller(content.id)(self,content)
         return g,content
     
     def add_new_group_to_group(self,group_id:str,metadata={},rank=[0]):
         parent,child = self._add_new_content_to_group(group_id, ContentGroup(rank=rank, metadata=metadata, parent_id=group_id))
-        return child
+        return parent,child
 
     def add_new_text_to_group(self,group_id:str,author_id:str,text:str):
         parent,child = self._add_new_content_to_group(group_id,
                                                       TextContent(author_id=author_id, group_id=group_id),
                                                       raw=text)
-        return child
+        return parent,child
     
     def add_new_embedding_to_group(self,group_id:str, author_id:str, content_id:str, vec:list[float]):
         parent,child = self._add_new_content_to_group(group_id,
                                                       EmbeddingContent(author_id=author_id, 
                                                                        group_id=group_id,target_id=content_id),
                                                       raw=str(vec))
-        return child
+        return parent,child
     
 
     def read_image(self, filepath):
@@ -208,7 +213,7 @@ class LLMstore(SingletonKeyValueStorage):
         parent,child = self._add_new_content_to_group(group_id,
                                                       ImageContent(author_id=author_id,group_id=group_id),
                                                       raw=raw_base64)
-        return child
+        return parent,child
 
     # available for regx?
     def find(self,id:str) -> AbstractObj:
@@ -256,24 +261,24 @@ class AbstractObjController:
         self.model.update_time = get_current_datetime_with_utc()
         
     def store(self):
-        self._store._store_obj(self)
+        self._store._store_obj(self.model)
         return self
 
     def delete(self):
         self._store.delete_obj(self.model)
 
-    def load(self):
-        assert self.model is not None, 'controller has null model!'
-        exists = self._store.exists(self.model.id)
-        if not exists:
-            self.model = None
-        else:
-            data = self._store.get(self.model.id)
-            if type(data) is str:
-                data = json.loads(data)
-            tmp = self.model.model_validate(data)
-            self.model.__dict__.update(tmp.__dict__)
-        return self
+    # def load(self):
+    #     assert self.model is not None, 'controller has null model!'
+    #     exists = self._store.exists(self.model.id)
+    #     if not exists:
+    #         self.model = None
+    #     else:
+    #         data = self._store.get(self.model.id)
+    #         if type(data) is str:
+    #             data = json.loads(data)
+    #         tmp = self.model.model_validate(data)
+    #         self.model.__dict__.update(tmp.__dict__)
+    #     return self
 
     def update_metadata(self, key, value):
         updated_metadata = {**self.model.metadata, key: value}
@@ -299,9 +304,9 @@ class AbstractContentController(AbstractObjController):
         return f"CommonData:{self.model.id}"
 
     def delete(self):
-        controller:CommonDataController = self.get_data().controller
-        controller.delete()
-        super().delete()
+        dcontroller:CommonDataController = self.get_data().controller
+        dcontroller.delete()        
+        self._store.delete_obj(self.model)
 
     def get_author(self) -> Author:
         return self._store.find(self.model.author_id)
@@ -353,7 +358,7 @@ class AbstractGroupController(AbstractObjController):
         self.delete()
 
     def get_children_content(self):
-        self.load()
+        # self.load()
         assert  self.model is not None, 'controller has null model!'
         results = []
         for child_id in self.model.children_id:
@@ -370,39 +375,43 @@ class AbstractGroupController(AbstractObjController):
         print('########################################################')
 
 class ContentGroupController(AbstractGroupController):
-    def load_all_root_groups(self):
-        keys = [key[:-1] for key in self._store.keys('ContentGroup:*:')]
-        results:list[ContentGroupController] = []
-        for key in keys:
-            group = ContentGroupController(ContentGroup(id=key)).load()
-            if group.model is not None and not group.model.parent_id:
-                results.append(group)
-        return results
+    def __init__(self, store:LLMstore, model:ContentGroup):
+        self.model = model
+        self._store = store
 
     def add_new_child_group(self,metadata={},rank=[0]):
-        return self._store.add_new_group_to_group(self.model.id,metadata=metadata,rank=rank)
+        parent,child = self._store.add_new_group_to_group(self.model.id,metadata=metadata,rank=rank)
+        self.model.__dict__.update(parent.__dict__)
+        return parent,child
 
     def add_new_text_content(self, author_id:str, text:str):
-        return self._store.add_new_text_to_group(group_id=self.model.id,author_id=author_id,
-                                                 text=text)
+        parent,child = self._store.add_new_text_to_group(group_id=self.model.id,author_id=author_id,
+                                                 text=text)                             
+        self.model.__dict__.update(parent.__dict__)
+        return parent,child
     
     def add_new_embeding_content(self, author_id:str, content_id:str, vec:list[float]):
-        return self._store.add_new_embedding_to_group(group_id=self.model.id,author_id=author_id,
-                                                       content_id=content_id, vec=vec)
+        parent,child = self._store.add_new_embedding_to_group(group_id=self.model.id,author_id=author_id,
+                                                       content_id=content_id, vec=vec)                                   
+        self.model.__dict__.update(parent.__dict__)
+        return parent,child
     
-    def add_new_image_to_group(self,author_id:str, filepath:str):
-        return self._store.add_new_image_to_group(group_id=self.model.id,author_id=author_id,
-                                                  filepath=filepath)
+    def add_new_image_content(self,author_id:str, filepath:str):
+        parent,child = self._store.add_new_image_to_group(group_id=self.model.id,author_id=author_id,
+                                                  filepath=filepath)                              
+        self.model.__dict__.update(parent.__dict__)
+        return parent,child
+        
 
     def remove_child(self, child_id:str):
         remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
         for content in self.get_children_content():
-            content:AbstractObjController = content
-            if content.model.id == child_id:
+            controller:AbstractObjController = content.controller
+            if controller.model.id == child_id:
                 if child_id.startswith('ContentGroup'):
-                    group:ContentGroupController = content
+                    group:ContentGroupController = controller
                     group.delete_recursive_from_keyValue_storage()
-                content.delete()
+                controller.delete()
                 break
         self.update(children_id = remaining_ids)
         return self
@@ -414,7 +423,10 @@ class ContentGroupController(AbstractGroupController):
         return results
 
 class TextContentController(AbstractContentController):
-    pass
+    def __init__(self, store:LLMstore, model:TextContent):
+        self.model = model
+        self._store = store
+
 
 class EmbeddingContentController(AbstractContentController):
     def __init__(self, store:LLMstore, model: EmbeddingContent):
@@ -433,7 +445,7 @@ class EmbeddingContentController(AbstractContentController):
     def get_data_rLOD2(self):
         return self.get_data_raw()[::10**(2+1)]
     
-    def get_target(self):
+    def get_target(self) -> AbstractContent:
         assert  self.model is not None, 'controller has null model!'
         target_id = self.model.target_id
         return self._store.find(target_id)
