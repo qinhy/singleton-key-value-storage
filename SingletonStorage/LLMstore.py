@@ -242,6 +242,7 @@ class LLMstore(SingletonKeyValueStorage):
                                                       ImageContent(author_id=author_id,group_id=group.id),
                                                       raw=raw_base64)
         return parent,child
+    
     # available for regx?
     def find(self,id:str) -> AbstractObj:
         data_dict = self.client.get(id)
@@ -293,19 +294,6 @@ class AbstractObjController:
 
     def delete(self):
         self._store.delete_obj(self.model)
-
-    # def load(self):
-    #     assert self.model is not None, 'controller has null model!'
-    #     exists = self._store.exists(self.model.id)
-    #     if not exists:
-    #         self.model = None
-    #     else:
-    #         data = self._store.get(self.model.id)
-    #         if type(data) is str:
-    #             data = json.loads(data)
-    #         tmp = self.model.model_validate(data)
-    #         self.model.__dict__.update(tmp.__dict__)
-    #     return self
 
     def update_metadata(self, key, value):
         updated_metadata = {**self.model.metadata, key: value}
@@ -367,10 +355,6 @@ class AbstractGroupController(AbstractObjController):
         for child_id in self.model.children_id:
             if not self._store.exists(child_id):
                 continue
-            # child_class = self.get_class(child_id)
-            # child_controller_class = self.get_class_controller(child_id)
-            # content:AbstractObjController = child_controller_class(child_class(id=child_id))
-            # content = content.load()
             content:AbstractObj = self._store.find(child_id)
             yield content, depth
             if child_id.startswith('ContentGroup'):
@@ -408,29 +392,21 @@ class ContentGroupController(AbstractGroupController):
 
     def add_new_child_group(self,metadata={},rank=[0]):
         parent,child = self._store.add_new_group_to_group(group=self.model,metadata=metadata,rank=rank)
-        # self.model.__dict__.update(parent.__dict__)
-        # return parent,child
         return child
 
     def add_new_text_content(self, author_id:str, text:str):
         parent,child = self._store.add_new_text_to_group(group=self.model,author_id=author_id,
                                                  text=text)                             
-        # self.model.__dict__.update(parent.__dict__)
-        # return parent,child
         return child
     
     def add_new_embeding_content(self, author_id:str, content_id:str, vec:list[float]):
         parent,child = self._store.add_new_embedding_to_group(group=self.model,author_id=author_id,
                                                        content_id=content_id, vec=vec)                                   
-        # self.model.__dict__.update(parent.__dict__)
-        # return parent,child
         return child
     
     def add_new_image_content(self,author_id:str, filepath:str):
         parent,child = self._store.add_new_image_to_group(group=self.model,author_id=author_id,
                                                   filepath=filepath)                              
-        # self.model.__dict__.update(parent.__dict__)
-        # return parent,child
         return child
         
 
