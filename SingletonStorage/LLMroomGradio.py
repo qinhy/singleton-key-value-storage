@@ -61,6 +61,8 @@ try:
         
         def chat(author=None, message:str=None,filepath:str=None, cr:ChatRoom=cr,configs:List[Configs.Config]=configs):
             try:                
+                if message is None:
+                    return '# Welcome to Vision Room, show messages by "Reflesh"'
                 if len(message)>0 and author in cr.speakers and filepath:
                     s = cr.speakers[author]
                     gid = s.new_group()
@@ -73,7 +75,7 @@ try:
                 show_passages = [c for c in configs if c.name=='show_passages']
                 show_passages = int(show_passages[0].value) if len(show_passages)>0 else 10
                 
-                def get_msgs_md(msgs:List[AbstractContent],cr:ChatRoom=cr):
+                def get_msgs_md(msgs:List[AbstractContent],cr:ChatRoom=cr,depth=0):
                     res = []
                     for i,v in enumerate(msgs):
                         if 'ContentGroup' not in v.__class__.__name__:
@@ -81,23 +83,36 @@ try:
                                 econtroller:EmbeddingContentController = v.controller
                                 tcontroller:AbstractContentController = econtroller.get_target().controller
                                 t = tcontroller.get_data_raw()[:10]
-                                m = f'## {cr.speakers[econtroller.get_target().author_id].name}: "{t}"=>{econtroller.get_data_raw()[:5]}...\n\n_[{v.create_time}][{v.id}]_'                                
+
+                                name = cr.speakers[econtroller.get_target().author_id].name
+                                msg = f'"{t}"=>{econtroller.get_data_raw()[:5]}...'
+
                             elif 'ImageContent' in v.__class__.__name__:
                                 vcontroller:ImageContentController = v.controller
                                 im = vcontroller.get_image()
                                 imid = v.id.split(':')[1]
                                 b64 = vcontroller.get_data_raw()
                                 im = vcontroller.get_image()
-                                m = f'## {cr.speakers[v.author_id].name}:\n\n_[{v.create_time}][{v.id}]_'
-                                m += f'![{imid}](data:image/{im.format};base64,{b64})'
+                                
+                                name = cr.speakers[v.author_id].name
+                                msg = f'![{imid}](data:image/{im.format};base64,{b64})'
                             else:
                                 vcontroller:AbstractContentController = v.controller
-                                m = f'## {cr.speakers[v.author_id].name}:\n{vcontroller.get_data_raw()}\n\n_[{v.create_time}][{v.id}]_'
+                                
+                                name = cr.speakers[v.author_id].name
+                                msg = vcontroller.get_data_raw().replace("\n","\n>\n>")
+
+                            m = f'\n\n##### {name}:\n>{msg}\n>\n>_{v.create_time} {v.id}_'
+                            if depth>0:
+                                lvl = ''.join(['>']*(depth+1))
+                                m = m.replace('>',lvl)
+                                lvl = ''.join(['>']*(depth))
+                                m = m.replace('#####',f'{lvl}#####')
                             res.append(m)
                         else:
-                            res.append("\n\n---\n\n".join(get_msgs_md(cr.get_messages_in_group(v.id))))
+                            res.append("\n".join(get_msgs_md(cr.get_messages_in_group(v.id),depth=depth+1)))
                     return res
-                return "\n\n---\n\n".join(get_msgs_md(cr.get_messages_in_group()[-show_passages:]))
+                return "\n".join(get_msgs_md(cr.get_messages_in_group()[-show_passages:]))
             except Exception as e:
                 return f'{e}'
 
@@ -110,8 +125,8 @@ try:
                         reflesh = gr.Button("Reflesh")
                         delmsg.click(fn=roomdelmsg, inputs=[msgid], outputs=[msgid])
 
-                    # history = gr.Textbox(label="History",value=chat(None,''))                
-                    history = gr.Markdown(label="History",value=chat(None,''))
+                    # history = gr.Textbox(label="History",value=chat(None,None))                
+                    history = gr.Markdown(label="History",value=chat(None,None))
                     author = gr.Dropdown(value='User',choices=[n for n in cr.speakers.keys() if ':' not in n], label="Author")
                     
                     with gr.Tab("Text"):
