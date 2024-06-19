@@ -46,7 +46,7 @@ def openaimsg():
     return messages
 
 def pygpt(speaker:Speaker, msg:AbstractContent):
-    data = {"model": 'gpt-4o',"messages": openaimsg()[-int(num_passages.value):]}
+    data = {"model": 'gpt-4o',"messages": [{"role":"system","content":"Your name is VisionMaster and good at making description of image."}] + openaimsg()[-int(num_passages.value):]}
     response = openairequest(url="https://api.openai.com/v1/chat/completions",jsonstr=json.dumps(data,ensure_ascii=False))
     speaker.speak(str(response['error']) if 'error' in response else response['choices'][0]['message']['content'])
 

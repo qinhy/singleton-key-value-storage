@@ -35,8 +35,7 @@ class Speaker:
         rooms = self.author.metadata.get('groups','')
         if self.room.chatroom().id not in rooms:
             rooms += self.room.chatroom().id
-            ac:AuthorController = self.author.controller
-            ac.update_metadata('groups',rooms)
+            self.author.controller.update_metadata('groups',rooms)
         return self
     
     def new_group(self):
@@ -91,7 +90,9 @@ class ChatRoom:
             if self.chatroom_id in a.metadata.get('groups',''):
                 Speaker(a).entery_room(self)
     
-    def chatroom(self):return self.store.find(self.chatroom_id)
+    def chatroom(self):
+        res:ContentGroup = self.store.find(self.chatroom_id)
+        return res
 
     def _on_message_change(self):
         self.msgs = self.get_messages_in_group()
@@ -146,8 +147,7 @@ class ChatRoom:
 
     def get_mentions(self, message:AbstractContent, speaker_ids=[]):
         msg_auther = self.speakers[message.author_id].name
-        controller:AbstractContentController = message.controller
-        mentions = re.findall(r'@([a-zA-Z0-9]+)', controller.get_data_raw())
+        mentions = re.findall(r'@([a-zA-Z0-9]+)', message.controller.get_data_raw())
         targets = []
         
         for mention in mentions:

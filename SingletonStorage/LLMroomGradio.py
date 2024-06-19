@@ -1,7 +1,7 @@
 import threading
 from typing import List
 from SingletonStorage.LLMroom import ChatRoom
-from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, ContentGroupController, EmbeddingContentController, ImageContentController
+from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, ContentGroupController, EmbeddingContentController, ImageContentController, TextContent
 
 class Configs:
     class Config:
@@ -51,26 +51,43 @@ try:
     def build_gui(cr:ChatRoom,configs:List[Configs.Config]=[],json=None):
         def roomdelmsg(msgid,cr:ChatRoom=cr):
             try:
+                if str(msgid).isdecimal() and int(msgid)>0:
+                    for m in cr.chatroom().controller.get_children_content()[-int(msgid):]:
+                        cr.chatroom().controller.remove_child(m.id)
+                    cr.store.dump(json)
+                    return True,chat(None,'')
+                
+                for msgid in msgid.split('\n'):
+                    cr.chatroom().controller.remove_child(msgid)
+                cr.store.dump(json)
+                
+                return True,chat(None,'')
+            except Exception as e:
+                return f'{e}',chat(None,'')
+        
+        def clonemsg(msgid,cr:ChatRoom=cr):
+            try:
                 for msgid in msgid.split('\n'):
                     gc:ContentGroupController = cr.chatroom().controller
-                    gc.remove_child(msgid)
-                cr.store.dump(json)
-                return True
+                    c = gc.get_child_content(msgid)
+                    if type(c) is TextContent:
+                        text = c.controller.get_data_raw()
+                        return chat(c.controller.get_author().id,c.controller.get_data_raw())
             except Exception as e:
                 return f'{e}'
-        
-        def chat(author=None, message:str=None,filepath:str=None, cr:ChatRoom=cr,configs:List[Configs.Config]=configs):
+            
+        def chat(author_id:str=None, message:str=None,filepath:str=None, cr:ChatRoom=cr,configs:List[Configs.Config]=configs):
             try:                
                 if message is None:
-                    return '# Welcome to Vision Room, show messages by "Reflesh"'
-                if len(message)>0 and author in cr.speakers and filepath:
-                    s = cr.speakers[author]
+                    return f'# Welcome to {json}, show messages by "Reflesh"'
+                if len(message)>0 and author_id in cr.speakers and filepath:
+                    s = cr.speakers[author_id]
                     gid = s.new_group()
                     s.speak_img(filepath,gid)
                     s.speak(message,gid)
                     
-                elif len(message)>0 and author in cr.speakers:
-                    cr.speakers[author].speak(message)
+                elif len(message)>0 and author_id in cr.speakers:
+                    cr.speakers[author_id].speak(message)
 
                 show_passages = [c for c in configs if c.name=='show_passages']
                 show_passages = int(show_passages[0].value) if len(show_passages)>0 else 10
@@ -122,8 +139,9 @@ try:
                     with gr.Row():
                         msgid = gr.Textbox(label="Message Id")
                         delmsg =gr.Button("Delete")
+                        clmsg =gr.Button("Clone")
                         reflesh = gr.Button("Reflesh")
-                        delmsg.click(fn=roomdelmsg, inputs=[msgid], outputs=[msgid])
+                        
 
                     # history = gr.Textbox(label="History",value=chat(None,None))                
                     history = gr.Markdown(label="History",value=chat(None,None))
@@ -135,9 +153,10 @@ try:
                         image_file = gr.Image(type='filepath')
                     send = gr.Button("Send")                    
                     
-
+                    clmsg.click(fn=clonemsg, inputs=[msgid], outputs=history)
                     reflesh.click(fn=lambda :chat(None,''), inputs=[], outputs=history)
                     send.click(fn=chat, inputs=[author,message,image_file], outputs=history)
+                    delmsg.click(fn=roomdelmsg, inputs=[msgid], outputs=[msgid,history])
 
                     # image_button_filepath.click(save_image_filepath, inputs=image_input_filepath)
 
