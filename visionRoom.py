@@ -1,15 +1,12 @@
-
 import json
 import os
-
 import requests
+
 from SingletonStorage.LLMroom import ChatRoom, Speaker
 from SingletonStorage.LLMroomGradio import Configs, build_gui
 from SingletonStorage.LLMstore import AbstractContent, LLMstore
 
-
 sss = LLMstore()
-
 try:
     sss.load('visionRoom.json')
 except Exception as e:
@@ -46,11 +43,13 @@ def openaimsg():
     return messages
 
 def pygpt(speaker:Speaker, msg:AbstractContent):
-    data = {"model": 'gpt-4o',"messages": [{"role":"system","content":"Your name is VisionMaster and good at making description of image."}] + openaimsg()[-int(num_passages.value):]}
+    data = {"model": model.value,
+            "messages": [{"role":"system",
+                        "content":"Your name is VisionMaster and good at making description of image."}] + openaimsg()[-int(num_passages.value):]}
     response = openairequest(url="https://api.openai.com/v1/chat/completions",jsonstr=json.dumps(data,ensure_ascii=False))
     speaker.speak(str(response['error']) if 'error' in response else response['choices'][0]['message']['content'])
 
-cr.speakers.get('VisionMaster',Speaker(cr.store.add_new_author(name="VisionMaster", role="assistant",metadata={'model':model.value}))
+cr.speakers.get('VisionMaster',Speaker(cr.store.add_new_author(name="VisionMaster",role="assistant",metadata={'model':model.value}))
                                 ).entery_room(cr).add_mention_callback(pygpt)
 
 u = cr.speakers.get('User',Speaker(cr.store.add_new_author(name="User", role="user"))).entery_room(cr)
