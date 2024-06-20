@@ -218,16 +218,6 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def python_backend(self):
         self.client = SingletonPythonDictStorageController(SingletonPythonDictStorage())
         return self
-    
-    if firestore_back:
-        def firestore_backend(self,google_project_id=None,google_firestore_collection=None):
-            self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage(google_project_id,google_firestore_collection))
-            return self
-
-    if redis_back:
-        def redis_backend(self,redis_URL=None):# 'redis://127.0.0.1:6379'
-            self.client = SingletonRedisStorageController(SingletonRedisStorage(redis_URL))
-            return self
 
     def exists(self, key: str): return self.client.exists(key)
 
@@ -242,3 +232,13 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def dump(self,json_path): self.client.dump(json_path)
 
     def load(self,json_path): self.client.load(json_path)
+    
+    if firestore_back:
+        def firestore_backend(self,google_project_id=None,google_firestore_collection=None):
+            self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage(google_project_id,google_firestore_collection))
+            return self
+
+    if redis_back:
+        def redis_backend(self,redis_URL=None):# 'redis://127.0.0.1:6379'
+            self.client = SingletonRedisStorageController(SingletonRedisStorage(redis_URL))
+            return self

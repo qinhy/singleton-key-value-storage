@@ -16,13 +16,14 @@ cr = ChatRoom(sss)
 
 cr.speakers.get('RoomDataSaver',Speaker(cr.store.add_new_author(name="RoomDataSaver", role="assistant"))
                 ).entery_room(cr).add_new_message_callback(lambda s,m:[sss.dump('visionRoom.json')])
-   
+
 configs = Configs()
 model=configs.new_config('model','gpt-4o')
 num_passages=configs.new_config('num passages','1')
+OPENAI_API_KEY=configs.new_config('openai api key',os.environ['OPENAI_API_KEY'])
 
 def openairequest(url,jsonstr):
-    headers = {"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}","Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY.value}","Content-Type": "application/json"}
     data = jsonstr
     response = requests.post(url=url, data=data, headers=headers)
     try:

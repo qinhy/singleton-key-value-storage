@@ -1,8 +1,9 @@
 
-import re
-from typing import List, Dict
+
 from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, Author, AuthorController, ContentGroup, ContentGroupController, EmbeddingContentController, ImageContentController, LLMstore, TextContent
 
+import re
+from typing import List, Dict
 class Speaker:
     def __init__(self,author:Author) -> None:
         self.author = author
