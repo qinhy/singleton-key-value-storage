@@ -96,16 +96,6 @@ class ChatRoom:
 
     def _on_message_change(self):
         self.msgs = self.get_messages_in_group()
-
-    # def add_message_to_chatroom(self, message_content: AbstractContent, group:ContentGroup=None):
-        
-    #     if group is not None and self.chatroom().id != group.id:
-    #         self.add_content_group_to_chatroom(group)
-    #     else:
-    #         group = self.chatroom
-    #     self.store._add_new_content_to_group(group.id, message_content)
-    #     self._on_message_change()
-    #     return message_content.id
     
     def add_content_group_to_chatroom(self):
         gc:ContentGroupController = self.chatroom().controller
@@ -173,32 +163,29 @@ class ChatRoom:
     def _prepare_speak(self,speaker_id,group_id:str=None,new_group=False,type='Text',msg=''):
         speaker = self.get_speaker(speaker_id)
 
-        def add_content(obj:AbstractContent,type=type):
+        def add_content(obj:ContentGroup,type=type):
             if 'Text' in type:
-                return getattr(obj.controller,f'add_new_text_content',None)
+                return obj.controller.add_new_text_content
             elif 'Image' in type:
-                return getattr(obj.controller,f'add_new_image_content',None)
+                return obj.controller.add_new_image_content
             else:
                 raise ValueError(f'Unknown type of {type}')
 
-        if (group_id is None and not new_group) or (group_id == self.chatroom().id):
-            tc = add_content(self.chatroom())(speaker.author.id, msg)
-            # message_id = self.add_message_to_chatroom(tc)
+        if (group_id is None and not new_group) or (group_id == self.chatroom_id):
+            tc = add_content(self.chatroom())
 
         elif group_id is not None and not new_group:
             if group_id not in self.chatroom().children_id:
                 raise ValueError(f'no such group {group_id}')
             group:ContentGroup = self.store.find(group_id)
-            tc = add_content(group)(speaker.author.id, msg)
-            # message_id = self.add_message_to_chatroom(tc.model,group.model)
+            tc = add_content(group)
             self._on_message_change()
 
         elif group_id is None and new_group:            
             controller:ContentGroupController = self.chatroom().controller
             group = controller.add_new_child_group()
-            tc = add_content(group)(speaker.author.id, msg)
-            # message_id = self.add_message_to_chatroom(tc,group)
-        return tc
+            tc = add_content(group)
+        return tc(speaker.author.id, msg)
 
     # def speak_stream(self,speaker_id,stream,callback,group_id:str=None,new_group=False):
     #     content:TextContent = None#self._prepare_speak(speaker_id,group_id,new_group)

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
 
 from SingletonStorage.Storages import SingletonKeyValueStorage
+
 def get_current_datetime_with_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
 
@@ -274,85 +275,50 @@ class AbstractObj(BaseModel):
     metadata: dict = {}
     controller: AbstractObjController = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
 class CommonData(AbstractObj):
     raw: str = ''
     rLOD0: str = ''
     rLOD1: str = ''
     rLOD2: str = ''
     controller: CommonDataController = None
-
-    def __init__(self, **data):
-        if 'id' not in data:
-            raise ValueError(f"[{self.__class__.__name__}]: The object has no id!")
-        super().__init__(**data)
-
 class Author(AbstractObj):
+    id: str = Field(default_factory=lambda :f"Author:{uuid4()}")
     name: str = ''
     role: str = ''
     controller: AuthorController = None
-
-    def __init__(self, **data):
-        has_id = 'id' in data
-        if not has_id:
-            data['id'] = f"Author:{uuid4()}"
-        super().__init__(**data)
-
 class AbstractContent(AbstractObj):
     author_id: str=''
     group_id: str=''
     controller: AbstractContentController = None
 
+    def data_id(self):
+        return f"CommonData:{self.id}"
 class AbstractGroup(AbstractObj):
     author_id: str=''
     parent_id: str = ''
     children_id: List[str] = []
     controller: AbstractGroupController = None
-
 class ContentGroup(AbstractGroup):
+    id: str = Field(default_factory=lambda :f"ContentGroup:{uuid4()}")
     controller: ContentGroupController = None
-    def __init__(self, **data):
-        if 'id' not in data:
-            data['id'] = f"ContentGroup:{uuid4()}"
-        super().__init__(**data)
-
 class TextContent(AbstractContent):
+    id: str = Field(default_factory=lambda :f"TextContent:{uuid4()}")
     controller: TextContentController = None
-    def __init__(self, **data):
-        if 'id' not in data:
-            data['id'] = f"TextContent:{uuid4()}"
-        super().__init__(**data)
 
 class EmbeddingContent(AbstractContent):
+    id: str = Field(default_factory=lambda :f"EmbeddingContent:{uuid4()}")
     controller: EmbeddingContentController = None
     target_id: str
-    def __init__(self, **data):
-        if 'id' not in data:
-            data['id'] = f"EmbeddingContent:{uuid4()}"
-        elif 'id' in data and 'target_id' not in data:
-            data['target_id'] = ''
-        super().__init__(**data)
-
 class FileLinkContent(AbstractContent):
+    id: str = Field(default_factory=lambda :f"FileLinkContent:{uuid4()}")
     controller: FileLinkContentController = None
-    def __init__(self, **data):
-        if 'id' not in data:
-            data['id'] = f"FileLinkContent:{uuid4()}"
-        super().__init__(**data)        
-
 class BinaryFileContent(AbstractContent):
+    id: str = Field(default_factory=lambda :f"BinaryFileContent:{uuid4()}")
     controller: BinaryFileContentController = None
-    def __init__(self, **data):
-        if 'id' not in data:
-            data['id'] = f"BinaryFileContent:{uuid4()}"
-        super().__init__(**data)
         
 class ImageContent(BinaryFileContent):
+    id: str = Field(default_factory=lambda :f"ImageContent:{uuid4()}")
     controller: ImageContentController = None
-    def __init__(self, **data):
-        if 'id' not in data:
-            data['id'] = f"ImageContent:{uuid4()}"
-        super().__init__(**data)
 
 class LLMstore(SingletonKeyValueStorage):
     client = SingletonKeyValueStorage().python_backend()
@@ -427,47 +393,17 @@ class LLMstore(SingletonKeyValueStorage):
         group.controller = self.get_controller(group.id)(self,group)
         return group
     
-    def _add_new_content_to_group(self,group:ContentGroup,content:AbstractObj,raw:str=None):
+    def _add_new_content_to_group(self,group:ContentGroup,content:AbstractContent,raw:str=None):
         group.children_id.append(content.id)
         self._store_obj(group)
         if raw is not None and 'ContentGroup' not in content.id:
             self._store_obj(content)
-            self._store_obj(CommonData(id=f"CommonData:{content.id}", raw=raw))        
+            self._store_obj(CommonData(id=content.data_id(), raw=raw))
         else:
             self._store_obj(content)
             
         content.controller = self.get_controller(content.id)(self,content)
-        return group,content
-    
-    def _add_new_content_to_group_byID(self,group_id:str,content:AbstractObj,raw:str=None):
-        g:AbstractGroup = self.find(group_id)
-        return self._add_new_content_to_group(g,content,raw)
-    
-    def add_new_group_to_group_byID(self,group_id:str,metadata={},rank=[0]):
-        parent,child = self._add_new_content_to_group_byID(group_id, ContentGroup(rank=rank, metadata=metadata, parent_id=group_id))
-        return parent,child
-
-    def add_new_text_to_group_byID(self,group_id:str,author_id:str,text:str):
-        parent,child = self._add_new_content_to_group_byID(group_id,
-                                                      TextContent(author_id=author_id, group_id=group_id),
-                                                      raw=text)
-        return parent,child
-    
-    def add_new_embedding_to_group_byID(self,group_id:str, author_id:str, content_id:str, vec:list[float]):
-        parent,child = self._add_new_content_to_group_byID(group_id,
-                                                      EmbeddingContent(author_id=author_id, 
-                                                                       group_id=group_id,target_id=content_id),
-                                                      raw=str(vec))
-        return parent,child
-    
-    def add_new_image_to_group_byID(self,group_id:str,author_id:str, filepath:str):
-        raw_bytes = self.read_image(filepath)
-        raw_base64 = self.encode_image(raw_bytes)
-        parent,child = self._add_new_content_to_group_byID(group_id,
-                                                      ImageContent(author_id=author_id,group_id=group_id),
-                                                      raw=raw_base64)
-        return parent,child
-    
+        return group,content    
 
     def read_image(self, filepath):
         with open(filepath, "rb") as f:
