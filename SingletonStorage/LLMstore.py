@@ -321,8 +321,10 @@ class ImageContent(BinaryFileContent):
     controller: ImageContentController = None
 
 class LLMstore(SingletonKeyValueStorage):
-    client = SingletonKeyValueStorage().python_backend()
-
+    
+    def __init__(self) -> None:
+        self.python_backend()
+        
     def _client(self):
         return self.client
     
@@ -453,6 +455,10 @@ class LLMstore(SingletonKeyValueStorage):
         for key in keys:
             obj = self.find(key)
             results.append(obj)
+        return results
+    
+    def find_all_authors(self):
+        results:list[Author] = self.find_all('Author:*')
         return results
 
     def delete_obj(self, obj:AbstractObj):

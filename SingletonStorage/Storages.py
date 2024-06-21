@@ -145,13 +145,12 @@ if redis_back:
             self.model.client.delete(key)
             self._delete_slaves(key)
 
-
         def keys(self, pattern: str = "*"):
             return self.model.client.keys(pattern)
 
         def dump(self, path="RedisStorage.json"):
-            all_keys = self.model.client.keys()
-            all_data = {key: self.model.client.get(key) for key in all_keys}
+            all_keys = self.keys()
+            all_data = {key: self.get(key) for key in all_keys}
             with open(path, "w") as tf:
                 json.dump(all_data, tf)
 
@@ -159,7 +158,7 @@ if redis_back:
             with open(path, "r") as tf:
                 data:dict = json.load(tf)
             for key, value in data.items():
-                self.model.client.set(key, value)
+                self.set(key, value)
 
 class SingletonPythonDictStorage:
     _instance = None
@@ -239,6 +238,6 @@ class SingletonKeyValueStorage(SingletonStorageController):
             return self
 
     if redis_back:
-        def redis_backend(self,redis_URL=None):# 'redis://127.0.0.1:6379'
+        def redis_backend(self,redis_URL='redis://127.0.0.1:6379'):
             self.client = SingletonRedisStorageController(SingletonRedisStorage(redis_URL))
             return self

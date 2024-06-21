@@ -84,13 +84,17 @@ class ChatRoom:
             roots = [g for g in roots if g.id==chatroom_id]
             if len(roots)==0:
                 raise ValueError(f'no group({chatroom_id}) in store')        
-        chatroom = roots[0]  
+        chatroom = roots[0]
+
         self.chatroom_id = chatroom.id
         self.msgs = []
         
-        for a in self.store.find_all('Author:*'):
+        for a in self.store.find_all_authors():
             if self.chatroom_id in a.metadata.get('groups',''):
-                Speaker(a).entery_room(self)
+                print(a)
+                self.speakers[a.id] = Speaker(a).entery_room(self)
+                self.speakers[a.name] = self.speakers[a.id]
+        print(self.speakers)
     
     def chatroom(self):
         res:ContentGroup = self.store.find(self.chatroom_id)

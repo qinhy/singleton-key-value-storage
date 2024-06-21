@@ -6,16 +6,18 @@ from SingletonStorage.LLMroom import ChatRoom, Speaker
 from SingletonStorage.LLMroomGradio import Configs, build_gui
 from SingletonStorage.LLMstore import AbstractContent, LLMstore
 
-sss = LLMstore()
+sss = LLMstore().redis_backend()
 try:
     sss.load('visionRoom.json')
 except Exception as e:
     print(e)
 
 cr = ChatRoom(sss)
-
-cr.speakers.get('RoomDataSaver',Speaker(cr.store.add_new_author(name="RoomDataSaver", role="assistant"))
-                ).entery_room(cr).add_new_message_callback(lambda s,m:[sss.dump('visionRoom.json')])
+def get_speaker(name,role,metadata={}):
+    if name in cr.speakers:
+        return cr.speakers[name]
+    return Speaker(cr.store.add_new_author(name=name, role=role, metadata=metadata))
+get_speaker('RoomDataSaver','assistant').entery_room(cr).add_new_message_callback(lambda s,m:[sss.dump('visionRoom.json')])
 
 configs = Configs()
 model=configs.new_config('model','gpt-4o')
@@ -78,11 +80,8 @@ def pygpt(speaker:Speaker, msg:AbstractContent):
         response = openai_request(url="https://api.openai.com/v1/chat/completions",data=json.dumps(data,ensure_ascii=False))
         speaker.speak(str(response['error']) if 'error' in response else response['choices'][0]['message']['content'])
 
-
-cr.speakers.get('VisionMaster',Speaker(cr.store.add_new_author(name="VisionMaster",role="assistant",metadata={'model':model.value}))
-                                ).entery_room(cr).add_mention_callback(pygpt)
-
-u = cr.speakers.get('User',Speaker(cr.store.add_new_author(name="User", role="user"))).entery_room(cr)
+get_speaker('VisionMaster','assistant',{'model':model.value}).entery_room(cr).add_mention_callback(pygpt)
+get_speaker('User','user').entery_room(cr)
 
 # u.speak('hi')
 # gid = u.new_group()
