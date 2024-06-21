@@ -134,6 +134,9 @@ try:
             except Exception as e:
                 return f'{e}'
 
+        def read_json(file):
+            return 'not implement'
+        
         with gr.Blocks() as demo:
             with gr.Tab("Chat"):
                 with gr.Column():
@@ -169,6 +172,8 @@ try:
                             update = gr.Button("Update")
                             update.click(fn=c.update, inputs=[config_value], outputs=[config_value])
                             getv.click(fn=c.get, inputs=[], outputs=[config_value])
+
+                    gr.Interface(read_json, "file", "text")
 
                 # demo.launch()
                 # demo.launch(auth=("admin", "admin"))
