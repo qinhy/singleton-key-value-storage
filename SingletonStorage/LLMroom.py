@@ -1,5 +1,6 @@
 
 
+import threading
 from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, Author, AuthorController, ContentGroup, ContentGroupController, EmbeddingContentController, ImageContentController, LLMstore, TextContent
 
 import re
@@ -59,14 +60,14 @@ class Speaker:
         self.is_speaking -= 1
         return self
     
-    # def speak_stream(self,stream,group_id:str=None,new_group=False):
-    #     self.is_speaking += 1
-    #     def callback():
-    #         self.is_speaking -= 1
-    #     if self.room is not None:
-    #         worker_thread = threading.Thread(target=self.room.speak_stream,args=(self.id,stream,callback,group_id,new_group))
-    #         worker_thread.start()
-    #     return self
+    def speak_stream(self,stream,group_id:str=None,new_group=False):
+        self.is_speaking += 1
+        def callback():
+            self.is_speaking -= 1
+        if self.room is not None:
+            worker_thread = threading.Thread(target=self.room.speak_stream,args=(self.id,stream,callback,group_id,new_group))
+            worker_thread.start()
+        return self
     
 class ChatRoom:
     def __init__(self, store:LLMstore, chatroom_id:str=None, speakers:Dict[str,Speaker]={}) -> None:
@@ -188,18 +189,18 @@ class ChatRoom:
             tc = add_content(group)
         return tc(speaker.author.id, msg)
 
-    # def speak_stream(self,speaker_id,stream,callback,group_id:str=None,new_group=False):
-    #     content:TextContent = None#self._prepare_speak(speaker_id,group_id,new_group)
-    #     msg = ''
-    #     for i,r in enumerate(stream):
-    #         if r and i==0:
-    #             content = self._prepare_speak(speaker_id,group_id,new_group)
-    #         assert r is not None, f'can not prepare string reply in speak_stream! {r}'
-    #         content.append_data_raw(r)
-    #         msg += r
-    #     callback()
-    #     self.notify_new_message(content, self.speakers.keys())
-    #     self.notify_mention(content, self.speakers.keys())
+    def speak_stream(self,speaker_id,stream,callback,group_id:str=None,new_group=False):
+        content:AbstractContent = None
+        msg = ''
+        for i,r in enumerate(stream):
+            assert r is not None, f'can not prepare string reply in speak_stream! {r}'
+            if i==0:
+                content = self._prepare_speak(speaker_id,group_id,new_group)
+            content.controller.append_data_raw(r)
+            msg += r
+        callback()
+        self.notify_new_message(content, self.speakers.keys())
+        self.notify_mention(content, self.speakers.keys())
 
     def speak(self,speaker_id,msg:str,group_id:str=None,new_group=False):
         content = self._prepare_speak(speaker_id,group_id,new_group,msg=msg)

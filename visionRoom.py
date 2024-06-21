@@ -20,11 +20,32 @@ cr.speakers.get('RoomDataSaver',Speaker(cr.store.add_new_author(name="RoomDataSa
 configs = Configs()
 model=configs.new_config('model','gpt-4o')
 num_passages=configs.new_config('num passages','1')
+stream=configs.new_config('stream','no')
 OPENAI_API_KEY=configs.new_config('openai api key',os.environ['OPENAI_API_KEY'])
 
-def openairequest(url,jsonstr):
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY.value}","Content-Type": "application/json"}
-    data = jsonstr
+def openai_streaming_request(url="https://api.openai.com/v1/chat/completions", data=r"{}",
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY.value}","Content-Type": "application/json"}):
+
+    try:
+        with requests.post(url=url, data=data, headers=headers, stream=True) as response:
+            response.raise_for_status()
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    try:
+                        decoded_chunks = chunk.decode('utf-8').replace('\n','').split('data: ')
+                        for decoded_chunk in decoded_chunks:
+                            if len(decoded_chunk)==0:continue
+                            if '[DONE]' in decoded_chunk:return
+                            chunk_dict = json.loads(decoded_chunk, strict=False)
+                            yield chunk_dict
+                    except Exception as e:
+                        yield {'error': f'{e}'}
+    except requests.exceptions.RequestException as e:
+        yield {'error': f'HTTP Request failed: {e}'}
+
+def openai_request(url="https://api.openai.com/v1/chat/completions",data=r"{}",
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY.value}","Content-Type": "application/json"}):
+
     response = requests.post(url=url, data=data, headers=headers)
     try:
         response = json.loads(response.text,strict=False)
@@ -35,7 +56,7 @@ def openairequest(url,jsonstr):
             return {'error':f'{response}({e})'}
     return response
 
-def openaimsg():
+def openai_msg():
     msgd = cr.msgsDict(True,todict = lambda c:c.controller.get_data_raw())
     def mergelist(l):
         name,role = l[0]['name'],l[0]['role']        
@@ -44,11 +65,19 @@ def openaimsg():
     return messages
 
 def pygpt(speaker:Speaker, msg:AbstractContent):
-    data = {"model": model.value,
+    is_stream = any([i == stream.value.lower() for i in ['y','yes','true']])
+    data = {"model": model.value, "stream":is_stream,
             "messages": [{"role":"system",
-                        "content":"Your name is VisionMaster and good at making description of image."}] + openaimsg()[-int(num_passages.value):]}
-    response = openairequest(url="https://api.openai.com/v1/chat/completions",jsonstr=json.dumps(data,ensure_ascii=False))
-    speaker.speak(str(response['error']) if 'error' in response else response['choices'][0]['message']['content'])
+                        "content":"Your name is VisionMaster and good at making description of image."}] + openai_msg()[-int(num_passages.value):]}
+    if is_stream:
+        def genmsg():
+            for response in openai_streaming_request(url="https://api.openai.com/v1/chat/completions",data=json.dumps(data,ensure_ascii=False)):
+                yield response['choices'][0]['delta'].get('content','')            
+        speaker.speak_stream(genmsg())
+    else:
+        response = openai_request(url="https://api.openai.com/v1/chat/completions",data=json.dumps(data,ensure_ascii=False))
+        speaker.speak(str(response['error']) if 'error' in response else response['choices'][0]['message']['content'])
+
 
 cr.speakers.get('VisionMaster',Speaker(cr.store.add_new_author(name="VisionMaster",role="assistant",metadata={'model':model.value}))
                                 ).entery_room(cr).add_mention_callback(pygpt)
@@ -64,3 +93,13 @@ try:
     build_gui(cr,configs.tolist(),'visionRoom.json').launch()
 except Exception as e:
     print(e)
+
+# import gradio as gr
+# import time
+# def my_function(x):
+#     time.sleep(1)
+#     for i in range(100):
+#         time.sleep(0.1)
+#         yield i
+
+# gr.Interface(my_function, gr.Textbox(), gr.Textbox()).launch()

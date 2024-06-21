@@ -137,23 +137,22 @@ try:
         with gr.Blocks() as demo:
             with gr.Tab("Chat"):
                 with gr.Column():
-                    with gr.Row():
-                        msgid = gr.Textbox(label="Message Id")
-                        delmsg =gr.Button("Delete")
-                        clmsg =gr.Button("Clone")
-                        reflesh = gr.Button("Reflesh")
-                        
 
-                    # history = gr.Textbox(label="History",value=chat(None,None))                
                     history = gr.Markdown(label="History",value=chat(None,None))
                     author = gr.Dropdown(value='User',choices=[n for n in cr.speakers.keys() if ':' not in n], label="Author")
                     
-                    with gr.Tab("Text"):
+                    with gr.Tab("Home"):
                         message = gr.Textbox(label="Message")
+                        send = gr.Button("Send")
+                        reflesh = gr.Button("Reflesh")
                     with gr.Tab("Image"):
                         image_file = gr.Image(type='filepath')
-                    send = gr.Button("Send")                    
-                    
+                    with gr.Tab("Room"):                    
+                        msgid = gr.Textbox(label="Message Id")
+                        delmsg =gr.Button("Delete")
+                        clmsg =gr.Button("Clone")
+                        
+
                     clmsg.click(fn=clonemsg, inputs=[msgid], outputs=history)
                     reflesh.click(fn=lambda :chat(None,''), inputs=[], outputs=history)
                     send.click(fn=chat, inputs=[author,message,image_file], outputs=history)
