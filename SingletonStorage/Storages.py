@@ -639,8 +639,8 @@ class Tests(unittest.TestCase):
 
     def test_all(self):
         self.test_python()
-        self.test_redis()
         self.test_sqlite()
+        self.test_redis()
         # self.test_firestore()
 
     def test_python(self):
