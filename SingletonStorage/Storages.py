@@ -188,10 +188,7 @@ if sqlite_back:
             cls._instance.worker_thread.daemon = True
             cls._instance.should_stop = threading.Event()  # Use an event to signal the thread to stop
             cls._instance.worker_thread.start()
-            
-            query = "CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)"
-            query_id = cls._instance._execute_query(query)
-            result = cls._instance._pop_result(query_id)
+            cls._instance._execute_query("CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)")
 
         def __new__(cls):
             if cls._instance is None:
@@ -269,8 +266,7 @@ if sqlite_back:
 
         def _store_result(self, query_id, query, result):
             with self.lock:
-                self.result_dict["query"] = query
-                self.result_dict[query_id] = result
+                self.result_dict[query_id] = {'result':result,'query':query,'time':time.time()}
                 # if "INSERT" or "DELETE" or "UPDATE":
                 #     self.execute_query_toKafka(query)
         
@@ -284,10 +280,10 @@ if sqlite_back:
             if self.should_stop.is_set():
                 raise ValueError('the DB thread is stopped!')
             query_id = str(uuid.uuid4())
-            self.query_queue.put({'query': (query,val), 'id': query_id})
+            self.query_queue.put({'query': (query,val), 'id': query_id, 'time':time.time()})
             return query_id
 
-        def _pop_result(self, query_id, timeout=1):
+        def _pop_result(self, query_id, timeout=1, wait=0.01):
             start_time = time.time()
             while True:
                 with self.lock:
@@ -295,7 +291,7 @@ if sqlite_back:
                         return self.result_dict.pop(query_id)
                 if time.time() - start_time > timeout:
                     return None  # or return a custom timeout message
-                time.sleep(0.1)  # Wait a short time before checking again to reduce CPU usage
+                time.sleep(wait)  # Wait a short time before checking again to reduce CPU usage
 
         def _clean_result(self):
             while True:
@@ -315,10 +311,11 @@ if sqlite_back:
 
         def _execute_query_with_res(self,query):
             query_id = self.model._execute_query(query)
+            # print({'time':time.time()})
             # print(f"Create query submitted with ID: {query_id}")
             result = self.model._pop_result(query_id)
             # print(f"Result for {query_id}: {result}")
-            return result
+            return result['result']
 
         def exists(self, key: str) -> bool:
             query = f"SELECT EXISTS(SELECT * FROM KeyValueStore WHERE key = '{key}');"
@@ -439,27 +436,27 @@ class Tests(unittest.TestCase):
         super().__init__(*args,**kwargs)
         self.store = SingletonKeyValueStorage()
 
-    def test_all(self):
-        self.test_python()
-        self.test_sqlite()
-        self.test_redis()
-        # self.test_firestore()
+    def test_all(self,num=1):
+        self.test_python(num)
+        self.test_sqlite(num)
+        self.test_redis(num)
+        # self.test_firestore(num)
 
-    def test_python(self):
+    def test_python(self,num=1):
         self.store.python_backend()
-        self.test_all_cases()
+        for i in range(num):self.test_all_cases()
 
-    def test_redis(self):
+    def test_redis(self,num=1):
         self.store.redis_backend()
-        self.test_all_cases()
+        for i in range(num):self.test_all_cases()
 
-    def test_sqlite(self):
+    def test_sqlite(self,num=1):
         self.store.sqlite_backend()
-        self.test_all_cases()
+        for i in range(num):self.test_all_cases()
 
-    def test_firestore(self):
+    def test_firestore(self,num=1):
         self.store.firestore_backend()
-        self.test_all_cases()
+        for i in range(num):self.test_all_cases()
 
     def test_all_cases(self):
         self.test_set_and_get()
