@@ -166,18 +166,6 @@ if redis_back:
                 res = []
             return res
 
-        # def dump(self, path="RedisStorage.json"):
-        #     all_keys = self.model.client.keys()
-        #     all_data = {key: self.get(key) for key in all_keys}
-        #     with open(path, "w") as tf:
-        #         json.dump(all_data, tf)
-
-        # def load(self, path="RedisStorage.json"):
-        #     with open(path, "r") as tf:
-        #         data:dict = json.load(tf)
-        #     for key, value in data.items():
-        #         self.model.client.set(key, value)
-
 if sqlite_back:
     import sqlite3
     import threading
