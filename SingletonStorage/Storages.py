@@ -145,7 +145,6 @@ if redis_back:
             self.model.client.delete(key)
             self._delete_slaves(key)
 
-
         def keys(self, pattern: str='*') -> list[str]:            
             try:
                 res = self.model.client.keys(pattern)
@@ -155,7 +154,7 @@ if redis_back:
 
         def dump(self, path="RedisStorage.json"):
             all_keys = self.model.client.keys()
-            all_data = {key: self.model.client.get(key) for key in all_keys}
+            all_data = {key: self.get(key) for key in all_keys}
             with open(path, "w") as tf:
                 json.dump(all_data, tf)
 
@@ -163,7 +162,7 @@ if redis_back:
             with open(path, "r") as tf:
                 data:dict = json.load(tf)
             for key, value in data.items():
-                self.model.client.set(key, value)
+                self.set(key, value)
 
 if sqlite_back:
     import sqlite3
@@ -348,11 +347,16 @@ if sqlite_back:
             result = self._execute_query_with_res(query)
             return result
 
-        def dump(self,path="SqliteStorage.db"):
-            self._execute_query_with_res(f"dump_file {path}")
+        def dump(self,path="SqliteStorage.json"):
+            # self._execute_query_with_res(f"dump_file {path}")
+            with open(path, "w") as tf: json.dump({k:self.get(k) for k in self.keys('*')}, tf)            
 
-        def load(self,path="SqliteStorage.db"):
-            self._execute_query_with_res(f"load_file {path}")
+        def load(self,path="SqliteStorage.json"):
+            # self._execute_query_with_res(f"load_file {path}")
+            with open(path, "r") as tf:
+                store:dict = json.load(tf)
+                for k,v in store.items():
+                    self.set(k,v)
 
 class SingletonPythonDictStorage:
     _instance = None
@@ -464,6 +468,7 @@ class Tests(unittest.TestCase):
         self.test_delete()
         self.test_keys()
         self.test_get_nonexistent()
+        self.test_dump_and_load()
 
     def test_set_and_get(self):
         self.store.set('test1', {'data': 123})
@@ -487,3 +492,13 @@ class Tests(unittest.TestCase):
 
     def test_get_nonexistent(self):
         self.assertEqual(self.store.get('nonexistent'), None, "Getting a non-existent key should return None.")
+        
+    def test_dump_and_load(self):
+        self.store.dump('test.json')        
+        with open('test.json', "r") as tf:
+            self.assertEqual(json.load(tf), 
+                            {"test1": {"data": 123}, "test2": {"data": 456}, "alpha": {"info": "first"}, "abeta": {"info": "second"}, "gamma": {"info": "third"}}
+                            , "Should return the correct keys and values.")
+        self.store.load('test.json')
+        import os
+        os.remove('test.json')
