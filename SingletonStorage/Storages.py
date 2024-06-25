@@ -390,9 +390,14 @@ if sqlite_back:
                 SingletonSqliteStorage._set_instance(cls)
             return cls._instance
 
-        def __init__(self, redis_URL=None):
+        def __init__(self):
             self.slaves:list = self.slaves
             self.client:sqlite3.Connection = self.client
+            self.query_queue:queue.Queue = self.query_queue 
+            self.result_dict:dict = self.result_dict 
+            self.lock:threading.Lock = self.lock 
+            self.worker_thread:threading.Thread = self.worker_thread 
+            self.should_stop:threading.Event = self.should_stop
             
         def _process_queries(self):
             self.client = sqlite3.connect(':memory:')
