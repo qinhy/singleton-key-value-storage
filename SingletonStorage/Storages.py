@@ -27,19 +27,28 @@ class SingletonStorageController:
     def _delete_slaves(self, key: str):
         [s.delete(key) for s in self.model.slaves if hasattr(s, 'delete')]
 
-    def exists(self, key: str) -> bool: print('not implement')
+    def exists(self, key: str) -> bool: print(f'[{self.__class__.__name__}]: not implement')
 
-    def set(self, key: str, value: dict): print('not implement')
+    def set(self, key: str, value: dict): print(f'[{self.__class__.__name__}]: not implement')
 
-    def get(self, key: str) -> dict: print('not implement')
+    def get(self, key: str) -> dict: print(f'[{self.__class__.__name__}]: not implement')
 
-    def delete(self, key: str): print('not implement')
+    def delete(self, key: str): print(f'[{self.__class__.__name__}]: not implement')
 
-    def keys(self, pattern: str='*') -> list[str]: print('not implement')
+    def keys(self, pattern: str='*') -> list[str]: print(f'[{self.__class__.__name__}]: not implement')
+    
+    def clean(self): [self.delete(k) for k in self.keys('*')]
 
-    def dump(self, json_path=None): print('not implement')
+    def dumps(self): return json.dumps({k:self.get(k) for k in self.keys('*')})
+    
+    def loads(self, json_string=r'{}'): [ self.set(k,v) for k,v in json.loads(json_string).items()]
 
-    def load(self, json_path=None): print('not implement')
+    def dump(self,path):
+        with open(path, "w") as tf: tf.write(self.dumps())
+
+    def load(self,path):
+        with open(path, "r") as tf: self.loads(tf.read())
+
 
     def dumps(self): print('not implement')
 
@@ -102,7 +111,7 @@ if firestore_back:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
             return fnmatch.filter(keys, pattern)
-
+        
 if redis_back:
     import redis
     class SingletonRedisStorage:
@@ -157,17 +166,17 @@ if redis_back:
                 res = []
             return res
 
-        def dump(self, path="RedisStorage.json"):
-            all_keys = self.model.client.keys()
-            all_data = {key: self.get(key) for key in all_keys}
-            with open(path, "w") as tf:
-                json.dump(all_data, tf)
+        # def dump(self, path="RedisStorage.json"):
+        #     all_keys = self.model.client.keys()
+        #     all_data = {key: self.get(key) for key in all_keys}
+        #     with open(path, "w") as tf:
+        #         json.dump(all_data, tf)
 
-        def load(self, path="RedisStorage.json"):
-            with open(path, "r") as tf:
-                data:dict = json.load(tf)
-            for key, value in data.items():
-                self.model.client.set(key, value)
+        # def load(self, path="RedisStorage.json"):
+        #     with open(path, "r") as tf:
+        #         data:dict = json.load(tf)
+        #     for key, value in data.items():
+        #         self.model.client.set(key, value)
 
 if sqlite_back:
     import sqlite3
@@ -333,6 +342,8 @@ if sqlite_back:
             else:
                 query = f"INSERT INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
                 result = self._execute_query_with_res(query)
+            self._set_slaves(key,value)
+
 
         def get(self, key: str) -> dict:
             query = f"SELECT value FROM KeyValueStore WHERE key = '{key}'"
@@ -351,17 +362,6 @@ if sqlite_back:
             query = f"SELECT key FROM KeyValueStore WHERE key LIKE '{pattern}'"
             result = self._execute_query_with_res(query)
             return result
-
-        def dump(self,path="SqliteStorage.json"):
-            # self._execute_query_with_res(f"dump_file {path}")
-            with open(path, "w") as tf: json.dump({k:self.get(k) for k in self.keys('*')}, tf)            
-
-        def load(self,path="SqliteStorage.json"):
-            # self._execute_query_with_res(f"load_file {path}")
-            with open(path, "r") as tf:
-                store:dict = json.load(tf)
-                for k,v in store.items():
-                    self.set(k,v)
 
 class SingletonPythonDictStorage:
     _instance = None
@@ -400,18 +400,6 @@ class SingletonPythonDictStorageController(SingletonStorageController):
     def keys(self, pattern: str='*') -> list[str]:
         return fnmatch.filter(self.model.store.keys(), pattern)
 
-    def dumps(self):
-        return json.dumps(self.model.store)
-    
-    def loads(self, json_string=None):
-       self.model.store = json.loads(json_string)
-
-    def dump(self,path="PythonDictStorage.json"):
-        with open(path, "w") as tf: json.dump(self.model.store, tf)
-
-    def load(self,path="PythonDictStorage.json"):
-        with open(path, "r") as tf: self.model.store = json.load(tf)
-
 class SingletonKeyValueStorage(SingletonStorageController):
 
     def __init__(self) -> None:
@@ -442,9 +430,15 @@ class SingletonKeyValueStorage(SingletonStorageController):
 
     def keys(self, pattern: str='*') -> list[str]: return self.client.keys(pattern)
 
+    def clean(self): self.client.clean()
+
     def dump(self,json_path): self.client.dump(json_path)
 
     def load(self,json_path): self.client.load(json_path)
+
+    def dumps(self,): return self.client.dumps()
+
+    def loads(self,json_str): self.client.loads(json_str)
 
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs) -> None:
@@ -505,11 +499,16 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.store.get('nonexistent'), None, "Getting a non-existent key should return None.")
         
     def test_dump_and_load(self):
-        self.store.dump('test.json')        
-        with open('test.json', "r") as tf:
-            self.assertEqual(json.load(tf), 
-                            {"test1": {"data": 123}, "test2": {"data": 456}, "alpha": {"info": "first"}, "abeta": {"info": "second"}, "gamma": {"info": "third"}}
-                            , "Should return the correct keys and values.")
+        raw = {"test1": {"data": 123}, "test2": {"data": 456}, "alpha": {"info": "first"}, "abeta": {"info": "second"}, "gamma": {"info": "third"}}
+        self.store.dump('test.json')
+
+        self.store.clean()        
+        self.assertEqual(self.store.dumps(),'{}', "Should return the correct keys and values.")
+
         self.store.load('test.json')
+        self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
         import os
-        os.remove('test.json')
+        
+        self.store.clean()
+        self.store.loads(json.dumps(raw))
+        self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
