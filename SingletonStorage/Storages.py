@@ -13,6 +13,7 @@ def get_error(func):
 # self checking
 firestore_back = get_error(lambda:__import__('google.cloud.firestore')) is None
 redis_back = get_error(lambda:__import__('redis')) is None
+sqlite_back = True
 
 class SingletonStorageController:
 
@@ -122,6 +123,7 @@ if redis_back:
         def __init__(self, redis_URL=None):
             self.slaves:list = self.slaves
             self.client:redis.Redis = self.client
+
     class SingletonRedisStorageController(SingletonStorageController):
         def __init__(self, model: SingletonRedisStorage):
             self.model = model
@@ -155,6 +157,182 @@ if redis_back:
                 data:dict = json.load(tf)
             for key, value in data.items():
                 self.model.client.set(key, value)
+
+if sqlite_back:
+    import sqlite3
+    import threading
+    import queue
+    import time
+    import uuid
+    class SingletonSqliteStorage:
+        _instance = None
+        _meta = {}
+
+        @staticmethod
+        def _set_instance(cls):
+            cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                                
+            cls._instance.client = None
+            cls._instance.slaves = []
+
+        def __new__(cls):
+            if cls._instance is None:
+                SingletonSqliteStorage._set_instance(cls)
+            return cls._instance
+
+        def __init__(self):
+            self.client = sqlite3.connect(':memory:')
+            self.query_queue = queue.Queue()
+            self.result_dict = {}
+            self.lock = threading.Lock()
+            self.worker_thread = threading.Thread(target=self._process_queries)
+            self.worker_thread.daemon = True
+            self.should_stop = threading.Event()  # Use an event to signal the thread to stop
+            self.worker_thread.start()
+
+        def _process_queries(self):
+            self.client = sqlite3.connect(':memory:')
+
+            while not self.should_stop.is_set():  # Check if the thread should stop
+                try:
+                    # Use get with timeout to allow periodic checks for should_stop
+                    query_info = self.query_queue.get(timeout=1)
+                    # print('query_info',query_info)
+                except queue.Empty:
+                    continue  # If the queue is empty, continue to check should_stop
+
+                query, query_id = query_info['query'], query_info['id']
+                query,val = query
+                if 'dump_file' == query[:len('dump_file')]:
+                    disk_conn = sqlite3.connect(query.split()[1])
+                    self._clone(self.client,disk_conn)
+                    disk_conn.close()
+                
+                if 'load_file' == query[:len('load_file')]:     
+                    disk_conn = sqlite3.connect(query.split()[1])
+                    self.client.close()
+                    self.client = sqlite3.connect(':memory:')
+                    self._clone(disk_conn,self.client)
+                    disk_conn.close()
+
+                try:
+                    cursor = self.client.cursor()
+                    if val is None:
+                        cursor.execute(query)
+                    else:
+                        cursor.execute(query, val)
+
+                    if cursor.description is None:
+                        self._store_result(query_id, query, True)
+                        continue
+                    columns = [description[0] for description in cursor.description]
+                    result = cursor.fetchall()
+                    if len(columns) > 1:
+                        result = [dict(zip(columns, row)) for row in result]
+                    else:
+                        result = [str(row[0]) for row in result]
+                    self._store_result(query_id, query, result)
+                except sqlite3.Error as e:
+                    self._store_result(query_id, query, f"SQLite error: {e}")
+                finally:
+                    self.query_queue.task_done()
+                    self.client.commit()
+
+        def _store_result(self, query_id, query, result):
+            with self.lock:
+                self.result_dict["query"] = query
+                self.result_dict[query_id] = result
+                # if "INSERT" or "DELETE" or "UPDATE":
+                #     self.execute_query_toKafka(query)
+        
+        def _clone(self,a,b):
+            query = "".join(line for line in a.iterdump())
+            # print(query)
+            b.executescript(query)
+            b.commit()
+
+        # def dump_file(self, file_path, overwrite=True):
+        #     if os.path.isfile(file_path) and not overwrite:
+        #         raise ValueError(f'{file_path} is exists!')
+        #     if os.path.isfile(file_path) and overwrite:
+        #         os.remove(file_path)
+        #     self.execute_query(f'dump2file {file_path}')
+
+        def _execute_query(self, query, val=None):
+            if self.should_stop.is_set():
+                raise ValueError('the DB thread is stopped!')
+            query_id = str(uuid.uuid4())
+            self.query_queue.put({'query': (query,val), 'id': query_id})
+            return query_id
+
+        def _pop_result(self, query_id, timeout=1):
+            start_time = time.time()
+            while True:
+                with self.lock:
+                    if query_id in self.result_dict:
+                        return self.result_dict.pop(query_id)
+                if time.time() - start_time > timeout:
+                    return None  # or return a custom timeout message
+                time.sleep(0.1)  # Wait a short time before checking again to reduce CPU usage
+
+        def _clean_result(self):
+            while True:
+                with self.lock:
+                    self.result_dict = {}
+                return True
+
+        def _stop_thread(self):
+            while not self.query_queue.empty():
+                time.sleep(0.1)
+            self.should_stop.set()  # Signal the thread to stop
+            self.worker_thread.join()  # Wait for the thread to finish
+
+    class SingletonSqliteStorageController(SingletonStorageController):
+        def __init__(self, model: SingletonSqliteStorage):
+            self.model = model
+            query = "CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)"
+            query_id = self.model._execute_query(query)
+            print(f"Create query submitted with ID: {query_id}")
+            result = self.model._pop_result(query_id)
+            print(f"Result for {query_id}: {result}")
+
+        def _execute_query_with_res(self,query):
+            query_id = self.model._execute_query(query)
+            print(f"Create query submitted with ID: {query_id}")
+            result = self.model._pop_result(query_id)
+            print(f"Result for {query_id}: {result}")
+            return result
+
+        def exists(self, key: str):
+            query = f"SELECT EXISTS(SELECT 1 FROM KeyValueStore WHERE key = '{key}');"
+            result = self._execute_query_with_res(query)
+            return result
+
+        def set(self, key: str, value: dict):
+            query = f"INSERT INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
+            result = self._execute_query_with_res(query)
+
+        def get(self, key: str) -> dict:
+            query = f"SELECT value FROM KeyValueStore WHERE key = '{key}'"
+            result = self._execute_query_with_res(query)
+            if result is None:return {}
+            return result
+        
+        def delete(self, key: str):
+            query = f"DELETE FROM KeyValueStore WHERE key = '{key}'"
+            result = self._execute_query_with_res(query)
+            self._delete_slaves(key)
+
+        def keys(self, pattern: str):
+            pattern = pattern.replace('*', '%').replace('?', '_')  # Translate fnmatch pattern to SQL LIKE pattern
+            query = f"SELECT key FROM KeyValueStore WHERE key LIKE '{pattern}'"
+            result = self._execute_query_with_res(query)
+            return result
+
+        # def dump(self,path="PythonDictStorage.json"):
+        #     with open(path, "w") as tf: json.dump(self.model.store, tf)
+
+        # def load(self,path="PythonDictStorage.json"):
+        #     with open(path, "r") as tf: self.model.store = json.load(tf)
 
 class SingletonPythonDictStorage:
     _instance = None
