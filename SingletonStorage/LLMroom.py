@@ -1,7 +1,7 @@
 
 
 import threading
-from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, Author, AuthorController, ContentGroup, ContentGroupController, EmbeddingContentController, ImageContentController, LLMstore, TextContent
+from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, Author, ContentGroup, ContentGroupController, EmbeddingContentController, ImageContentController, LLMstore
 
 import re
 from typing import List, Dict

@@ -49,12 +49,6 @@ class SingletonStorageController:
     def load(self,path):
         with open(path, "r") as tf: self.loads(tf.read())
 
-
-    def dumps(self): print('not implement')
-
-    def loads(self, json_string=None): print('not implement')
-
-
 if firestore_back:
     from google.cloud import firestore
     class SingletonFirestoreStorage:

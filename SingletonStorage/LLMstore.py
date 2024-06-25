@@ -382,7 +382,7 @@ class LLMstore(SingletonKeyValueStorage):
         return res
    
     def _store_obj(self, obj:AbstractObj):
-        self.client.set(obj.id,json.loads(obj.model_dump_json(exclude=['controller'])))
+        self.set(obj.id,json.loads(obj.model_dump_json(exclude=['controller'])))
         return obj
         
     def add_new_author(self,name, role, rank:list=[0], metadata={}) -> Author:
@@ -444,13 +444,13 @@ class LLMstore(SingletonKeyValueStorage):
     
     # available for regx?
     def find(self,id:str) -> AbstractObj:
-        data_dict = self.client.get(id)
+        data_dict = self.get(id)
         obj:AbstractObj = self.get_class(id)(**data_dict)
         obj.controller = self.get_controller(id)(self,obj)
         return obj
     
     def find_all(self,id:str=f'Author:*'):
-        keys = [key for key in self.client.keys(id)]
+        keys = [key for key in self.keys(id)]
         results:list[AbstractObj] = []
         for key in keys:
             obj = self.find(key)
@@ -462,7 +462,7 @@ class LLMstore(SingletonKeyValueStorage):
         return results
 
     def delete_obj(self, obj:AbstractObj):
-        self.client.delete(obj.id)
+        self.delete(obj.id)
         obj.controller = None
     
     def update_obj(self, obj:AbstractObj, **kwargs) -> AbstractObj:

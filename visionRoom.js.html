@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Singleton Storage Example</title>
+</head>
+<body>
+    <script>
+        class SingletonStorageController {
+            add_slave(slave) {this.model.slaves.push(slave);}
+
+            _set_slaves(key, value) {
+                this.model.slaves.forEach(slave => {
+                    if (slave.set) {slave.set(key, value);}
+                });}
+
+            _delete_slaves(key) {
+                this.model.slaves.forEach(slave => {
+                    if (slave.delete) {slave.delete(key);}
+                });}
+
+            exists(key) {console.log(`[${this.constructor.name}]: not implemented`);}
+
+            set(key, value) {console.log(`[${this.constructor.name}]: not implemented`);}
+
+            get(key) {console.log(`[${this.constructor.name}]: not implemented`);}
+
+            delete(key) {console.log(`[${this.constructor.name}]: not implemented`);}
+
+            keys(pattern = '*') {console.log(`[${this.constructor.name}]: not implemented`);}
+
+            clean() {this.keys('*').forEach(k => this.delete(k));}
+
+            dumps() {var res = {}; this.keys('*').forEach(k => res[k]=this.get(k));return JSON.stringify(res); }
+
+            loads(jsonString = '{}') {console.log('not implemented');}
+        }
+
+        class SingletonJavascriptDictStorage {
+            static _instance = null;
+            static _meta = {};
+
+            constructor() {
+                if (!SingletonJavascriptDictStorage._instance) {SingletonJavascriptDictStorage._instance = this;
+                    this.store = {};
+                    this.slaves = [];
+                }
+                return SingletonJavascriptDictStorage._instance;
+            }
+        }
+
+        class SingletonJavascriptDictStorageController extends SingletonStorageController {
+            constructor(model) {
+                super();
+                this.model = model;
+            }
+
+            exists(key) {return key in this.model.store;}
+
+            set(key, value) {
+                this.model.store[key] = value;
+                this._set_slaves(key, value);
+            }
+
+            get(key) {return this.model.store[key] || null;}
+
+            delete(key) {
+                if (key in this.model.store) {delete this.model.store[key];}
+                this._delete_slaves(key);
+            }
+
+            keys(pattern = '*') {
+                const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+                return Object.keys(this.model.store).filter(key => key.match(regex));
+            }
+        }
+
+        class SingletonKeyValueStorage extends SingletonStorageController {
+            constructor() {super();
+                this.js_backend();}
+
+            js_backend() {this.client = new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage());}
+
+            exists(key) { return this.client.exists(key); }
+            set(key, value) { this.client.set(key, value); }
+            get(key) { return this.client.get(key); }
+            delete(key) { this.client.delete(key); }
+            keys(pattern = '*') { return this.client.keys(pattern); }
+            clean() { this.client.clean(); }
+            dump(jsonPath) { this.client.dump(jsonPath); }
+            load(jsonPath) { this.client.load(jsonPath); }
+            dumps() { return this.client.dumps(); }
+            loads(jsonStr) { this.client.loads(jsonStr); }}
+
+        // Tests for SingletonKeyValueStorage
+        (async () => {
+            console.log("Testing SingletonKeyValueStorage...");
+
+            const storage = new SingletonKeyValueStorage();
+
+            // Test 1: Set and Get
+            storage.set('key1', { data: 'value1' });
+            const value1 = storage.get('key1');
+            console.assert(JSON.stringify(value1) === JSON.stringify({ data: 'value1' }), 'Test 1 Failed: Set or Get does not work correctly');
+
+            // Test 2: Exists
+            const exists1 = storage.exists('key1');
+            const exists2 = storage.exists('key2');
+            console.assert(exists1 === true, 'Test 2 Failed: Exists does not return true for existing key');
+            console.assert(exists2 === false, 'Test 2 Failed: Exists does not return false for non-existing key');
+
+            // Test 3: Delete
+            storage.delete('key1');
+            const valueAfterDelete = storage.get('key1');
+            console.assert(valueAfterDelete === null, 'Test 3 Failed: Delete does not remove the key properly');
+
+            // Test 4: Keys
+            storage.set('test1', { data: '123' });
+            storage.set('test2', { data: '456' });
+            storage.set('something', { data: '789' });
+            const keys = storage.keys('test*');
+            console.assert(keys.includes('test1') && keys.includes('test2') && keys.length === 2, 'Test 4 Failed: Keys does not filter correctly');
+
+            // Test 5: Clean
+            storage.clean();
+            const keysAfterClean = storage.keys('*');
+            console.assert(keysAfterClean.length === 0, 'Test 5 Failed: Clean does not clear all keys');
+
+            console.log("All tests completed.");
+        })();
+
+        // Example usage:
+        // let storage = new SingletonKeyValueStorage();
+        // storage.set('key1', {data: 'value1'});
+        // console.log(storage.get('key1')); // Output: {data: 'value1'}
+        // storage.delete('key1');
+        // console.log(storage.get('key1')); // Output: null
+
+        // LLM stores
+        function getCurrentDateTimeWithUTC() {
+            return new Date().toISOString();
+        }
+
+        function generateUUID(prefix) {
+                return prefix+'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function() {
+                    return Math.floor(Math.random() * 16).toString(16);
+                });
+                }
+
+        class AbstractObj {
+            constructor() {
+                this.id = '';
+                this.rank = [0];
+                this.createTime = getCurrentDateTimeWithUTC();
+                this.updateTime = getCurrentDateTimeWithUTC();
+                this.status = '';
+                this.metadata = {};
+                this.controller = null;
+            }
+        }
+
+        class CommonData extends AbstractObj {
+            constructor() {
+                super();
+                this.raw = '';
+                this.rLOD0 = '';
+                this.rLOD1 = '';
+                this.rLOD2 = '';
+                this.controller = null;
+            }
+        }
+
+        class Author extends AbstractObj {
+            constructor() {
+                super();
+                this.id = generateUUID('Author:');
+                this.name = '';
+                this.role = '';
+                this.controller = null;
+            }
+        }
+
+        class AbstractContent extends AbstractObj {
+            constructor() {
+                super();
+                this.authorId = '';
+                this.groupId = '';
+                this.controller = null;
+            }
+
+            dataId() {
+                return `CommonData:${this.id}`;
+            }
+        }
+
+        class AbstractGroup extends AbstractObj {
+            constructor() {
+                super();
+                this.authorId = '';
+                this.parentId = '';
+                this.childrenId = [];
+                this.controller = null;
+            }
+        }
+
+        class ContentGroup extends AbstractGroup {
+            constructor() {
+                super();
+                this.id = generateUUID('ContentGroup:');
+                this.controller = null;
+            }
+        }
+
+        class TextContent extends AbstractContent {
+            constructor() {
+                super();
+                this.id = generateUUID('TextContent:');
+                this.controller = null;
+            }
+        }
+
+        class EmbeddingContent extends AbstractContent {
+            constructor() {
+                super();
+                this.id = generateUUID('EmbeddingContent:');
+                this.targetId = '';
+                this.controller = null;
+            }
+        }
+
+        class FileLinkContent extends AbstractContent {
+            constructor() {
+                super();
+                this.id = generateUUID('FileLinkContent:');
+                this.controller = null;
+            }
+        }
+
+        class BinaryFileContent extends AbstractContent {
+            constructor() {
+                super();
+                this.id = generateUUID('BinaryFileContent:');
+                this.controller = null;
+            }
+        }
+
+        class ImageContent extends BinaryFileContent {
+            constructor() {
+                super();
+                this.id = generateUUID('ImageContent:');
+                this.controller = null;
+            }
+        }
+
+        class AbstractObjController {
+            constructor(store, model) {
+                this.model = model;
+                this._store = store;
+            }
+
+            update(kwargs) {
+                if (!this.model) throw new Error('controller has null model!');
+                for (const key in kwargs) {
+                    if (key in this.model) {
+                        this.model[key] = kwargs[key];
+                    }
+                }
+                this._update_timestamp();
+                this.store();
+            }
+
+            _update_timestamp() {
+                if (!this.model) throw new Error('controller has null model!');
+                this.model.update_time = getCurrentDateTimeWithUTC();
+            }
+
+            store() {
+                this._store._store_obj(this.model);
+                return this;
+            }
+
+            delete() {
+                this._store.delete_obj(this.model);
+            }
+
+            update_metadata(key, value) {
+                const updated_metadata = { ...this.model.metadata, [key]: value };
+                this.update({ metadata: updated_metadata });
+                return this;
+            }
+        }
+
+        class CommonDataController extends AbstractObjController {
+            constructor(store, model) {
+                super(store, model);
+            }
+        }
+
+        class AuthorController extends AbstractObjController {
+            constructor(store, model) {
+                super(store, model);
+            }
+        }
+
+        class AbstractContentController extends AbstractObjController {
+            constructor(store, model) {
+                super(store, model);
+            }
+
+            data_id() {
+                return `CommonData:${this.model.id}`;
+            }
+
+            delete() {
+                this.get_data().controller.delete();
+                super.delete();
+            }
+
+            get_author() {
+                return this._store.find(this.model.author_id);
+            }
+
+            get_group() {
+                return this._store.find(this.model.group_id);
+            }
+
+            get_data() {
+                return this._store.find(this.data_id());
+            }
+
+            get_data_raw() {
+                return this.get_data().raw;
+            }
+
+            update_data_raw(msg) {
+                const data = this.get_data();
+                data.controller.update({ raw: msg });
+                return this;
+            }
+
+            append_data_raw(msg) {
+                const data = this.get_data();
+                data.controller.update({ raw: data.raw + msg });
+                return this;
+            }
+        }
+
+        class AbstractGroupController extends AbstractObjController {
+            constructor(store, model) {
+                super(store, model);
+            }
+
+            *yield_children_content_recursive(depth = 0) {
+                for (const child_id of this.model.children_id) {
+                    if (!this._store.exists(child_id)) continue;
+                    const content = this._store.find(child_id);
+                    yield { content, depth };
+                    if (child_id.startsWith('ContentGroup')) {
+                        const group = new AbstractGroupController(this._store, content);
+                        yield* group.yield_children_content_recursive(depth + 1);
+                    }
+                }
+            }
+
+            delete_recursive_from_keyValue_storage() {
+                for (const { content } of this.yield_children_content_recursive()) {
+                    content.controller.delete();
+                }
+                this.delete();
+            }
+
+            get_children_content() {
+                if (!this.model) throw new Error('controller has null model!');
+                return this.model.children_id.map(child_id => this._store.find(child_id));
+            }
+
+            get_child_content(child_id) {
+                return this._store.find(child_id);
+            }
+
+            prints() {
+                console.log('########################################################');
+                for (const { content, depth } of this.yield_children_content_recursive()) {
+                    console.log('    '.repeat(depth) + content.id);
+                }
+                console.log('########################################################');
+            }
+        }
+
+        class ContentGroupController extends AbstractGroupController {
+            constructor(store, model) {
+                super(store, model);
+            }
+
+            add_new_child_group(metadata = {}, rank = [0]) {
+                const { parent, child } = this._store.add_new_group_to_group(this.model, metadata, rank);
+                return child;
+            }
+
+            add_new_text_content(author_id, text) {
+                const { parent, child } = this._store.add_new_text_to_group(this.model, author_id, text);
+                return child;
+            }
+
+            add_new_embedding_content(author_id, content_id, vec) {
+                const { parent, child } = this._store.add_new_embedding_to_group(this.model, author_id, content_id, vec);
+                return child;
+            }
+
+            add_new_image_content(author_id, filepath) {
+                const { parent, child } = this._store.add_new_image_to_group(this.model, author_id, filepath);
+                return child;
+            }
+
+            remove_child(child_id) {
+                const remaining_ids = this.model.children_id.filter(cid => cid !== child_id);
+                for (const content of this.get_children_content()) {
+                    if (content.controller.model.id === child_id) {
+                        if (child_id.startsWith('ContentGroup')) {
+                            const group = new ContentGroupController(this._store, content.controller.model);
+                            group.delete_recursive_from_keyValue_storage();
+                        }
+                        content.controller.delete();
+                        break;
+                    }
+                }
+                this.update({ children_id: remaining_ids });
+                return this;
+            }
+
+            get_children_content_recursive() {
+                const results = [];
+                for (const { content } of this.yield_children_content_recursive()) {
+                    results.push(content);
+                }
+                return results;
+            }
+        }
+
+        class TextContentController extends AbstractContentController {
+            constructor(store, model) {
+                super(store, model);
+                this.model = model;
+                this._store = store;
+            }
+        }
+
+        class EmbeddingContentController extends AbstractContentController {
+            constructor(store, model) {
+                super(store, model);
+                this.model = model;
+                this._store = store;
+            }
+
+            get_data_raw() {
+                const data = super.get_data_raw();
+                return data.substring(1, data.length - 1).split(',').map(Number);
+            }
+
+            get_data_rLOD0() {
+                return this.get_data_raw().filter((_, index) => index % 10 === 0);
+            }
+
+            get_data_rLOD1() {
+                return this.get_data_raw().filter((_, index) => index % 100 === 0);
+            }
+
+            get_data_rLOD2() {
+                return this.get_data_raw().filter((_, index) => index % 1000 === 0);
+            }
+
+            get_target() {
+                if (!this.model) {
+                    throw new Error('controller has null model!');
+                }
+                const targetId = this.model.targetId;
+                return this._store.find(targetId);
+            }
+
+            update_data_raw(embedding) {
+                super.update_data_raw(JSON.stringify(embedding));
+                return this;
+            }
+        }
+
+        class FileLinkContentController extends AbstractContentController {
+            constructor(store, model) {
+                super(store, model);
+            }
+        }
+
+        class BinaryFileContentController extends AbstractContentController {
+            constructor(store, model) {
+                super(store, model);
+            }
+
+            read_bytes(filepath) {
+                throw new Error('This would require server-side JavaScript to read files, like Node.js')
+            }
+
+            b64decode(fileBase64) {
+                return Buffer.from(fileBase64, 'base64');
+            }
+
+            get_data_rLOD0() {
+                throw new Error('binary file has no LOD concept');
+            }
+
+            get_data_rLOD1() {
+                throw new Error('binary file has no LOD concept');
+            }
+
+            get_data_rLOD2() {
+                throw new Error('binary file has no LOD concept');
+            }
+        }
+
+        class ImageContentController extends BinaryFileContentController {
+            constructor(store, model) {
+                super(store, model);
+            }
+
+            decode_image(encodedString) {
+                throw new Error("In a Node.js environment, you might use a library like 'sharp' to handle image decoding")
+            }
+
+            get_image() {
+                const encodedImage = this.get_data_raw();
+                if (encodedImage) {
+                    return this.decode_image(encodedImage);
+                }
+                return null;
+            }
+
+            get_image_format() {
+                const image = this.get_image();
+                return image ? image.format : null;
+            }
+
+            get_data_rLOD(lod = 0) {
+                const image = this.get_image();
+                const ratio = Math.pow(10, lod + 1);
+                if (image.width / ratio === 0 || image.height / ratio === 0) {
+                    throw new Error(`Image size (${image.width}, ${image.height}) of LOD${lod} is smaller than 1`);
+                }
+                // Assuming 'sharp' for image resizing
+                return image.resize({ width: image.width / ratio, height: image.height / ratio });
+            }
+
+            get_data_rLOD0() {
+                return this.get_data_rLOD(0);
+            }
+
+            get_data_rLOD1() {
+                return this.get_data_rLOD(1);
+            }
+
+            get_data_rLOD2() {
+                return this.get_data_rLOD(2);
+            }
+        }
+
+        class LLMstore extends SingletonKeyValueStorage {
+            constructor() {
+                super();
+                this.js_backend();
+            }
+
+            storage() {
+                return this.client;
+            }
+
+            _get_all_object_names() {
+                return [
+                    'AbstractObj', 'CommonData', 'Author', 'AbstractContent', 'AbstractGroup',
+                    'ContentGroup', 'TextContent', 'EmbeddingContent', 'FileLinkContent',
+                    'BinaryFileContent', 'ImageContent'
+                ];
+            }
+
+            _get_all_object_classes() {
+                return [
+                    AbstractObj, CommonData, Author, AbstractContent, AbstractGroup,
+                    ContentGroup, TextContent, EmbeddingContent, FileLinkContent,
+                    BinaryFileContent, ImageContent
+                ];
+            }
+
+            _get_all_object_controller_classes() {
+                return [
+                    AbstractObjController, CommonDataController, AuthorController,
+                    AbstractContentController, AbstractGroupController, ContentGroupController,
+                    TextContentController, EmbeddingContentController, FileLinkContentController,
+                    BinaryFileContentController, ImageContentController
+                ];
+            }
+
+            get_class(id) {
+                const classType = id.split(':')[0];
+                const map = Object.fromEntries(this._get_all_object_names().map((name, i) => [name, this._get_all_object_classes()[i]]));
+                const res = map[classType];
+                if (!res) {
+                    throw new Error(`No such class of ${classType}`);
+                }
+                return res;
+            }
+
+            get_controller(id) {
+                const classType = id.split(':')[0];
+                const map = Object.fromEntries(this._get_all_object_names().map((name, i) => [name, this._get_all_object_controller_classes()[i]]));
+                const res = map[classType];
+                if (!res) {
+                    throw new Error(`No such controller of ${classType}`);
+                }
+                return new res(this, {id: id});  // Assuming controllers need a reference to the store and id
+            }
+
+            _store_obj(obj) {
+                const data = JSON.parse(
+                    JSON.stringify(obj,  function replacer(key, value) {return (key == 'controller') ? undefined : value;} )
+                );
+                this.set(obj.id, data);
+                return obj;
+            }
+
+            add_new_author(name, role, rank = [0], metadata = {}) {
+                const author = new Author({ name, role, rank, metadata });
+                this._store_obj(author);
+                author.controller = this.get_controller(author.id);
+                return author;
+            }
+
+            add_new_root_group(metadata = {}, rank = [0]) {
+                const group = new ContentGroup({ rank, metadata });
+                this._store_obj(group);
+                group.controller = this.get_controller(group.id);
+                return group;
+            }
+
+            _add_new_content_to_group(group, content, raw = null) {
+                group.childrenId.push(content.id);
+                this._store_obj(group);
+                this._store_obj(content);
+                if (raw !== null && !content.id.includes('ContentGroup')) {
+                    this._store_obj(new CommonData({ id: content.dataId(), raw }));
+                }
+                content.controller = this.get_controller(content.id);
+                return [group, content];
+            }
+
+            read_image(filepath) {                
+                throw new Error('This would require server-side JavaScript to read files, like Node.js')
+            }
+
+            b64encode(fileBytes) {
+                return Buffer.from(fileBytes).toString('base64');
+            }
+
+            encode_image(imageBytes) {
+                return this.b64encode(imageBytes);
+            }
+
+            add_new_group_to_group(group, metadata = {}, rank = [0]) {
+                const [parent, child] = this._add_new_content_to_group(group, new ContentGroup({ rank, metadata, parentId: group.id }));
+                return [parent, child];
+            }
+
+            add_new_text_to_group(group, authorId, text) {
+                const [parent, child] = this._add_new_content_to_group(group, new TextContent({ authorId, groupId: group.id }), text);
+                return [parent, child];
+            }
+
+            add_new_embedding_to_group(group, authorId, contentId, vec) {
+                const [parent, child] = this._add_new_content_to_group(group, new EmbeddingContent({ authorId, groupId: group.id, targetId: contentId }), JSON.stringify(vec));
+                return [parent, child];
+            }
+
+            add_new_image_to_group(group, authorId, filepath) {
+                const rawBytes = this.read_image(filepath);
+                const rawBase64 = this.encode_image(rawBytes);
+                const [parent, child] = this._add_new_content_to_group(group, new ImageContent({ authorId, groupId: group.id }), rawBase64);
+                return [parent, child];
+            }
+
+            // Regular expression based search, consider using database or similar techniques
+            find(id) {
+                const dataDict = this.get(id);
+                const obj = new (this.get_class(id))(dataDict);
+                obj.controller = this.get_controller(id);
+                return obj;
+            }
+
+            find_all(pattern = 'Author:*') {
+                const keys = this.keys(pattern);
+                const results = keys.map(key => this.find(key));
+                return results;
+            }
+
+            find_all_authors() {
+                return this.find_all('Author:*');
+            }
+
+            delete_obj(obj) {
+                this.delete(obj.id);
+                obj.controller = null;
+            }
+
+            update_obj(obj, updates) {
+                for (const [k, v] of Object.entries(updates)) {
+                    if (v !== null && obj.model_fields.includes(k)) {
+                        obj[k] = v;
+                        obj.updateTime = getCurrentDateTimeWithUTC();
+                    }
+                }
+                this._store_obj(obj);
+                return obj;
+            }
+        }
+        
+        {            
+            // Initialize the LLMstore for testing
+            const llmStore = new LLMstore();
+
+            // Test adding a new author
+            const testAuthor = llmStore.add_new_author('John Doe', 'Author', [5], {note: 'test metadata'});
+            console.log('Added Author:', testAuthor);
+
+            // Test retrieving an author
+            const retrievedAuthor = llmStore.find(testAuthor.id);
+            console.log('Retrieved Author:', retrievedAuthor);
+
+            // Testing adding and retrieving a group
+            const testGroup = llmStore.add_new_root_group({section: 'A'}, [1]);
+            console.log('Added Group:', testGroup);
+
+            const retrievedGroup = llmStore.find(testGroup.id);
+            console.log('Retrieved Group:', retrievedGroup);
+
+            console.log(llmStore.dumps());
+        }
+
+    </script>
+</body>
+</html>
