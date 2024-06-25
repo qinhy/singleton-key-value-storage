@@ -1,6 +1,7 @@
 
 import fnmatch
 import json
+import unittest
 from urllib.parse import urlparse
 
 def get_error(func):
@@ -26,7 +27,7 @@ class SingletonStorageController:
     def _delete_slaves(self, key: str):
         [s.delete(key) for s in self.model.slaves if hasattr(s, 'delete')]
 
-    def exists(self, key: str): print('not implement')
+    def exists(self, key: str) -> bool: print('not implement')
 
     def set(self, key: str, value: dict): print('not implement')
 
@@ -34,7 +35,7 @@ class SingletonStorageController:
 
     def delete(self, key: str): print('not implement')
 
-    def keys(self, pattern: str): print('not implement')
+    def keys(self, pattern: str='*') -> list[str]: print('not implement')
 
     def dump(self, json_path=None): print('not implement')
 
@@ -76,7 +77,7 @@ if firestore_back:
         def __init__(self, model: SingletonFirestoreStorage):
             self.model = model
 
-        def exists(self, key: str):
+        def exists(self, key: str) -> bool:
             doc = self.model.collection.document(key).get()
             return doc.exists
         
@@ -92,7 +93,7 @@ if firestore_back:
             self.model.collection.document(key).delete()
             self._delete_slaves(key)
 
-        def keys(self, pattern: str):
+        def keys(self, pattern: str='*') -> list[str]:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
             return fnmatch.filter(keys, pattern)
@@ -128,7 +129,7 @@ if redis_back:
         def __init__(self, model: SingletonRedisStorage):
             self.model = model
 
-        def exists(self, key: str):
+        def exists(self, key: str) -> bool:
             return self.model.client.exists(key)
 
         def set(self, key: str, value: dict):
@@ -136,15 +137,21 @@ if redis_back:
             self._set_slaves(key,value)
 
         def get(self, key: str) -> dict:
-            return json.loads(self.model.client.get(key))
+            res = self.model.client.get(key)
+            if res: res = json.loads(res)
+            return res
 
         def delete(self, key: str):
             self.model.client.delete(key)
             self._delete_slaves(key)
 
 
-        def keys(self, pattern: str = "*"):
-            return self.model.client.keys(pattern)
+        def keys(self, pattern: str='*') -> list[str]:            
+            try:
+                res = self.model.client.keys(pattern)
+            except Exception as e:
+                res = []
+            return res
 
         def dump(self, path="RedisStorage.json"):
             all_keys = self.model.client.keys()
@@ -173,22 +180,28 @@ if sqlite_back:
             cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                                
             cls._instance.client = None
             cls._instance.slaves = []
+            
+            cls._instance.query_queue = queue.Queue()
+            cls._instance.result_dict = {}
+            cls._instance.lock = threading.Lock()
+            cls._instance.worker_thread = threading.Thread(target=cls._instance._process_queries)
+            cls._instance.worker_thread.daemon = True
+            cls._instance.should_stop = threading.Event()  # Use an event to signal the thread to stop
+            cls._instance.worker_thread.start()
+            
+            query = "CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)"
+            query_id = cls._instance._execute_query(query)
+            result = cls._instance._pop_result(query_id)
 
         def __new__(cls):
             if cls._instance is None:
                 SingletonSqliteStorage._set_instance(cls)
             return cls._instance
 
-        def __init__(self):
-            self.client = sqlite3.connect(':memory:')
-            self.query_queue = queue.Queue()
-            self.result_dict = {}
-            self.lock = threading.Lock()
-            self.worker_thread = threading.Thread(target=self._process_queries)
-            self.worker_thread.daemon = True
-            self.should_stop = threading.Event()  # Use an event to signal the thread to stop
-            self.worker_thread.start()
-
+        def __init__(self, redis_URL=None):
+            self.slaves:list = self.slaves
+            self.client:sqlite3.Connection = self.client
+            
         def _process_queries(self):
             self.client = sqlite3.connect(':memory:')
 
@@ -203,39 +216,51 @@ if sqlite_back:
                 query, query_id = query_info['query'], query_info['id']
                 query,val = query
                 if 'dump_file' == query[:len('dump_file')]:
-                    disk_conn = sqlite3.connect(query.split()[1])
-                    self._clone(self.client,disk_conn)
-                    disk_conn.close()
+                    try:
+                        disk_conn = sqlite3.connect(query.split()[1])
+                        self._clone(self.client,disk_conn)
+                    except sqlite3.Error as e:
+                        self._store_result(query_id, query, f"SQLite error: {e}")
+                    finally:
+                        disk_conn.close()
+                        self.query_queue.task_done()
+                        self.client.commit()   
                 
-                if 'load_file' == query[:len('load_file')]:     
-                    disk_conn = sqlite3.connect(query.split()[1])
-                    self.client.close()
-                    self.client = sqlite3.connect(':memory:')
-                    self._clone(disk_conn,self.client)
-                    disk_conn.close()
+                elif 'load_file' == query[:len('load_file')]:     
+                    try:
+                        disk_conn = sqlite3.connect(query.split()[1])
+                        self.client.close()
+                        self.client = sqlite3.connect(':memory:')
+                        self._clone(disk_conn,self.client)
+                    except sqlite3.Error as e:
+                        self._store_result(query_id, query, f"SQLite error: {e}")
+                    finally:
+                        disk_conn.close()  
+                        self.query_queue.task_done()
+                        self.client.commit()                    
+                else:
+                    try:
+                        cursor = self.client.cursor()
+                        if val is None:
+                            cursor.execute(query)
+                        else:
+                            cursor.execute(query, val)
 
-                try:
-                    cursor = self.client.cursor()
-                    if val is None:
-                        cursor.execute(query)
-                    else:
-                        cursor.execute(query, val)
-
-                    if cursor.description is None:
-                        self._store_result(query_id, query, True)
-                        continue
-                    columns = [description[0] for description in cursor.description]
-                    result = cursor.fetchall()
-                    if len(columns) > 1:
-                        result = [dict(zip(columns, row)) for row in result]
-                    else:
-                        result = [str(row[0]) for row in result]
-                    self._store_result(query_id, query, result)
-                except sqlite3.Error as e:
-                    self._store_result(query_id, query, f"SQLite error: {e}")
-                finally:
-                    self.query_queue.task_done()
-                    self.client.commit()
+                        if cursor.description is None:
+                            self._store_result(query_id, query, True)
+                            continue
+                        columns = [description[0] for description in cursor.description]
+                        result = cursor.fetchall()
+                        if len(columns) > 1:
+                            result = [dict(zip(columns, row)) for row in result]
+                        else:
+                            result = [str(row[0]) for row in result]
+                        self._store_result(query_id, query, result)
+                    except sqlite3.Error as e:
+                        self._store_result(query_id, query, f"SQLite error: {e}")
+                    finally:
+                        self.query_queue.task_done()
+                        self.client.commit()
 
         def _store_result(self, query_id, query, result):
             with self.lock:
@@ -249,13 +274,6 @@ if sqlite_back:
             # print(query)
             b.executescript(query)
             b.commit()
-
-        # def dump_file(self, file_path, overwrite=True):
-        #     if os.path.isfile(file_path) and not overwrite:
-        #         raise ValueError(f'{file_path} is exists!')
-        #     if os.path.isfile(file_path) and overwrite:
-        #         os.remove(file_path)
-        #     self.execute_query(f'dump2file {file_path}')
 
         def _execute_query(self, query, val=None):
             if self.should_stop.is_set():
@@ -289,50 +307,50 @@ if sqlite_back:
     class SingletonSqliteStorageController(SingletonStorageController):
         def __init__(self, model: SingletonSqliteStorage):
             self.model = model
-            query = "CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)"
-            query_id = self.model._execute_query(query)
-            print(f"Create query submitted with ID: {query_id}")
-            result = self.model._pop_result(query_id)
-            print(f"Result for {query_id}: {result}")
 
         def _execute_query_with_res(self,query):
             query_id = self.model._execute_query(query)
-            print(f"Create query submitted with ID: {query_id}")
+            # print(f"Create query submitted with ID: {query_id}")
             result = self.model._pop_result(query_id)
-            print(f"Result for {query_id}: {result}")
+            # print(f"Result for {query_id}: {result}")
             return result
 
-        def exists(self, key: str):
-            query = f"SELECT EXISTS(SELECT 1 FROM KeyValueStore WHERE key = '{key}');"
+        def exists(self, key: str) -> bool:
+            query = f"SELECT EXISTS(SELECT * FROM KeyValueStore WHERE key = '{key}');"
             result = self._execute_query_with_res(query)
-            return result
+            return result[0]!='0'
 
         def set(self, key: str, value: dict):
-            query = f"INSERT INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
-            result = self._execute_query_with_res(query)
+            if self.exists(key):
+                query = f"UPDATE KeyValueStore SET value = json('{json.dumps(value)}') WHERE key = '{key}'"
+                result = self._execute_query_with_res(query)
+            else:
+                query = f"INSERT INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
+                result = self._execute_query_with_res(query)
 
         def get(self, key: str) -> dict:
             query = f"SELECT value FROM KeyValueStore WHERE key = '{key}'"
             result = self._execute_query_with_res(query)
-            if result is None:return {}
-            return result
+            if result is None:return None
+            if len(result)==0:return None
+            return json.loads(result[0])
         
         def delete(self, key: str):
             query = f"DELETE FROM KeyValueStore WHERE key = '{key}'"
             result = self._execute_query_with_res(query)
             self._delete_slaves(key)
 
-        def keys(self, pattern: str):
+        def keys(self, pattern: str='*') -> list[str]:
             pattern = pattern.replace('*', '%').replace('?', '_')  # Translate fnmatch pattern to SQL LIKE pattern
             query = f"SELECT key FROM KeyValueStore WHERE key LIKE '{pattern}'"
             result = self._execute_query_with_res(query)
             return result
 
-        # def dump(self,path="PythonDictStorage.json"):
-        #     with open(path, "w") as tf: json.dump(self.model.store, tf)
+        def dump(self,path="SqliteStorage.db"):
+            self._execute_query_with_res(f"dump_file {path}")
 
-        # def load(self,path="PythonDictStorage.json"):
-        #     with open(path, "r") as tf: self.model.store = json.load(tf)
+        def load(self,path="SqliteStorage.db"):
+            self._execute_query_with_res(f"load_file {path}")
 
 class SingletonPythonDictStorage:
     _instance = None
@@ -353,7 +371,7 @@ class SingletonPythonDictStorageController(SingletonStorageController):
     def __init__(self, model:SingletonPythonDictStorage):
         self.model = model
 
-    def exists(self, key: str):
+    def exists(self, key: str) -> bool:
         return key in self.model.store
 
     def set(self, key: str, value: dict):
@@ -361,14 +379,14 @@ class SingletonPythonDictStorageController(SingletonStorageController):
         self._set_slaves(key,value)
 
     def get(self, key: str) -> dict:
-        return self.model.store[key]
+        return self.model.store.get(key,None)
 
     def delete(self, key: str):
         if key in self.model.store:
             del self.model.store[key]
         self._delete_slaves(key)
 
-    def keys(self, pattern: str):
+    def keys(self, pattern: str='*') -> list[str]:
         return fnmatch.filter(self.model.store.keys(), pattern)
 
     def dump(self,path="PythonDictStorage.json"):
@@ -390,10 +408,14 @@ class SingletonKeyValueStorage(SingletonStorageController):
             self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage(google_project_id,google_firestore_collection))
 
     if redis_back:
-        def redis_backend(self,redis_URL=None):# 'redis://127.0.0.1:6379'
+        def redis_backend(self,redis_URL='redis://127.0.0.1:6379'):
             self.client = SingletonRedisStorageController(SingletonRedisStorage(redis_URL))
 
-    def exists(self, key: str): return self.client.exists(key)
+    if sqlite_back:
+        def sqlite_backend(self):
+            self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
+
+    def exists(self, key: str) -> bool: return self.client.exists(key)
 
     def set(self, key: str, value: dict): self.client.set( key, value)
 
@@ -401,8 +423,65 @@ class SingletonKeyValueStorage(SingletonStorageController):
 
     def delete(self, key: str): self.client.delete(key)
 
-    def keys(self, pattern: str): return self.client.keys(pattern)
+    def keys(self, pattern: str='*') -> list[str]: return self.client.keys(pattern)
 
     def dump(self,json_path): self.client.dump(json_path)
 
     def load(self,json_path): self.client.load(json_path)
+
+class Tests(unittest.TestCase):
+    def __init__(self,*args,**kwargs) -> None:
+        super().__init__(*args,**kwargs)
+        self.store = SingletonKeyValueStorage()
+
+    def test_all(self):
+        self.test_python()
+        self.test_redis()
+        self.test_sqlite()
+        # self.test_firestore()
+
+    def test_python(self):
+        self.store.python_backend()
+        self.test_all_cases()
+
+    def test_redis(self):
+        self.store.redis_backend()
+        self.test_all_cases()
+
+    def test_sqlite(self):
+        self.store.sqlite_backend()
+        self.test_all_cases()
+
+    def test_firestore(self):
+        self.store.firestore_backend()
+        self.test_all_cases()
+
+    def test_all_cases(self):
+        self.test_set_and_get()
+        self.test_exists()
+        self.test_delete()
+        self.test_keys()
+        self.test_get_nonexistent()
+
+    def test_set_and_get(self):
+        self.store.set('test1', {'data': 123})
+        self.assertEqual(self.store.get('test1'), {'data': 123}, "The retrieved value should match the set value.")
+
+    def test_exists(self):
+        self.store.set('test2', {'data': 456})
+        self.assertTrue(self.store.exists('test2'), "Key should exist after being set.")
+
+    def test_delete(self):
+        self.store.set('test3', {'data': 789})
+        self.store.delete('test3')
+        self.assertFalse(self.store.exists('test3'), "Key should not exist after being deleted.")
+
+    def test_keys(self):
+        self.store.set('alpha', {'info': 'first'})
+        self.store.set('abeta', {'info': 'second'})
+        self.store.set('gamma', {'info': 'third'})
+        expected_keys = ['alpha', 'abeta']
+        self.assertEqual(sorted(self.store.keys('a*')), sorted(expected_keys), "Should return the correct keys matching the pattern.")
+
+    def test_get_nonexistent(self):
+        self.assertEqual(self.store.get('nonexistent'), None, "Getting a non-existent key should return None.")
