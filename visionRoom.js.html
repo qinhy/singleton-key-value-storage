@@ -1,39 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>Singleton Storage Example</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons@7.0.0/primeicons.css">
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
+
 <body>
     <script>
         class SingletonStorageController {
-            add_slave(slave) {this.model.slaves.push(slave);}
+            add_slave(slave) { this.model.slaves.push(slave); }
 
             _set_slaves(key, value) {
                 this.model.slaves.forEach(slave => {
-                    if (slave.set) {slave.set(key, value);}
-                });}
+                    if (slave.set) { slave.set(key, value); }
+                });
+            }
 
             _delete_slaves(key) {
                 this.model.slaves.forEach(slave => {
-                    if (slave.delete) {slave.delete(key);}
-                });}
+                    if (slave.delete) { slave.delete(key); }
+                });
+            }
 
-            exists(key) {console.log(`[${this.constructor.name}]: not implemented`);}
+            exists(key) { console.log(`[${this.constructor.name}]: not implemented`); }
 
-            set(key, value) {console.log(`[${this.constructor.name}]: not implemented`);}
+            set(key, value) { console.log(`[${this.constructor.name}]: not implemented`); }
 
-            get(key) {console.log(`[${this.constructor.name}]: not implemented`);}
+            get(key) { console.log(`[${this.constructor.name}]: not implemented`); }
 
-            delete(key) {console.log(`[${this.constructor.name}]: not implemented`);}
+            delete(key) { console.log(`[${this.constructor.name}]: not implemented`); }
 
-            keys(pattern = '*') {console.log(`[${this.constructor.name}]: not implemented`);}
+            keys(pattern = '*') { console.log(`[${this.constructor.name}]: not implemented`); }
 
-            clean() {this.keys('*').forEach(k => this.delete(k));}
+            clean() { this.keys('*').forEach(k => this.delete(k)); }
 
-            dumps() {var res = {}; this.keys('*').forEach(k => res[k]=this.get(k));return JSON.stringify(res); }
+            dumps() { var res = {}; this.keys('*').forEach(k => res[k] = this.get(k)); return JSON.stringify(res); }
 
-            loads(jsonString = '{}') {console.log('not implemented');}
+            loads(jsonString = '{}') { console.log('not implemented'); }
         }
 
         class SingletonJavascriptDictStorage {
@@ -41,7 +47,8 @@
             static _meta = {};
 
             constructor() {
-                if (!SingletonJavascriptDictStorage._instance) {SingletonJavascriptDictStorage._instance = this;
+                if (!SingletonJavascriptDictStorage._instance) {
+                    SingletonJavascriptDictStorage._instance = this;
                     this.store = {};
                     this.slaves = [];
                 }
@@ -55,17 +62,17 @@
                 this.model = model;
             }
 
-            exists(key) {return key in this.model.store;}
+            exists(key) { return key in this.model.store; }
 
             set(key, value) {
                 this.model.store[key] = value;
                 this._set_slaves(key, value);
             }
 
-            get(key) {return this.model.store[key] || null;}
+            get(key) { return this.model.store[key] || null; }
 
             delete(key) {
-                if (key in this.model.store) {delete this.model.store[key];}
+                if (key in this.model.store) { delete this.model.store[key]; }
                 this._delete_slaves(key);
             }
 
@@ -76,10 +83,12 @@
         }
 
         class SingletonKeyValueStorage extends SingletonStorageController {
-            constructor() {super();
-                this.js_backend();}
+            constructor() {
+                super();
+                this.js_backend();
+            }
 
-            js_backend() {this.client = new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage());}
+            js_backend() { this.client = new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()); }
 
             exists(key) { return this.client.exists(key); }
             set(key, value) { this.client.set(key, value); }
@@ -90,7 +99,8 @@
             dump(jsonPath) { this.client.dump(jsonPath); }
             load(jsonPath) { this.client.load(jsonPath); }
             dumps() { return this.client.dumps(); }
-            loads(jsonStr) { this.client.loads(jsonStr); }}
+            loads(jsonStr) { this.client.loads(jsonStr); }
+        }
 
         // Tests for SingletonKeyValueStorage
         (async () => {
@@ -142,10 +152,10 @@
         }
 
         function generateUUID(prefix) {
-                return prefix+'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function() {
-                    return Math.floor(Math.random() * 16).toString(16);
-                });
-                }
+            return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
+                return Math.floor(Math.random() * 16).toString(16);
+            });
+        }
 
         class AbstractObj {
             constructor() {
@@ -612,12 +622,12 @@
                 if (!res) {
                     throw new Error(`No such controller of ${classType}`);
                 }
-                return new res(this, {id: id});  // Assuming controllers need a reference to the store and id
+                return new res(this, { id: id });  // Assuming controllers need a reference to the store and id
             }
 
             _store_obj(obj) {
                 const data = JSON.parse(
-                    JSON.stringify(obj,  function replacer(key, value) {return (key == 'controller') ? undefined : value;} )
+                    JSON.stringify(obj, function replacer(key, value) { return (key == 'controller') ? undefined : value; })
                 );
                 this.set(obj.id, data);
                 return obj;
@@ -648,7 +658,7 @@
                 return [group, content];
             }
 
-            read_image(filepath) {                
+            read_image(filepath) {
                 throw new Error('This would require server-side JavaScript to read files, like Node.js')
             }
 
@@ -716,29 +726,182 @@
                 return obj;
             }
         }
-        
-        {            
+
+        {
             // Initialize the LLMstore for testing
             const llmStore = new LLMstore();
 
             // Test adding a new author
-            const testAuthor = llmStore.add_new_author('John Doe', 'Author', [5], {note: 'test metadata'});
-            console.log('Added Author:', testAuthor);
+            const testAuthor = llmStore.add_new_author('John Doe', 'Author', [5], { note: 'test metadata' });
+            console.log('Added test Author:', testAuthor);
 
             // Test retrieving an author
             const retrievedAuthor = llmStore.find(testAuthor.id);
-            console.log('Retrieved Author:', retrievedAuthor);
+            console.log('Retrieved test Author:', retrievedAuthor);
 
             // Testing adding and retrieving a group
-            const testGroup = llmStore.add_new_root_group({section: 'A'}, [1]);
-            console.log('Added Group:', testGroup);
+            const testGroup = llmStore.add_new_root_group({ section: 'A' }, [1]);
+            console.log('Added test Group:', testGroup);
 
             const retrievedGroup = llmStore.find(testGroup.id);
-            console.log('Retrieved Group:', retrievedGroup);
+            console.log('Retrieved test Group:', retrievedGroup);
 
             console.log(llmStore.dumps());
         }
 
     </script>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/primevue@4.0.0-rc.2/umd/primevue.min.js"></script>
+    <script src="https://unpkg.com/@primevue/themes@4.0.0-rc.2/umd/lara.min.js"></script>
+
+
+    <div id="app">
+        <div class="card">
+            <p-tabs value="0">
+                <p-tablist>
+                    <p-tab value="0">Home</p-tab>
+                    <p-tab value="1">Config</p-tab>
+                    <p-tab value="2">Help</p-tab>
+                </p-tablist>
+                <p-tabpanels>
+                    <p-tabpanel value="0" >
+
+                        <p-inputtext v-model="text" placeholder="Type something..."></p-inputtext>
+                        <p-button label="Show Alert" @click="showAlert"></p-button>
+                        <p v-if="message">{{ message }}</p>
+                        <hr>
+
+                        <ul>
+                            <li v-for="msg in messages">
+                                <hr>
+                                <p v-if="darkmode" class="text-gray-300">{{ msg }}</p>
+                                <p v-else>{{ msg }}</p>
+                            </li>
+                        </ul>                        
+                        
+                    </p-tabpanel>
+                    <p-tabpanel value="1">
+                        
+                        <div class="card">
+                            <label for="switchdarkmode">Darkmode : </label>
+                            <p-toggleswitch inputId="switchdarkmode" v-model="darkmode" @click="schemeMode"></p-toggleswitch>
+                        </div>
+
+                        <div class="card">
+                            <label for="apikey">API Key : </label>
+                            <p-inputtext id="apikey" v-model="textconfigs.apikey.value" placeholder="Enter your API key"/>
+                        </div>
+                        <div class="card">
+                            <label for="sysp">System Prompt : </label>
+                            <p-inputtext id="sysp" v-model="textconfigs.sysp.value" placeholder="Enter system prompt"/>
+                        </div>
+                        <div class="card">
+                            <label for="modelname">Model Name : </label>
+                            <p-inputtext id="modelname" v-model="textconfigs.modelname.value" placeholder="Enter model name"/>
+                        </div>
+                    </p-tabpanel>
+                    <p-tabpanel value="2">
+                        <p class="m-0">
+                            coming soon
+                        </p>
+                    </p-tabpanel>
+                </p-tabpanels>
+            </p-tabs>
+        </div>
+        </script>
+    </div>
+
+
+    <script>
+        const { createApp, ref } = Vue;
+        const app = createApp({
+            setup() {
+                const darkmode = ref(false);
+                const text = ref('');
+
+                const textconfigs = {
+                    apikey:ref(''),                    
+                    sysp:ref('You are a helpful assistant.'),
+                    modelname:ref('gpt-3.5-turbo'),
+                }
+
+                const message = ref('');
+                const messages = ref([]);
+
+                const showAlert = () => {
+                    message.value = `Alert: ${text.value}`;
+                    messages.value.push(message.value)
+                };
+
+                const schemeMode = () => {
+                    const root = document.getElementsByTagName('html')[0];
+                    root.classList.toggle('app-dark');
+                }
+
+                openaichat = async () => {
+                    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json','Authorization': `Bearer ${textconfigs.apikey.value}`},
+                        body: JSON.stringify({model: textconfigs.modelname.value, stream: true,
+                            messages: [{ role: 'user', content: message.value }],})
+                        });
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done)break;
+                        const text = decoder.decode(value);
+                        const lines = text.split(/\n+/);
+                        for (const line of lines) {
+                            const json_text = line.replace(/^data:\s*/, '');
+                            if (json_text === '[DONE]')return;
+                            const data = JSON.parse(json_text);
+                            const content = data.choices[0].delta.content;
+                            if (content) {
+                                document.body.append(document.createTextNode(content));
+                            }
+                        }
+                    }
+                }
+                return { darkmode, textconfigs, text, message, messages, showAlert, schemeMode };
+            },
+        });
+
+        app.use(PrimeVue.Config, {
+            theme: {
+                preset: PrimeVue.Themes.Lara,
+                options: {
+                    prefix: 'p',
+                    darkModeSelector: '.app-dark',
+                    cssLayer: false,
+                }
+            }
+        });
+
+        app.directive('ripple', PrimeVue.Ripple);
+
+        app.component('p-datepicker', PrimeVue.DatePicker);
+        app.component('p-button', PrimeVue.Button);
+        app.component('p-inputtext', PrimeVue.InputText);
+        app.component('p-tabs', PrimeVue.Tabs);
+        app.component('p-tablist', PrimeVue.TabList);
+        app.component('p-tab', PrimeVue.Tab);
+        app.component('p-tabpanels', PrimeVue.TabPanels);
+        app.component('p-tabpanel', PrimeVue.TabPanel);
+        app.component('p-toast', PrimeVue.Toast);
+        app.component('p-panel', PrimeVue.Panel);
+        app.component('p-avatar', PrimeVue.Avatar);
+        app.component('p-toggleswitch', PrimeVue.ToggleSwitch);
+
+        app.component('p-accordion', PrimeVue.Accordion);
+        app.component('p-accordiontab', PrimeVue.AccordionTab);
+        app.component('p-accordionheader', PrimeVue.AccordionHeader);
+        app.component('p-accordioncontent', PrimeVue.AccordionContent);
+        app.component('p-accordionpanel', PrimeVue.AccordionPanel);
+        app.component('p-badge', PrimeVue.Badge);
+
+        app.mount('#app');
+    </script>
+
 </body>
+
 </html>
