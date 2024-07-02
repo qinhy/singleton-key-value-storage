@@ -18,6 +18,12 @@ class SingletonStorageController {
     clean() { this.keys('*').forEach(k => this.delete(k)); }
     dumps() { var res = {}; this.keys('*').forEach(k => res[k] = this.get(k)); return JSON.stringify(res); }
     loads(jsonString = '{}') {this.clean();Object.entries(JSON.parse(jsonString)).forEach(d => this.set(d[0], d[1]));}
+    
+    randuuid(prefix = ''){
+        return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
+            return Math.floor(Math.random() * 16).toString(16);
+        });
+    }
 }
 
 class SingletonJavascriptDictStorage {
