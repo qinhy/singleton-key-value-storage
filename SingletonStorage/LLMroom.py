@@ -37,7 +37,7 @@ class Speaker:
         rooms = self.author.metadata.get('groups','')
         if self.room.chatroom().id not in rooms:
             rooms += self.room.chatroom().id
-            self.author.controller.update_metadata('groups',rooms)
+            self.author._controller.update_metadata('groups',rooms)
         return self
     
     def new_group(self):
@@ -104,21 +104,21 @@ class ChatRoom:
         self.msgs = self.get_messages_in_group()
     
     def add_content_group_to_chatroom(self):
-        gc:ContentGroupController = self.chatroom().controller
+        gc:ContentGroupController = self.chatroom()._controller
         child = gc.add_new_child_group()
         self._on_message_change()
         return child.id
     
     def get_messages_in_group(self,id=None)->List[AbstractContent]:
         if id is None:
-            gc:ContentGroupController = self.chatroom().controller
+            gc:ContentGroupController = self.chatroom()._controller
             return gc.get_children_content()
         else:
-            gc:ContentGroupController = self.store.find(id).controller
+            gc:ContentGroupController = self.store.find(id)._controller
             return gc.get_children_content()
     
     def get_messages_recursive_in_chatroom(self):
-        gc:ContentGroupController = self.chatroom().controller
+        gc:ContentGroupController = self.chatroom()._controller
         return gc.get_children_content_recursive()
     
     def traverse_nested_messages(self, nested_content_list=None):
@@ -143,7 +143,7 @@ class ChatRoom:
 
     def get_mentions(self, message:AbstractContent, speaker_ids=[]):
         msg_auther = self.speakers[message.author_id].name
-        mentions = re.findall(r'@([a-zA-Z0-9]+)', message.controller.get_data_raw())
+        mentions = re.findall(r'@([a-zA-Z0-9]+)', message._controller.get_data_raw())
         targets = []
         
         for mention in mentions:
@@ -171,9 +171,9 @@ class ChatRoom:
 
         def add_content(obj:ContentGroup,type=type):
             if 'Text' in type:
-                return obj.controller.add_new_text_content
+                return obj._controller.add_new_text_content
             elif 'Image' in type:
-                return obj.controller.add_new_image_content
+                return obj._controller.add_new_image_content
             else:
                 raise ValueError(f'Unknown type of {type}')
 
@@ -188,7 +188,7 @@ class ChatRoom:
             self._on_message_change()
 
         elif group_id is None and new_group:            
-            controller:ContentGroupController = self.chatroom().controller
+            controller:ContentGroupController = self.chatroom()._controller
             group = controller.add_new_child_group()
             tc = add_content(group)
         return tc(speaker.author.id, msg)
@@ -200,7 +200,7 @@ class ChatRoom:
             assert r is not None, f'can not prepare string reply in speak_stream! {r}'
             if i==0:
                 content = self._prepare_speak(speaker_id,group_id,new_group)
-            content.controller.append_data_raw(r)
+            content._controller.append_data_raw(r)
             msg += r
         callback()
         self.notify_new_message(content, self.speakers.keys())
@@ -222,7 +222,7 @@ class ChatRoom:
     def msgsDict(self,refresh=False,msgs=None,todict=None):        
         if todict is None:
             def todict(v:AbstractContent):
-                c:AbstractContentController = v.controller
+                c:AbstractContentController = v._controller
                 n = v.__class__.__name__
                 if 'Text' in n:
                     return {"type": "text","text": c.get_data_raw()}
@@ -239,12 +239,12 @@ class ChatRoom:
         res = []
         for v in msgs:
             if 'ContentGroup' not in v.__class__.__name__:
-                mc:AbstractContentController = v.controller
+                mc:AbstractContentController = v._controller
                 name = mc.get_author().name
                 role = mc.get_author().role
                 if 'EmbeddingContent' in v.__class__.__name__:
-                    ec:EmbeddingContentController = v.controller
-                    mc:AbstractContentController = ec.get_target().controller
+                    ec:EmbeddingContentController = v._controller
+                    mc:AbstractContentController = ec.get_target()._controller
                     t = mc.get_data_raw()[:10]
                     # print(f'{intents}{self.speakers[m.model.author_id].name}: "{t}"=>{m.load().get_data_raw()[:5]}...')
                 elif 'TextContent' in v.__class__.__name__:
@@ -269,16 +269,16 @@ class ChatRoom:
             print(f'{intents}-------------------------------------------------------------')
             if 'ContentGroup' not in v.__class__.__name__:
                 if 'EmbeddingContent' in v.__class__.__name__:
-                    econtroller:EmbeddingContentController = v.controller
-                    tcontroller:AbstractContentController = econtroller.get_target().controller
+                    econtroller:EmbeddingContentController = v._controller
+                    tcontroller:AbstractContentController = econtroller.get_target()._controller
                     t = tcontroller.get_data_raw()[:10]
                     print(f'{intents}{self.speakers[econtroller.get_target().author_id].name}: "{t}"=>{econtroller.get_data_raw()[:5]}...')
                 elif 'ImageContent' in v.__class__.__name__:
-                    vcontroller:ImageContentController = v.controller
+                    vcontroller:ImageContentController = v._controller
                     im = vcontroller.get_image()
                     print(f'{intents}{self.speakers[v.author_id].name}: Image{im.size} of {im.info}')
                 else:
-                    vcontroller:AbstractContentController = v.controller
+                    vcontroller:AbstractContentController = v._controller
                     print(f'{intents}{self.speakers[v.author_id].name}: {vcontroller.get_data_raw()}')
             else:
                 self.printMsgs(False,intent+4,self.get_messages_in_group(v.id))

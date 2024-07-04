@@ -37,7 +37,9 @@ class AbstractObjController:
         return self
 
     def delete(self):
-        self._store.delete_obj(self.model)
+        # self._store.delete_obj(self.model)    
+        self._store.delete(self.model.id)
+        self.model._controller = None
 
     def update_metadata(self, key, value):
         updated_metadata = {**self.model.metadata, key: value}
@@ -63,8 +65,10 @@ class AbstractContentController(AbstractObjController):
         return f"CommonData:{self.model.id}"
 
     def delete(self):
-        self.get_data().controller.delete()        
-        self._store.delete_obj(self.model)
+        self.get_data()._controller.delete()        
+        # self._store.delete_obj(self.model)        
+        self._store.delete(self.model.id)
+        self.model._controller = None
 
     def get_author(self):
         author:Author = self._store.find(self.model.author_id)
@@ -82,12 +86,12 @@ class AbstractContentController(AbstractObjController):
         return self.get_data().raw    
 
     def update_data_raw(self, msg: str):
-        self.get_data().controller.update(raw = msg)
+        self.get_data()._controller.update(raw = msg)
         return self
 
     def append_data_raw(self, msg: str):
         data = self.get_data()
-        data.controller.update(raw = data.raw + msg)
+        data._controller.update(raw = data.raw + msg)
         return self
     
 class AbstractGroupController(AbstractObjController):
@@ -102,13 +106,13 @@ class AbstractGroupController(AbstractObjController):
             content:AbstractObj = self._store.find(child_id)
             yield content, depth
             if child_id.startswith('ContentGroup'):
-                group:AbstractGroupController = content.controller
+                group:AbstractGroupController = content._controller
                 for cc, d in group.yield_children_content_recursive(depth + 1):
                     yield cc, d
 
     def delete_recursive_from_keyValue_storage(self):
         for c, d in self.yield_children_content_recursive():
-            c.controller.delete()
+            c._controller.delete()
         self.delete()
 
     def get_children_content(self):
@@ -159,11 +163,11 @@ class ContentGroupController(AbstractGroupController):
     def remove_child(self, child_id:str):
         remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
         for content in self.get_children_content():
-            if content.controller.model.id == child_id:
+            if content._controller.model.id == child_id:
                 if child_id.startswith('ContentGroup'):
-                    group:ContentGroupController = content.controller
+                    group:ContentGroupController = content._controller
                     group.delete_recursive_from_keyValue_storage()
-                content.controller.delete()
+                content._controller.delete()
                 break
         self.update(children_id = remaining_ids)
         return self
@@ -268,6 +272,7 @@ class ImageContentController(BinaryFileContentController):
     def get_data_rLOD2(self):
         return self.get_data_rLOD(lod=2)
     
+# class Model4LLM:
 class AbstractObj(BaseModel):
     id: str
     rank: list = [0]
@@ -275,23 +280,39 @@ class AbstractObj(BaseModel):
     update_time: datetime = Field(default_factory=get_current_datetime_with_utc)
     status: str = ""
     metadata: dict = {}
-    controller: AbstractObjController = None
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)    
+    _controller: AbstractObjController = None
+
+    def get_controller(self)->AbstractObjController: return self._controller
+    def init_controller(self,store)->AbstractObjController:
+        self._controller = AbstractObjController(store,self)
 class CommonData(AbstractObj):
     raw: str = ''
     rLOD0: str = ''
     rLOD1: str = ''
     rLOD2: str = ''
-    controller: CommonDataController = None
+    _controller: CommonDataController = None
+    
+    def get_controller(self)->CommonDataController: return self._controller
+    def init_controller(self,store)->CommonDataController:
+        self._controller = CommonDataController(store,self)
 class Author(AbstractObj):
     id: str = Field(default_factory=lambda :f"Author:{uuid4()}")
     name: str = ''
     role: str = ''
-    controller: AuthorController = None
+    _controller: AuthorController = None
+    
+    def get_controller(self)->AuthorController: return self._controller
+    def init_controller(self,store)->AuthorController:
+        self._controller = AuthorController(store,self)
 class AbstractContent(AbstractObj):
     author_id: str=''
     group_id: str=''
-    controller: AbstractContentController = None
+    _controller: AbstractContentController = None
+    
+    def get_controller(self)->AbstractContentController: return self._controller
+    def init_controller(self,store)->AbstractContentController:
+        self._controller = AbstractContentController(store,self)
 
     def data_id(self):
         return f"CommonData:{self.id}"
@@ -299,28 +320,56 @@ class AbstractGroup(AbstractObj):
     author_id: str=''
     parent_id: str = ''
     children_id: List[str] = []
-    controller: AbstractGroupController = None
+    _controller: AbstractGroupController = None
+    
+    def get_controller(self)->AbstractGroupController: return self._controller
+    def init_controller(self,store)->AbstractGroupController:
+        self._controller = AbstractGroupController(store,self)
 class ContentGroup(AbstractGroup):
     id: str = Field(default_factory=lambda :f"ContentGroup:{uuid4()}")
-    controller: ContentGroupController = None
+    _controller: ContentGroupController = None
+    
+    def get_controller(self)->ContentGroupController: return self._controller
+    def init_controller(self,store)->ContentGroupController:
+        self._controller = ContentGroupController(store,self)
 class TextContent(AbstractContent):
     id: str = Field(default_factory=lambda :f"TextContent:{uuid4()}")
-    controller: TextContentController = None
+    _controller: TextContentController = None
+    
+    def get_controller(self)->TextContentController: return self._controller
+    def init_controller(self,store)->TextContentController:
+        self._controller = TextContentController(store,self)
 
 class EmbeddingContent(AbstractContent):
     id: str = Field(default_factory=lambda :f"EmbeddingContent:{uuid4()}")
-    controller: EmbeddingContentController = None
+    _controller: EmbeddingContentController = None
+    
+    def get_controller(self)->EmbeddingContentController: return self._controller
+    def init_controller(self,store)->EmbeddingContentController:
+        self._controller = EmbeddingContentController(store,self)
     target_id: str
 class FileLinkContent(AbstractContent):
     id: str = Field(default_factory=lambda :f"FileLinkContent:{uuid4()}")
-    controller: FileLinkContentController = None
+    _controller: FileLinkContentController = None
+    
+    def get_controller(self)->FileLinkContentController: return self._controller
+    def init_controller(self,store)->FileLinkContentController:
+        self._controller = FileLinkContentController(store,self)
 class BinaryFileContent(AbstractContent):
     id: str = Field(default_factory=lambda :f"BinaryFileContent:{uuid4()}")
-    controller: BinaryFileContentController = None
+    _controller: BinaryFileContentController = None
+    
+    def get_controller(self)->BinaryFileContentController: return self._controller
+    def init_controller(self,store)->BinaryFileContentController:
+        self._controller = BinaryFileContentController(store,self)
         
 class ImageContent(BinaryFileContent):
     id: str = Field(default_factory=lambda :f"ImageContent:{uuid4()}")
-    controller: ImageContentController = None
+    _controller: ImageContentController = None
+    
+    def get_controller(self)->ImageContentController: return self._controller
+    def init_controller(self,store)->ImageContentController:
+        self._controller = ImageContentController(store,self)
 
 class LLMstore(SingletonKeyValueStorage):
     
@@ -330,71 +379,35 @@ class LLMstore(SingletonKeyValueStorage):
     def _client(self):
         return self.client
     
-    def _get_all_object_names(self):
-        return ['AbstractObj',
-                'CommonData',
-                'Author',
-                'AbstractContent',
-                'AbstractGroup',
-                'ContentGroup',
-                'TextContent',
-                'EmbeddingContent',
-                'FileLinkContent',
-                'BinaryFileContent',
-                'ImageContent',]
-    
-    def _get_all_object_classes(self):
-        return [AbstractObj,
-                CommonData,
-                Author,
-                AbstractContent,
-                AbstractGroup,
-                ContentGroup,
-                TextContent,
-                EmbeddingContent,
-                FileLinkContent,
-                BinaryFileContent,
-                ImageContent,]    
-    
-    def _get_all_object_controller_classes(self):
-        return [AbstractObjController,
-                CommonDataController,
-                AuthorController,
-                AbstractContentController,
-                AbstractGroupController,
-                ContentGroupController,
-                TextContentController,
-                EmbeddingContentController,
-                FileLinkContentController,
-                BinaryFileContentController,
-                ImageContentController,]
-    
     def get_class(self, id: str):
         class_type = id.split(':')[0]
-        res = {a:b for a,b in zip(self._get_all_object_names(),self._get_all_object_classes())}.get(class_type, None)
+        res = {c.__name__:c for c in [AbstractObj,
+                                    CommonData,
+                                    Author,
+                                    AbstractContent,
+                                    AbstractGroup,
+                                    ContentGroup,
+                                    TextContent,
+                                    EmbeddingContent,
+                                    FileLinkContent,
+                                    BinaryFileContent,
+                                    ImageContent,]}.get(class_type, None)
         if res is None:
             raise ValueError(f'No such class of {class_type}')
         return res
-    
-    def get_controller(self, id: str):
-        class_type = id.split(':')[0]
-        res = {a:b for a,b in zip(self._get_all_object_names(),self._get_all_object_controller_classes())}.get(class_type, None)
-        if res is None:
-            raise ValueError(f'No such controller of {class_type}')
-        return res
-   
+       
     def _store_obj(self, obj:AbstractObj):
-        self.set(obj.id,json.loads(obj.model_dump_json(exclude=['controller'])))
+        self.set(obj.id,json.loads(obj.model_dump_json()))
         return obj
         
     def add_new_author(self,name, role, rank:list=[0], metadata={}) -> Author:
         auther = self._store_obj(Author(name=name, role=role, rank=rank, metadata=metadata))
-        auther.controller = self.get_controller(auther.id)(self,auther)
+        auther.init_controller(self,auther)
         return auther
     
     def add_new_root_group(self,metadata={},rank=[0]) -> ContentGroup:
         group = self._store_obj( ContentGroup(rank=rank, metadata=metadata) )         
-        group.controller = self.get_controller(group.id)(self,group)
+        group.init_controller(self,group)
         return group
     
     def _add_new_content_to_group(self,group:ContentGroup,content:AbstractContent,raw:str=None):
@@ -405,8 +418,7 @@ class LLMstore(SingletonKeyValueStorage):
             self._store_obj(CommonData(id=content.data_id(), raw=raw))
         else:
             self._store_obj(content)
-            
-        content.controller = self.get_controller(content.id)(self,content)
+        content.init_controller(self)
         return group,content    
 
     def read_image(self, filepath):
@@ -448,7 +460,7 @@ class LLMstore(SingletonKeyValueStorage):
     def find(self,id:str) -> AbstractObj:
         data_dict = self.get(id)
         obj:AbstractObj = self.get_class(id)(**data_dict)
-        obj.controller = self.get_controller(id)(self,obj)
+        obj.init_controller(self)
         return obj
     
     def find_all(self,id:str=f'Author:*'):
@@ -462,15 +474,3 @@ class LLMstore(SingletonKeyValueStorage):
     def find_all_authors(self):
         results:list[Author] = self.find_all('Author:*')
         return results
-
-    def delete_obj(self, obj:AbstractObj):
-        self.delete(obj.id)
-        obj.controller = None
-    
-    def update_obj(self, obj:AbstractObj, **kwargs) -> AbstractObj:
-        for k,v in kwargs.items():
-            if v is not None and k in obj.model_fields:
-                obj.__dict__[k] = v
-                obj.update_time = get_current_datetime_with_utc()        
-        self._store_obj(obj)
-        return obj

@@ -1,6 +1,6 @@
 
 from SingletonStorage.LLMroom import ChatRoom
-from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, ContentGroupController, EmbeddingContentController, ImageContentController, TextContent
+from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, ContentGroupController, EmbeddingContentController, ImageContent, ImageContentController, TextContent
 
 import threading
 from typing import List
@@ -53,13 +53,13 @@ try:
         def roomdelmsg(msgid,cr:ChatRoom=cr):
             try:
                 if str(msgid).isdecimal() and int(msgid)>0:
-                    for m in cr.chatroom().controller.get_children_content()[-int(msgid):]:
-                        cr.chatroom().controller.remove_child(m.id)
+                    for m in cr.chatroom().get_controller().get_children_content()[-int(msgid):]:
+                        cr.chatroom().get_controller().remove_child(m.id)
                     cr.store.dump(json)
                     return True,chat(None,'')
                 
                 for msgid in msgid.split('\n'):
-                    cr.chatroom().controller.remove_child(msgid)
+                    cr.chatroom().get_controller().remove_child(msgid)
                 cr.store.dump(json)
                 
                 return True,chat(None,'')
@@ -69,11 +69,10 @@ try:
         def clonemsg(msgid,cr:ChatRoom=cr):
             try:
                 for msgid in msgid.split('\n'):
-                    gc:ContentGroupController = cr.chatroom().controller
+                    gc:ContentGroupController = cr.chatroom().get_controller()
                     c = gc.get_child_content(msgid)
                     if type(c) is TextContent:
-                        text = c.controller.get_data_raw()
-                        return chat(c.controller.get_author().id,c.controller.get_data_raw())
+                        return chat(c.get_controller().get_author().id,c.get_controller().get_data_raw())
             except Exception as e:
                 return f'{e}'
             
@@ -98,27 +97,25 @@ try:
                     for i,v in enumerate(msgs):
                         if 'ContentGroup' not in v.__class__.__name__:
                             if 'EmbeddingContent' in v.__class__.__name__:
-                                econtroller:EmbeddingContentController = v.controller
-                                tcontroller:AbstractContentController = econtroller.get_target().controller
-                                t = tcontroller.get_data_raw()[:10]
+                                v:ImageContent = v
+                                econtroller:EmbeddingContentController = v.get_controller()
+                                t = econtroller.get_target().get_controller().get_data_raw()[:10]
 
                                 name = cr.speakers[econtroller.get_target().author_id].name
                                 msg = f'"{t}"=>{econtroller.get_data_raw()[:5]}...'
 
                             elif 'ImageContent' in v.__class__.__name__:
-                                vcontroller:ImageContentController = v.controller
-                                im = vcontroller.get_image()
+                                v:ImageContent = v
+                                im = v.get_controller().get_image()
                                 imid = v.id.split(':')[1]
-                                b64 = vcontroller.get_data_raw()
-                                im = vcontroller.get_image()
+                                b64 = v.get_controller().get_data_raw()
+                                im = v.get_controller().get_image()
                                 
                                 name = cr.speakers[v.author_id].name
                                 msg = f'![{imid}](data:image/{im.format};base64,{b64})'
-                            else:
-                                vcontroller:AbstractContentController = v.controller
-                                
+                            else:                                
                                 name = cr.speakers[v.author_id].name
-                                msg = vcontroller.get_data_raw().replace("\n","\n>\n>")
+                                msg = v.get_controller().get_data_raw().replace("\n","\n>\n>")
 
                             m = f'\n\n##### {name}:\n>{msg}\n>\n>_{v.create_time} {v.id}_'
                             if depth>0:
@@ -136,7 +133,7 @@ try:
 
         def read_json(file):
             cr.store.load(file)
-            return cr.chatroom().controller.prints()
+            return cr.chatroom().get_controller().prints()
         
         with gr.Blocks() as demo:
             with gr.Tab("Chat"):
