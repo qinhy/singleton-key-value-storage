@@ -124,10 +124,12 @@ class AbstractGroupController(AbstractObjController):
         return res
 
     def prints(self):
-        print('########################################################')
+        res = '########################################################\n'
         for content, depth in self.yield_children_content_recursive():
-            print(f"{'    ' * depth}{content.id}")
-        print('########################################################')
+            res += f"{'    ' * depth}{content.id}\n"
+        res += '########################################################\n'
+        print(res)
+        return res
 
 class ContentGroupController(AbstractGroupController):
     def __init__(self, store, model):

@@ -135,7 +135,8 @@ try:
                 return f'{e}'
 
         def read_json(file):
-            return 'not implement'
+            cr.store.load(file)
+            return cr.chatroom().controller.prints()
         
         with gr.Blocks() as demo:
             with gr.Tab("Chat"):
