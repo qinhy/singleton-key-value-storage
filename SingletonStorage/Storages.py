@@ -17,15 +17,20 @@ redis_back = get_error(lambda:__import__('redis')) is None
 sqlite_back = True
 
 class SingletonStorageController:
+    def __init__(self, model):
+        self.model:object = model
+
+    def slaves(self) -> list:
+        return self.model.slaves
 
     def add_slave(self, slave):
-        self.model.slaves.append(slave)
+        self.slaves().append(slave)
         
     def _set_slaves(self, key: str, value: dict):
-        [s.set(key, value) for s in self.model.slaves if hasattr(s, 'set')]
+        [s.set(key, value) for s in self.slaves() if hasattr(s, 'set')]
     
     def _delete_slaves(self, key: str):
-        [s.delete(key) for s in self.model.slaves if hasattr(s, 'delete')]
+        [s.delete(key) for s in self.slaves() if hasattr(s, 'delete')]
 
     def exists(self, key: str) -> bool: print(f'[{self.__class__.__name__}]: not implement')
 
@@ -61,6 +66,7 @@ if firestore_back:
             cls._instance.client = firestore.Client(project=google_project_id)
             cls._instance.collection = cls._instance.client.collection(google_firestore_collection)
             cls._instance.slaves = []
+
             cls._meta['google_project_id']=google_project_id
             cls._meta['google_firestore_collection']=google_firestore_collection
         
@@ -83,7 +89,7 @@ if firestore_back:
             self.collection:firestore.CollectionReference = self.collection
     class SingletonFirestoreStorageController(SingletonStorageController):
         def __init__(self, model: SingletonFirestoreStorage):
-            self.model = model
+            self.model:SingletonFirestoreStorage = model
 
         def exists(self, key: str) -> bool:
             doc = self.model.collection.document(key).get()
@@ -135,7 +141,7 @@ if redis_back:
 
     class SingletonRedisStorageController(SingletonStorageController):
         def __init__(self, model: SingletonRedisStorage):
-            self.model = model
+            self.model:SingletonRedisStorage = model
 
         def exists(self, key: str) -> bool:
             return self.model.client.exists(key)
@@ -265,7 +271,7 @@ if sqlite_back:
                 # if "INSERT" or "DELETE" or "UPDATE":
                 #     self.execute_query_toKafka(query)
         
-        def _clone(self,a,b):
+        def _clone(self,a:sqlite3.Connection,b:sqlite3.Connection):
             query = "".join(line for line in a.iterdump())
             # print(query)
             b.executescript(query)
@@ -302,7 +308,7 @@ if sqlite_back:
 
     class SingletonSqliteStorageController(SingletonStorageController):
         def __init__(self, model: SingletonSqliteStorage):
-            self.model = model
+            self.model:SingletonSqliteStorage = model
 
         def _execute_query_with_res(self,query):
             query_id = self.model._execute_query(query)
@@ -362,7 +368,7 @@ class SingletonPythonDictStorage:
 
 class SingletonPythonDictStorageController(SingletonStorageController):
     def __init__(self, model:SingletonPythonDictStorage):
-        self.model = model
+        self.model:SingletonPythonDictStorage = model
 
     def exists(self, key: str) -> bool:
         return key in self.model.store
