@@ -225,7 +225,7 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
             const transaction = db.transaction([SingletonIndexedDBStorage.storeName], 'readwrite');
             const objectStore = transaction.objectStore(SingletonIndexedDBStorage.storeName);
             const request = objectStore.openCursor();
-    
+
             return new Promise((resolve, reject) => {
                 request.onsuccess = (event) => {
                     const cursor = event.target.result;
@@ -326,47 +326,47 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         // Test 1: Set and Get
         storage.set('key1', { data: 'value1' });
         const value1 = storage.get('key1');
-        if(value1.constructor.name=='Promise'){
-            value1.then(d=>
+        if (value1.constructor.name == 'Promise') {
+            value1.then(d =>
                 console.assert(JSON.stringify(d) === JSON.stringify({ data: 'value1' }), 'Test 1 Failed: Set or Get does not work correctly')
             );
         }
-        else{
+        else {
             console.assert(JSON.stringify(value1) === JSON.stringify({ data: 'value1' }), 'Test 1 Failed: Set or Get does not work correctly');
         }
 
         // Test 2: Exists
         const exists1 = storage.exists('key1');
         const exists2 = storage.exists('key2');
-        
-        if(exists1.constructor.name=='Promise'){
-            exists1.then(d=>
+
+        if (exists1.constructor.name == 'Promise') {
+            exists1.then(d =>
                 console.assert(d === true, 'Test 2 Failed: Exists does not return true for existing key')
             );
         }
-        else{
+        else {
             console.assert(exists1 === true, 'Test 2 Failed: Exists does not return true for existing key');
-        }        
-        
-        if(exists2.constructor.name=='Promise'){
-            exists2.then(d=>
+        }
+
+        if (exists2.constructor.name == 'Promise') {
+            exists2.then(d =>
                 console.assert(d === false, 'Test 2 Failed: Exists does not return false for non-existing key')
             );
         }
-        else{
+        else {
             console.assert(exists2 === false, 'Test 2 Failed: Exists does not return false for non-existing key');
         }
 
         // Test 3: Delete
         storage.delete('key1');
-        const valueAfterDelete = storage.get('key1');        
-        
-        if(valueAfterDelete && valueAfterDelete.constructor.name=='Promise'){
-            valueAfterDelete.then(d=>
+        const valueAfterDelete = storage.get('key1');
+
+        if (valueAfterDelete && valueAfterDelete.constructor.name == 'Promise') {
+            valueAfterDelete.then(d =>
                 console.assert(d === null, 'Test 3 Failed: Delete does not remove the key properly')
             );
         }
-        else{
+        else {
             console.assert(valueAfterDelete === null, 'Test 3 Failed: Delete does not remove the key properly');
         }
 
@@ -375,59 +375,59 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         storage.set('test2', { data: '456' });
         storage.set('something', { data: '789' });
         const keys = storage.keys('test*');
-        
-        if(keys && keys.constructor.name=='Promise'){
-            keys.then(d=>
+
+        if (keys && keys.constructor.name == 'Promise') {
+            keys.then(d =>
                 console.assert(d.includes('test1') && d.includes('test2') && d.length === 2, 'Test 4 Failed: Keys does not filter correctly')
             );
         }
-        else{
+        else {
             console.assert(keys.includes('test1') && keys.includes('test2') && keys.length === 2, 'Test 4 Failed: Keys does not filter correctly');
         }
 
         // Test 5: Clean
         storage.clean();
         const keysAfterClean = storage.keys('*');
-        if(keysAfterClean && keysAfterClean.constructor.name=='Promise'){
-            keysAfterClean.then(d=>
+        if (keysAfterClean && keysAfterClean.constructor.name == 'Promise') {
+            keysAfterClean.then(d =>
                 console.assert(d.length === 0, 'Test 5 Failed: Clean does not clear all keys')
             );
         }
-        else{
+        else {
             console.assert(keysAfterClean.length === 0, 'Test 5 Failed: Clean does not clear all keys');
         }
 
         // Test 6: dumps and loads
-        if(keysAfterClean.constructor.name!='Promise'){
+        if (keysAfterClean.constructor.name != 'Promise') {
             // Adding some test data
             storage.set('key1', 'value1');
             storage.set('key2', 'value2');
-            storage.set('key3', 'value3');              
+            storage.set('key3', 'value3');
             // Dumping the data
             const jsonString = storage.dumps();
             storage.clean();
             storage.loads(jsonString)
             console.assert(storage.dumps() === jsonString, 'Test 6 Failed: dumps data != loads data');
         }
-        else{
+        else {
             // Adding some test data
-            storage.set('key1', 'value1').then(d=>{
-                storage.set('key2', 'value2').then(d=>{            
-                    storage.set('key3', 'value3').then(d=>{      
+            storage.set('key1', 'value1').then(d => {
+                storage.set('key2', 'value2').then(d => {
+                    storage.set('key3', 'value3').then(d => {
                         // console.log('Initial data set.');                  
                         // Dumping the data
-                        storage.dumps().then(jsonString=>{
+                        storage.dumps().then(jsonString => {
                             // console.log('Data dumped:', jsonString);
-                            storage.clean().then(d=>{
-                                storage.loads(jsonString).then(d=>{
-                                    storage.dumps().then(verifiedJsonString=>{                                        
+                            storage.clean().then(d => {
+                                storage.loads(jsonString).then(d => {
+                                    storage.dumps().then(verifiedJsonString => {
                                         console.assert(verifiedJsonString === jsonString, 'Test 6 Failed: dumps data != loads data');
                                         storage.clean();
                                     });
                                 });
                             });
                         });
-                    });                    
+                    });
                 });
             });
         }
