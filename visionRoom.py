@@ -4,7 +4,7 @@ import requests
 
 from SingletonStorage.LLMroom import ChatRoom, Speaker
 from SingletonStorage.LLMroomGradio import Configs, build_gui
-from SingletonStorage.LLMstore import AbstractContent, LLMstore
+from SingletonStorage.LLMstore import Model4LLM, LLMstore
 
 sss = LLMstore()
 try:
@@ -57,14 +57,14 @@ def openai_request(url="https://api.openai.com/v1/chat/completions",data=r"{}",
     return response
 
 def openai_msg():
-    msgd = cr.msgsDict(True,todict = lambda c:c._controller.get_data_raw())
+    msgd = cr.msgsDict(True,todict = lambda c:c.get_controller().get_data_raw())
     def mergelist(l):
         name,role = l[0]['name'],l[0]['role']        
         return dict(name=name,role=role,content=[c['content'] for c in l])
     messages = [(d if type(d) is not list else mergelist(d)) for d in msgd]
     return messages
 
-def pygpt(speaker:Speaker, msg:AbstractContent):
+def pygpt(speaker:Speaker, msg:Model4LLM.AbstractContent):
     is_stream = any([i == stream.value.lower() for i in ['y','yes','true']])
     data = {"model": model.value, "stream":is_stream,
             "messages": [{"role":"system",

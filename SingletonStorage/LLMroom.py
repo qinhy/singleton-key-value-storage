@@ -1,12 +1,12 @@
 
 
 import threading
-from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, Author, ContentGroup, ContentGroupController, EmbeddingContentController, ImageContentController, LLMstore
+from SingletonStorage.LLMstore import Model4LLM, LLMstore
 
 import re
 from typing import List, Dict
 class Speaker:
-    def __init__(self,author:Author) -> None:
+    def __init__(self,author:Model4LLM.Author) -> None:
         self.author = author
         self.id = self.author.id
         self.name = self.author.name#self.id[-8:]
@@ -23,11 +23,11 @@ class Speaker:
         self.mention_callbacks.append(cb)
         return self
         
-    def on_new_message(self, message:AbstractContent):
+    def on_new_message(self, message:Model4LLM.AbstractContent):
         for cb in self.new_message_callbacks:
             cb(self,message)
 
-    def on_mention(self, message:AbstractContent):
+    def on_mention(self, message:Model4LLM.AbstractContent):
         for cb in self.mention_callbacks:
             cb(self,message)
 
@@ -37,7 +37,7 @@ class Speaker:
         rooms = self.author.metadata.get('groups','')
         if self.room.chatroom().id not in rooms:
             rooms += self.room.chatroom().id
-            self.author._controller.update_metadata('groups',rooms)
+            self.author.get_controller().update_metadata('groups',rooms)
         return self
     
     def new_group(self):
@@ -73,8 +73,8 @@ class ChatRoom:
     def __init__(self, store:LLMstore, chatroom_id:str=None, speakers:Dict[str,Speaker]={}) -> None:
         self.store=store
         self.speakers=speakers
-        chatroom:ContentGroup = None
-        roots:List[ContentGroup] = self.store.find_all('ContentGroup:*')
+        chatroom:Model4LLM.ContentGroup = None
+        roots:List[Model4LLM.ContentGroup] = self.store.find_all('ContentGroup:*')
         if chatroom_id is None:
             roots = [g for g in roots if len(g.parent_id)==0]
             if len(roots)==0:
@@ -97,29 +97,24 @@ class ChatRoom:
         print(self.speakers)
     
     def chatroom(self):
-        res:ContentGroup = self.store.find(self.chatroom_id)
-        return res
+        return self.store.find_group(self.chatroom_id)
 
     def _on_message_change(self):
         self.msgs = self.get_messages_in_group()
     
     def add_content_group_to_chatroom(self):
-        gc:ContentGroupController = self.chatroom()._controller
-        child = gc.add_new_child_group()
+        child = self.chatroom().get_controller().add_new_child_group()
         self._on_message_change()
         return child.id
     
-    def get_messages_in_group(self,id=None)->List[AbstractContent]:
+    def get_messages_in_group(self,id=None)->List[Model4LLM.AbstractContent]:
         if id is None:
-            gc:ContentGroupController = self.chatroom()._controller
-            return gc.get_children_content()
+            return self.chatroom().get_controller().get_children_content()
         else:
-            gc:ContentGroupController = self.store.find(id)._controller
-            return gc.get_children_content()
+            return self.store.find_group(id).get_controller().get_children_content()
     
     def get_messages_recursive_in_chatroom(self):
-        gc:ContentGroupController = self.chatroom()._controller
-        return gc.get_children_content_recursive()
+        return self.chatroom().get_controller().get_children_content_recursive()
     
     def traverse_nested_messages(self, nested_content_list=None):
         if nested_content_list is None:nested_content_list=self.get_messages_recursive_in_chatroom()
@@ -141,9 +136,9 @@ class ChatRoom:
             raise ValueError(f'no such user {speaker_id}')
         return self.speakers[speaker_id]
 
-    def get_mentions(self, message:AbstractContent, speaker_ids=[]):
+    def get_mentions(self, message:Model4LLM.AbstractContent, speaker_ids=[]):
         msg_auther = self.speakers[message.author_id].name
-        mentions = re.findall(r'@([a-zA-Z0-9]+)', message._controller.get_data_raw())
+        mentions = re.findall(r'@([a-zA-Z0-9]+)', message.get_controller().get_data_raw())
         targets = []
         
         for mention in mentions:
@@ -152,14 +147,14 @@ class ChatRoom:
                     targets.append(speaker.id)
         return targets
     
-    def notify_new_message(self, message:AbstractContent, speaker_ids=[]):
+    def notify_new_message(self, message:Model4LLM.AbstractContent, speaker_ids=[]):
         speaker_ids = set(speaker_ids)-set(self.get_mentions(message,speaker_ids))-set(self.speakers[message.author_id].id)
         ids = list(set([self.speakers[s] for s in speaker_ids]))
         ids = sorted(ids, key=lambda x:x.author.rank[0])
         for speaker in ids:
             speaker.on_new_message(message)
     
-    def notify_mention(self, message:AbstractContent, speaker_ids=[]):
+    def notify_mention(self, message:Model4LLM.AbstractContent, speaker_ids=[]):
         speaker_ids = self.get_mentions(message, speaker_ids)
         ids = list(set([self.speakers[s] for s in speaker_ids]))
         ids = sorted(ids, key=lambda x:x.author.rank[0])
@@ -169,11 +164,11 @@ class ChatRoom:
     def _prepare_speak(self,speaker_id,group_id:str=None,new_group=False,type='Text',msg=''):
         speaker = self.get_speaker(speaker_id)
 
-        def add_content(obj:ContentGroup,type=type):
+        def add_content(obj:Model4LLM.ContentGroup,type=type):
             if 'Text' in type:
-                return obj._controller.add_new_text_content
+                return obj.get_controller().add_new_text_content
             elif 'Image' in type:
-                return obj._controller.add_new_image_content
+                return obj.get_controller().add_new_image_content
             else:
                 raise ValueError(f'Unknown type of {type}')
 
@@ -183,24 +178,23 @@ class ChatRoom:
         elif group_id is not None and not new_group:
             if group_id not in self.chatroom().children_id:
                 raise ValueError(f'no such group {group_id}')
-            group:ContentGroup = self.store.find(group_id)
+            group:Model4LLM.ContentGroup = self.store.find(group_id)
             tc = add_content(group)
             self._on_message_change()
 
         elif group_id is None and new_group:            
-            controller:ContentGroupController = self.chatroom()._controller
-            group = controller.add_new_child_group()
+            group = self.chatroom().get_controller().add_new_child_group()
             tc = add_content(group)
         return tc(speaker.author.id, msg)
 
     def speak_stream(self,speaker_id,stream,callback,group_id:str=None,new_group=False):
-        content:AbstractContent = None
+        content:Model4LLM.AbstractContent = None
         msg = ''
         for i,r in enumerate(stream):
             assert r is not None, f'can not prepare string reply in speak_stream! {r}'
             if i==0:
                 content = self._prepare_speak(speaker_id,group_id,new_group)
-            content._controller.append_data_raw(r)
+            content.get_controller().append_data_raw(r)
             msg += r
         callback()
         self.notify_new_message(content, self.speakers.keys())
@@ -221,8 +215,8 @@ class ChatRoom:
 
     def msgsDict(self,refresh=False,msgs=None,todict=None):        
         if todict is None:
-            def todict(v:AbstractContent):
-                c:AbstractContentController = v._controller
+            def todict(v:Model4LLM.AbstractContent):
+                c = v.get_controller()
                 n = v.__class__.__name__
                 if 'Text' in n:
                     return {"type": "text","text": c.get_data_raw()}
@@ -232,20 +226,20 @@ class ChatRoom:
             # todict = lambda c:c.load().get_data_raw()
             
         if refresh:
-            self.msgs:List[AbstractContent] = self.get_messages_in_group()
+            self.msgs:List[Model4LLM.AbstractContent] = self.get_messages_in_group()
         if msgs is None:
             msgs = self.msgs
 
         res = []
         for v in msgs:
             if 'ContentGroup' not in v.__class__.__name__:
-                mc:AbstractContentController = v._controller
+                mc = v.get_controller()
                 name = mc.get_author().name
                 role = mc.get_author().role
                 if 'EmbeddingContent' in v.__class__.__name__:
-                    ec:EmbeddingContentController = v._controller
-                    mc:AbstractContentController = ec.get_target()._controller
-                    t = mc.get_data_raw()[:10]
+                    v:Model4LLM.EmbeddingContent = v
+                    t = v.get_controller().get_target(
+                        ).get_controller().get_data_raw()[:10]
                     # print(f'{intents}{self.speakers[m.model.author_id].name}: "{t}"=>{m.load().get_data_raw()[:5]}...')
                 elif 'TextContent' in v.__class__.__name__:
                     res.append(dict(name=name,role=role,content=todict(v)))
@@ -256,9 +250,9 @@ class ChatRoom:
         return res
 
 
-    def printMsgs(self,refresh=False,intent=0,msgs:List[AbstractContent]=None):
+    def printMsgs(self,refresh=False,intent=0,msgs:List[Model4LLM.AbstractContent]=None):
         if refresh:
-            self.msgs:List[AbstractContent] = self.get_messages_in_group()
+            self.msgs:List[Model4LLM.AbstractContent] = self.get_messages_in_group()
         if msgs is None:
             msgs = self.msgs
         intents = "".join([' ']*intent)
@@ -268,18 +262,18 @@ class ChatRoom:
         for i,v in enumerate(msgs):
             print(f'{intents}-------------------------------------------------------------')
             if 'ContentGroup' not in v.__class__.__name__:
+                v:Model4LLM.AbstractContent = v
                 if 'EmbeddingContent' in v.__class__.__name__:
-                    econtroller:EmbeddingContentController = v._controller
-                    tcontroller:AbstractContentController = econtroller.get_target()._controller
-                    t = tcontroller.get_data_raw()[:10]
+                    v:Model4LLM.EmbeddingContent = v
+                    econtroller = v.get_controller()
+                    t = econtroller.get_target().get_controller().get_data_raw()[:10]
                     print(f'{intents}{self.speakers[econtroller.get_target().author_id].name}: "{t}"=>{econtroller.get_data_raw()[:5]}...')
                 elif 'ImageContent' in v.__class__.__name__:
-                    vcontroller:ImageContentController = v._controller
-                    im = vcontroller.get_image()
+                    v:Model4LLM.ImageContent = v
+                    im = v.get_controller().get_image()
                     print(f'{intents}{self.speakers[v.author_id].name}: Image{im.size} of {im.info}')
                 else:
-                    vcontroller:AbstractContentController = v._controller
-                    print(f'{intents}{self.speakers[v.author_id].name}: {vcontroller.get_data_raw()}')
+                    print(f'{intents}{self.speakers[v.author_id].name}: {v.get_controller().get_data_raw()}')
             else:
                 self.printMsgs(False,intent+4,self.get_messages_in_group(v.id))
         print(f'{intents}-------------------------------------------------------------')

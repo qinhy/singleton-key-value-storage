@@ -1,6 +1,6 @@
 
 from SingletonStorage.LLMroom import ChatRoom
-from SingletonStorage.LLMstore import AbstractContent, AbstractContentController, ContentGroupController, EmbeddingContentController, ImageContent, ImageContentController, TextContent
+from SingletonStorage.LLMstore import Model4LLM
 
 import threading
 from typing import List
@@ -69,9 +69,9 @@ try:
         def clonemsg(msgid,cr:ChatRoom=cr):
             try:
                 for msgid in msgid.split('\n'):
-                    gc:ContentGroupController = cr.chatroom().get_controller()
+                    gc = cr.chatroom().get_controller()
                     c = gc.get_child_content(msgid)
-                    if type(c) is TextContent:
+                    if type(c) is Model4LLM.TextContent:
                         return chat(c.get_controller().get_author().id,c.get_controller().get_data_raw())
             except Exception as e:
                 return f'{e}'
@@ -92,20 +92,20 @@ try:
                 show_passages = [c for c in configs if c.name=='show_passages']
                 show_passages = int(show_passages[0].value) if len(show_passages)>0 else 10
                 
-                def get_msgs_md(msgs:List[AbstractContent],cr:ChatRoom=cr,depth=0):
+                def get_msgs_md(msgs:List[Model4LLM.AbstractContent],cr:ChatRoom=cr,depth=0):
                     res = []
                     for i,v in enumerate(msgs):
                         if 'ContentGroup' not in v.__class__.__name__:
                             if 'EmbeddingContent' in v.__class__.__name__:
-                                v:ImageContent = v
-                                econtroller:EmbeddingContentController = v.get_controller()
+                                v:Model4LLM.EmbeddingContent = v
+                                econtroller = v.get_controller()
                                 t = econtroller.get_target().get_controller().get_data_raw()[:10]
 
                                 name = cr.speakers[econtroller.get_target().author_id].name
                                 msg = f'"{t}"=>{econtroller.get_data_raw()[:5]}...'
 
                             elif 'ImageContent' in v.__class__.__name__:
-                                v:ImageContent = v
+                                v:Model4LLM.ImageContent = v
                                 im = v.get_controller().get_image()
                                 imid = v.id.split(':')[1]
                                 b64 = v.get_controller().get_data_raw()
