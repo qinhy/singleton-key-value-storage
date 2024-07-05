@@ -234,7 +234,7 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
                         const deleteRequest = cursor.delete();
                         deleteRequest.onsuccess = () => {
                             // Continue deleting next entry
-                            this._delete_slaves(key);
+                            this._delete_slaves(cursor.key);
                             cursor.continue();
                         };
                         deleteRequest.onerror = () => reject(deleteRequest.error);
