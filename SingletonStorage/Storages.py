@@ -59,9 +59,21 @@ if firestore_back:
     class SingletonFirestoreStorage:
         _instance = None
         _meta = {}
+        
+        def __new__(cls,google_project_id:str=None,google_firestore_collection:str=None):
+            same_proj = cls._meta.get('google_project_id',None)==google_project_id
+            same_coll = cls._meta.get('google_firestore_collection',None)==google_firestore_collection
 
-        @staticmethod
-        def _set_instance(cls,google_project_id,google_firestore_collection):
+            if cls._instance is not None and same_proj and same_coll:
+                return cls._instance
+            
+            if google_project_id is None or google_firestore_collection is None:
+                raise ValueError('google_project_id or google_firestore_collection must not be None at first time')
+            
+            if cls._instance is not None and not same_proj or not same_coll:
+                cls._instance.client.close()
+                print(f'warnning: instance changed to {google_project_id} , {google_firestore_collection}')
+
             cls._instance = super(SingletonFirestoreStorage, cls).__new__(cls)
             cls._instance.client = firestore.Client(project=google_project_id)
             cls._instance.collection = cls._instance.client.collection(google_firestore_collection)
@@ -69,18 +81,7 @@ if firestore_back:
 
             cls._meta['google_project_id']=google_project_id
             cls._meta['google_firestore_collection']=google_firestore_collection
-        
-        def __new__(cls,google_project_id:str=None,google_firestore_collection:str=None):
-            if cls._instance is None:
-                if google_project_id is None or google_firestore_collection is None:
-                    raise ValueError('google_project_id and google_firestore_collection must not be None at first time')
-                SingletonFirestoreStorage._set_instance(cls,google_project_id,google_firestore_collection)
-            
-            elif ( google_project_id is not None or google_firestore_collection is not None 
-                  ) and (
-                 cls._meta.get('google_project_id',None)!=google_project_id or cls._meta.get('google_firestore_collection',None)!=google_firestore_collection ):
-                print(f'warnning: instance changed to {google_project_id} , {google_firestore_collection}')
-                SingletonFirestoreStorage._set_instance(cls,google_project_id,google_firestore_collection)
+
             return cls._instance
         
         def __init__(self,google_project_id:str=None,google_firestore_collection:str=None):
@@ -118,24 +119,25 @@ if redis_back:
         _instance = None
         _meta = {}
 
-        @staticmethod
-        def _set_instance(cls,redis_URL):# 'redis://127.0.0.1:6379'
+        def __new__(cls, redis_URL=None):# redis://127.0.0.1:6379
+            if cls._instance is not None and cls._meta.get('redis_URL',None)==redis_URL:
+                return cls._instance
+            
+            if redis_URL is None: raise ValueError('redis_URL must not be None at first time (redis://127.0.0.1:6379)')
+            
+            if cls._instance is not None and cls._meta.get('redis_URL',None)!=redis_URL:
+                cls._instance.client.close()
+                print(f'warnning: instance changed to url {redis_URL}')
+
             url = urlparse(redis_URL)
             cls._instance = super(SingletonRedisStorage, cls).__new__(cls)                                
             cls._instance.client = redis.Redis(host=url.hostname, port=url.port, db=0, decode_responses=True)
             cls._instance.slaves = []
             cls._meta['redis_URL'] = redis_URL
 
-        def __new__(cls, redis_URL=None):
-            if cls._instance is None:
-                if redis_URL is None: raise ValueError('redis_URL must not be None at first time (redis://127.0.0.1:6379)')
-                SingletonRedisStorage._set_instance(cls,redis_URL)
-            elif redis_URL is not None and cls._meta.get('redis_URL',None)!=redis_URL:
-                print(f'warnning: instance changed to url {redis_URL}')
-                SingletonRedisStorage._set_instance(cls,redis_URL)
             return cls._instance
 
-        def __init__(self, redis_URL=None):
+        def __init__(self, redis_URL=None):#redis://127.0.0.1:6379
             self.slaves:list = self.slaves
             self.client:redis.Redis = self.client
 
@@ -175,25 +177,21 @@ if sqlite_back:
     class SingletonSqliteStorage:
         _instance = None
         _meta = {}
-
-        @staticmethod
-        def _set_instance(cls):
-            cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                                
-            cls._instance.client = None
-            cls._instance.slaves = []
-            
-            cls._instance.query_queue = queue.Queue()
-            cls._instance.result_dict = {}
-            cls._instance.lock = threading.Lock()
-            cls._instance.worker_thread = threading.Thread(target=cls._instance._process_queries)
-            cls._instance.worker_thread.daemon = True
-            cls._instance.should_stop = threading.Event()  # Use an event to signal the thread to stop
-            cls._instance.worker_thread.start()
-            cls._instance._execute_query("CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)")
-
+               
         def __new__(cls):
             if cls._instance is None:
-                SingletonSqliteStorage._set_instance(cls)
+                cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                                
+                cls._instance.client = None
+                cls._instance.slaves = []
+                
+                cls._instance.query_queue = queue.Queue()
+                cls._instance.result_dict = {}
+                cls._instance.lock = threading.Lock()
+                cls._instance.worker_thread = threading.Thread(target=cls._instance._process_queries)
+                cls._instance.worker_thread.daemon = True
+                cls._instance.should_stop = threading.Event()  # Use an event to signal the thread to stop
+                cls._instance.worker_thread.start()
+                cls._instance._execute_query("CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)")
             return cls._instance
 
         def __init__(self):
@@ -436,7 +434,7 @@ class Tests(unittest.TestCase):
     def test_all(self,num=1):
         self.test_python(num)
         self.test_sqlite(num)
-        self.test_redis(num)
+        # self.test_redis(num)
         # self.test_firestore(num)
 
     def test_python(self,num=1):
