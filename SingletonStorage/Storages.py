@@ -493,7 +493,6 @@ class Tests(unittest.TestCase):
 
         self.store.load('test.json')
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
-        import os
         
         self.store.clean()
         self.store.loads(json.dumps(raw))
