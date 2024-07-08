@@ -177,6 +177,9 @@ if sqlite_back:
     class SingletonSqliteStorage:
         _instance = None
         _meta = {}
+
+        DUMP_FILE='dump_db_file'
+        LOAD_FILE='load_db_file'
                
         def __new__(cls):
             if cls._instance is None:
@@ -216,7 +219,7 @@ if sqlite_back:
 
                 query, query_id = query_info['query'], query_info['id']
                 query,val = query
-                if 'dump_file' == query[:len('dump_file')]:
+                if SingletonSqliteStorage.DUMP_FILE == query[:len(SingletonSqliteStorage.DUMP_FILE)]:
                     try:
                         disk_conn = sqlite3.connect(query.split()[1])
                         self._clone(self.client,disk_conn)
@@ -227,7 +230,7 @@ if sqlite_back:
                         self.query_queue.task_done()
                         self.client.commit()   
                 
-                elif 'load_file' == query[:len('load_file')]:     
+                elif SingletonSqliteStorage.LOAD_FILE == query[:len(SingletonSqliteStorage.LOAD_FILE)]:     
                     try:
                         disk_conn = sqlite3.connect(query.split()[1])
                         self.client.close()
@@ -310,10 +313,7 @@ if sqlite_back:
 
         def _execute_query_with_res(self,query):
             query_id = self.model._execute_query(query)
-            # print({'time':time.time()})
-            # print(f"Create query submitted with ID: {query_id}")
             result = self.model._pop_result(query_id)
-            # print(f"Result for {query_id}: {result}")
             return result['result']
 
         def exists(self, key: str) -> bool:
