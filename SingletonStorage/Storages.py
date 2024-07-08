@@ -70,13 +70,13 @@ if firestore_back:
             if google_project_id is None or google_firestore_collection is None:
                 raise ValueError('google_project_id or google_firestore_collection must not be None at first time')
             
-            if cls._instance is not None and not same_proj or not same_coll:
-                cls._instance.client.close()
+            if cls._instance is not None and (not same_proj or not same_coll):
+                cls._instance.model.close()
                 print(f'warnning: instance changed to {google_project_id} , {google_firestore_collection}')
 
             cls._instance = super(SingletonFirestoreStorage, cls).__new__(cls)
-            cls._instance.client = firestore.Client(project=google_project_id)
-            cls._instance.collection = cls._instance.client.collection(google_firestore_collection)
+            cls._instance.model = firestore.Client(project=google_project_id)
+            cls._instance.collection = cls._instance.model.collection(google_firestore_collection)
             cls._instance.slaves = []
 
             cls._meta['google_project_id']=google_project_id
@@ -86,7 +86,7 @@ if firestore_back:
         
         def __init__(self,google_project_id:str=None,google_firestore_collection:str=None):
             self.slaves:list = self.slaves
-            self.client:firestore.Client = self.client    
+            self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
     class SingletonFirestoreStorageController(SingletonStorageController):
         def __init__(self, model: SingletonFirestoreStorage):
