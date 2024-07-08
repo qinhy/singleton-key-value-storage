@@ -525,5 +525,5 @@ if get_error(lambda:__import__('google.cloud.pubsub_v1')) is None:
             print(f"Received {message}.")
             message.ack()
         subscriber = pubsub_v1.SubscriberClient()    
-        streaming_pull_future = subscriber.subscribe(
+        subscriber.subscribe(
             subscriber.subscription_path('project_id', 'topic_id'+'-sub'), callback=subcallback)
