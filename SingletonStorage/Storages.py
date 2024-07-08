@@ -512,7 +512,7 @@ if get_error(lambda:__import__('google.cloud.pubsub_v1')) is None:
         # in the form `projects/{project_id}/topics/{topic_id}`
         class GooglePub:
             def set(self,k,v):
-                future = publisher.publish(publisher.topic_path('project_id', 'topic_id'),
+                future = publisher.publish(publisher.topic_path('project_id','topic_id'),
                                     f"{k}".encode("utf-8"))
                 print(future.result())
 
@@ -527,3 +527,13 @@ if get_error(lambda:__import__('google.cloud.pubsub_v1')) is None:
         subscriber = pubsub_v1.SubscriberClient()    
         subscriber.subscribe(
             subscriber.subscription_path('project_id', 'topic_id'+'-sub'), callback=subcallback)
+        # # Wrap subscriber in a 'with' block to automatically call close() when done.
+        # with subscriber:
+        #     try:
+        #         # When `timeout` is not set, result() will block indefinitely,
+        #         # unless an exception is encountered first.
+        #         streaming_pull_future.result(timeout=5.0)
+        #         print(ss.get('test'))
+        #     except TimeoutError:
+        #         streaming_pull_future.cancel()  # Trigger the shutdown.
+        #         streaming_pull_future.result()  # Block until the shutdown is complete.
