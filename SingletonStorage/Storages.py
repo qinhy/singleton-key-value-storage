@@ -112,7 +112,8 @@ if firestore_back:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
             return fnmatch.filter(keys, pattern)
-        
+      
+
 if redis_back:
     import redis
     class SingletonRedisStorage:
@@ -130,7 +131,7 @@ if redis_back:
                 print(f'warnning: instance changed to url {redis_URL}')
 
             url = urlparse(redis_URL)
-            cls._instance = super(SingletonRedisStorage, cls).__new__(cls)                                
+            cls._instance = super(SingletonRedisStorage, cls).__new__(cls)                        
             cls._instance.client = redis.Redis(host=url.hostname, port=url.port, db=0, decode_responses=True)
             cls._instance.slaves = []
             cls._meta['redis_URL'] = redis_URL
@@ -183,7 +184,7 @@ if sqlite_back:
                
         def __new__(cls):
             if cls._instance is None:
-                cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                                
+                cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                        
                 cls._instance.client = None
                 cls._instance.slaves = []
                 
@@ -241,7 +242,7 @@ if sqlite_back:
                     finally:
                         disk_conn.close()  
                         self.query_queue.task_done()
-                        self.client.commit()                    
+                        self.client.commit()            
                 else:
                     try:
                         cursor = self.client.cursor()
@@ -406,6 +407,9 @@ class SingletonKeyValueStorage(SingletonStorageController):
         def sqlite_backend(self):
             self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
 
+    def slaves(self) -> list:
+        return self.client.model.__dict__.get('slaves',None)
+
     def exists(self, key: str) -> bool: return self.client.exists(key)
 
     def set(self, key: str, value: dict): self.client.set( key, value)
@@ -488,7 +492,7 @@ class Tests(unittest.TestCase):
         raw = {"test1": {"data": 123}, "test2": {"data": 456}, "alpha": {"info": "first"}, "abeta": {"info": "second"}, "gamma": {"info": "third"}}
         self.store.dump('test.json')
 
-        self.store.clean()        
+        self.store.clean()
         self.assertEqual(self.store.dumps(),'{}', "Should return the correct keys and values.")
 
         self.store.load('test.json')
@@ -497,3 +501,29 @@ class Tests(unittest.TestCase):
         self.store.clean()
         self.store.loads(json.dumps(raw))
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
+
+
+# with pub/sub event example
+if get_error(lambda:__import__('google.cloud.pubsub_v1')) is None:
+    def test_google_pub_sub():
+        from google.cloud import pubsub_v1
+        publisher = pubsub_v1.PublisherClient()
+        # The `topic_path` method creates a fully qualified identifier
+        # in the form `projects/{project_id}/topics/{topic_id}`
+        class GooglePub:
+            def set(self,k,v):
+                future = publisher.publish(publisher.topic_path('project_id', 'topic_id'),
+                                    f"{k}".encode("utf-8"))
+                print(future.result())
+
+        ss = SingletonKeyValueStorage()
+        ss.firestore_backend('project_id','collection')
+        ss.add_slave(GooglePub())
+        ss.set('test',{'name':'yes!'})
+
+        def subcallback(message: pubsub_v1.subscriber.message.Message) -> None:
+            print(f"Received {message}.")
+            message.ack()
+        subscriber = pubsub_v1.SubscriberClient()    
+        subscriber.subscribe(
+            subscriber.subscription_path('project_id', 'topic_id'+'-sub'), callback=subcallback)
