@@ -21,7 +21,7 @@ class SingletonStorageController:
         self.model:object = model
 
     def slaves(self) -> list:
-        return self.model.slaves
+        return self.model.__dict__.get('slaves',None)
 
     def add_slave(self, slave):
         self.slaves().append(slave)
@@ -70,13 +70,13 @@ if firestore_back:
             if google_project_id is None or google_firestore_collection is None:
                 raise ValueError('google_project_id or google_firestore_collection must not be None at first time')
             
-            if cls._instance is not None and not same_proj or not same_coll:
-                cls._instance.client.close()
+            if cls._instance is not None and (not same_proj or not same_coll):
+                cls._instance.model.close()
                 print(f'warnning: instance changed to {google_project_id} , {google_firestore_collection}')
 
             cls._instance = super(SingletonFirestoreStorage, cls).__new__(cls)
-            cls._instance.client = firestore.Client(project=google_project_id)
-            cls._instance.collection = cls._instance.client.collection(google_firestore_collection)
+            cls._instance.model = firestore.Client(project=google_project_id)
+            cls._instance.collection = cls._instance.model.collection(google_firestore_collection)
             cls._instance.slaves = []
 
             cls._meta['google_project_id']=google_project_id
@@ -86,7 +86,7 @@ if firestore_back:
         
         def __init__(self,google_project_id:str=None,google_firestore_collection:str=None):
             self.slaves:list = self.slaves
-            self.client:firestore.Client = self.client    
+            self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
     class SingletonFirestoreStorageController(SingletonStorageController):
         def __init__(self, model: SingletonFirestoreStorage):
@@ -177,6 +177,9 @@ if sqlite_back:
     class SingletonSqliteStorage:
         _instance = None
         _meta = {}
+
+        DUMP_FILE='dump_db_file'
+        LOAD_FILE='load_db_file'
                
         def __new__(cls):
             if cls._instance is None:
@@ -216,7 +219,7 @@ if sqlite_back:
 
                 query, query_id = query_info['query'], query_info['id']
                 query,val = query
-                if 'dump_file' == query[:len('dump_file')]:
+                if SingletonSqliteStorage.DUMP_FILE == query[:len(SingletonSqliteStorage.DUMP_FILE)]:
                     try:
                         disk_conn = sqlite3.connect(query.split()[1])
                         self._clone(self.client,disk_conn)
@@ -227,7 +230,7 @@ if sqlite_back:
                         self.query_queue.task_done()
                         self.client.commit()   
                 
-                elif 'load_file' == query[:len('load_file')]:     
+                elif SingletonSqliteStorage.LOAD_FILE == query[:len(SingletonSqliteStorage.LOAD_FILE)]:     
                     try:
                         disk_conn = sqlite3.connect(query.split()[1])
                         self.client.close()
@@ -310,10 +313,7 @@ if sqlite_back:
 
         def _execute_query_with_res(self,query):
             query_id = self.model._execute_query(query)
-            # print({'time':time.time()})
-            # print(f"Create query submitted with ID: {query_id}")
             result = self.model._pop_result(query_id)
-            # print(f"Result for {query_id}: {result}")
             return result['result']
 
         def exists(self, key: str) -> bool:
@@ -493,7 +493,6 @@ class Tests(unittest.TestCase):
 
         self.store.load('test.json')
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
-        import os
         
         self.store.clean()
         self.store.loads(json.dumps(raw))
