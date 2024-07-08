@@ -21,7 +21,7 @@ class SingletonStorageController:
         self.model:object = model
 
     def slaves(self) -> list:
-        return self.model.slaves
+        return self.model.__dict__.get('slaves',None)
 
     def add_slave(self, slave):
         self.slaves().append(slave)
