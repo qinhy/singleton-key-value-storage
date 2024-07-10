@@ -1,7 +1,14 @@
 
+import sqlite3
+import threading
+import queue
+import time
+import urllib.parse
+import uuid
 import fnmatch
 import json
 import unittest
+import urllib
 from urllib.parse import urlparse
 
 def get_error(func):
@@ -21,16 +28,31 @@ class SingletonStorageController:
         self.model:object = model
 
     def slaves(self) -> list:
-        return self.model.slaves
+        return self.model.__dict__.get('slaves',[])
 
-    def add_slave(self, slave):
-        self.slaves().append(slave)
+    def add_slave(self, slave:object):
+        if slave.__dict__.get('uuid',None) is None:
+            slave.__dict__['uuid'] = uuid.uuid4()            
+        for s in self.model.__dict__['slaves']:
+            s:object = s
+            if s.__dict__.get('uuid',None)==slave.__dict__.get('uuid',None):
+                return
+        self.slaves().append(slave)        
+        
+    def delete_slave(self, slave:object):
+        if self.model.__dict__.get('slaves',None):
+            tmp = []
+            for s in self.model.__dict__['slaves']:
+                s:object = s
+                if s.__dict__.get('uuid',None)!=slave.__dict__.get('uuid',None):
+                    tmp.append(s)
+            self.model.__dict__['slaves'] = tmp
         
     def _set_slaves(self, key: str, value: dict):
-        [s.set(key, value) for s in self.slaves() if hasattr(s, 'set')]
+        [s.__dict__['set'](key, value) for s in self.slaves() if hasattr(s, 'set')]
     
     def _delete_slaves(self, key: str):
-        [s.delete(key) for s in self.slaves() if hasattr(s, 'delete')]
+        [s.__dict__['delete'](key) for s in self.slaves() if hasattr(s, 'delete')]
 
     def exists(self, key: str) -> bool: print(f'[{self.__class__.__name__}]: not implement')
 
@@ -70,13 +92,14 @@ if firestore_back:
             if google_project_id is None or google_firestore_collection is None:
                 raise ValueError('google_project_id or google_firestore_collection must not be None at first time')
             
-            if cls._instance is not None and not same_proj or not same_coll:
-                cls._instance.client.close()
+            if cls._instance is not None and (not same_proj or not same_coll):
+                cls._instance.model.close()
                 print(f'warnning: instance changed to {google_project_id} , {google_firestore_collection}')
 
             cls._instance = super(SingletonFirestoreStorage, cls).__new__(cls)
-            cls._instance.client = firestore.Client(project=google_project_id)
-            cls._instance.collection = cls._instance.client.collection(google_firestore_collection)
+            cls._instance.uuid = uuid.uuid4()
+            cls._instance.model = firestore.Client(project=google_project_id)
+            cls._instance.collection = cls._instance.model.collection(google_firestore_collection)
             cls._instance.slaves = []
 
             cls._meta['google_project_id']=google_project_id
@@ -85,8 +108,9 @@ if firestore_back:
             return cls._instance
         
         def __init__(self,google_project_id:str=None,google_firestore_collection:str=None):
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
-            self.client:firestore.Client = self.client    
+            self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
     class SingletonFirestoreStorageController(SingletonStorageController):
         def __init__(self, model: SingletonFirestoreStorage):
@@ -111,8 +135,8 @@ if firestore_back:
         def keys(self, pattern: str='*') -> list[str]:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
-            return fnmatch.filter(keys, pattern)
-        
+            return fnmatch.filter(keys, pattern)      
+
 if redis_back:
     import redis
     class SingletonRedisStorage:
@@ -129,8 +153,9 @@ if redis_back:
                 cls._instance.client.close()
                 print(f'warnning: instance changed to url {redis_URL}')
 
-            url = urlparse(redis_URL)
-            cls._instance = super(SingletonRedisStorage, cls).__new__(cls)                                
+            url:urllib.parse.ParseResult = urlparse(redis_URL)
+            cls._instance = super(SingletonRedisStorage, cls).__new__(cls)                        
+            cls._instance.uuid = uuid.uuid4()
             cls._instance.client = redis.Redis(host=url.hostname, port=url.port, db=0, decode_responses=True)
             cls._instance.slaves = []
             cls._meta['redis_URL'] = redis_URL
@@ -138,6 +163,7 @@ if redis_back:
             return cls._instance
 
         def __init__(self, redis_URL=None):#redis://127.0.0.1:6379
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
             self.client:redis.Redis = self.client
 
@@ -169,18 +195,17 @@ if redis_back:
             return res
 
 if sqlite_back:
-    import sqlite3
-    import threading
-    import queue
-    import time
-    import uuid
     class SingletonSqliteStorage:
         _instance = None
         _meta = {}
+
+        DUMP_FILE='dump_db_file'
+        LOAD_FILE='load_db_file'
                
         def __new__(cls):
             if cls._instance is None:
-                cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                                
+                cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                        
+                cls._instance.uuid = uuid.uuid4()
                 cls._instance.client = None
                 cls._instance.slaves = []
                 
@@ -195,6 +220,7 @@ if sqlite_back:
             return cls._instance
 
         def __init__(self):
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
             self.client:sqlite3.Connection = self.client
             self.query_queue:queue.Queue = self.query_queue 
@@ -216,7 +242,8 @@ if sqlite_back:
 
                 query, query_id = query_info['query'], query_info['id']
                 query,val = query
-                if 'dump_file' == query[:len('dump_file')]:
+                query:str = query
+                if SingletonSqliteStorage.DUMP_FILE == query[:len(SingletonSqliteStorage.DUMP_FILE)]:
                     try:
                         disk_conn = sqlite3.connect(query.split()[1])
                         self._clone(self.client,disk_conn)
@@ -227,7 +254,7 @@ if sqlite_back:
                         self.query_queue.task_done()
                         self.client.commit()   
                 
-                elif 'load_file' == query[:len('load_file')]:     
+                elif SingletonSqliteStorage.LOAD_FILE == query[:len(SingletonSqliteStorage.LOAD_FILE)]:     
                     try:
                         disk_conn = sqlite3.connect(query.split()[1])
                         self.client.close()
@@ -238,7 +265,7 @@ if sqlite_back:
                     finally:
                         disk_conn.close()  
                         self.query_queue.task_done()
-                        self.client.commit()                    
+                        self.client.commit()            
                 else:
                     try:
                         cursor = self.client.cursor()
@@ -310,10 +337,7 @@ if sqlite_back:
 
         def _execute_query_with_res(self,query):
             query_id = self.model._execute_query(query)
-            # print({'time':time.time()})
-            # print(f"Create query submitted with ID: {query_id}")
             result = self.model._pop_result(query_id)
-            # print(f"Result for {query_id}: {result}")
             return result['result']
 
         def exists(self, key: str) -> bool:
@@ -356,11 +380,13 @@ class SingletonPythonDictStorage:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(SingletonPythonDictStorage, cls).__new__(cls)
+            cls._instance.uuid = uuid.uuid4()
             cls._instance.store = {}
             cls._instance.slaves = []
         return cls._instance
     
     def __init__(self):
+        self.uuid:str = self.uuid
         self.slaves:list = self.slaves
         self.store:dict = self.store
 
@@ -405,6 +431,9 @@ class SingletonKeyValueStorage(SingletonStorageController):
     if sqlite_back:
         def sqlite_backend(self):
             self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
+
+    def slaves(self) -> list:
+        return self.client.model.__dict__.get('slaves',None)
 
     def exists(self, key: str) -> bool: return self.client.exists(key)
 
@@ -488,12 +517,11 @@ class Tests(unittest.TestCase):
         raw = {"test1": {"data": 123}, "test2": {"data": 456}, "alpha": {"info": "first"}, "abeta": {"info": "second"}, "gamma": {"info": "third"}}
         self.store.dump('test.json')
 
-        self.store.clean()        
+        self.store.clean()
         self.assertEqual(self.store.dumps(),'{}', "Should return the correct keys and values.")
 
         self.store.load('test.json')
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
-        import os
         
         self.store.clean()
         self.store.loads(json.dumps(raw))
