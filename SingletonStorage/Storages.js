@@ -1,12 +1,15 @@
 class SingletonStorageController {
-    add_slave(slave) { this.model.slaves.push(slave); }
+    slaves() { return this.model.slaves; }
+    add_slave(slave) { if(!slave.uuid)slave.uuid=self._randuuid();this.slaves().push(slave);}
+    delete_slave(slave) { this.model.slaves = this.model.slaves.filter(s=>s.uuid!=slave.uuid)}
+
     _set_slaves(key, value) {
-        this.model.slaves.forEach(slave => {
+        this.slaves().forEach(slave => {
             if (slave.set) { slave.set(key, value); }
         });
     }
     _delete_slaves(key) {
-        this.model.slaves.forEach(slave => {
+        this.slaves().forEach(slave => {
             if (slave.delete) { slave.delete(key); }
         });
     }
@@ -19,7 +22,7 @@ class SingletonStorageController {
     dumps() { var res = {}; this.keys('*').forEach(k => res[k] = this.get(k)); return JSON.stringify(res); }
     loads(jsonString = '{}') { this.clean(); Object.entries(JSON.parse(jsonString)).forEach(d => this.set(d[0], d[1])); }
 
-    randuuid(prefix = '') {
+    _randuuid(prefix = '') {
         return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
             return Math.floor(Math.random() * 16).toString(16);
         });
@@ -308,6 +311,10 @@ class SingletonKeyValueStorage extends SingletonStorageController {
     js_backend() { this.client = new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()); return this; }
     vue_backend() { this.client = new SingletonVueStorageController(new SingletonVueStorage()); return this; }
     indexedDB_backend() { this.client = new SingletonIndexedDBStorageController(new SingletonIndexedDBStorage()); return this; }
+
+    slaves() { return this.client.slaves(); }
+    add_slave(slave) { if(!slave.uuid)slave.uuid=self._randuuid();this.slaves().push(slave);}
+    delete_slave(slave) { this.client.model.slaves = this.client.model.slaves.filter(s=>s.uuid!=slave.uuid)}
 
     exists(key) { return this.client.exists(key); }
     set(key, value) { return this.client.set(key, value); }
