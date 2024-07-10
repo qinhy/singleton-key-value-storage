@@ -30,15 +30,21 @@ class SingletonStorageController:
     def slaves(self) -> list:
         return self.model.__dict__.get('slaves',[])
 
-    def add_slave(self, slave):
-        self.slaves().append(slave)
+    def add_slave(self, slave:object):
+        if slave.__dict__.get('uuid',None) is None:
+            slave.__dict__['uuid'] = uuid.uuid4()            
+        for s in self.model.__dict__['slaves']:
+            s:object = s
+            if s.__dict__.get('uuid',None)==slave.__dict__.get('uuid',None):
+                return
+        self.slaves().append(slave)        
         
     def delete_slave(self, slave:object):
         if self.model.__dict__.get('slaves',None):
             tmp = []
             for s in self.model.__dict__['slaves']:
                 s:object = s
-                if s.__dict__.get('slaves',None)!=slave.__dict__.get('slaves',None):
+                if s.__dict__.get('uuid',None)!=slave.__dict__.get('uuid',None):
                     tmp.append(s)
             self.model.__dict__['slaves'] = tmp
         
