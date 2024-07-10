@@ -27,32 +27,37 @@ class SingletonStorageController:
     def __init__(self, model):
         self.model:object = model
 
-    def slaves(self) -> list:
+    def _slaves(self) -> list:
         return self.model.__dict__.get('slaves',[])
+        
+    def _set_slaves(self, key: str, value: dict):
+        [s.__dict__['set'](key, value) for s in self._slaves() if hasattr(s, 'set')]
+    
+    def _delete_slaves(self, key: str):
+        [s.__dict__['delete'](key) for s in self._slaves() if hasattr(s, 'delete')]
 
-    def add_slave(self, slave:object):
+    def add_slave(self, slave:object) -> bool:
         if slave.__dict__.get('uuid',None) is None:
             slave.__dict__['uuid'] = uuid.uuid4()            
         for s in self.model.__dict__['slaves']:
             s:object = s
             if s.__dict__.get('uuid',None)==slave.__dict__.get('uuid',None):
-                return
-        self.slaves().append(slave)        
+                return False
+        self._slaves().append(slave)        
+        return True
         
-    def delete_slave(self, slave:object):
+    def delete_slave(self, slave:object) -> bool:
         if self.model.__dict__.get('slaves',None):
             tmp = []
             for s in self.model.__dict__['slaves']:
                 s:object = s
                 if s.__dict__.get('uuid',None)!=slave.__dict__.get('uuid',None):
                     tmp.append(s)
+            if len(self.model.__dict__['slaves'])==len(tmp):return False
             self.model.__dict__['slaves'] = tmp
-        
-    def _set_slaves(self, key: str, value: dict):
-        [s.__dict__['set'](key, value) for s in self.slaves() if hasattr(s, 'set')]
-    
-    def _delete_slaves(self, key: str):
-        [s.__dict__['delete'](key) for s in self.slaves() if hasattr(s, 'delete')]
+            return True
+        else:
+            return False
 
     def exists(self, key: str) -> bool: print(f'[{self.__class__.__name__}]: not implement')
 
@@ -432,29 +437,18 @@ class SingletonKeyValueStorage(SingletonStorageController):
         def sqlite_backend(self):
             self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
 
-    def slaves(self) -> list:
-        return self.client.model.__dict__.get('slaves',None)
-
-    def exists(self, key: str) -> bool: return self.client.exists(key)
-
-    def set(self, key: str, value: dict): self.client.set( key, value)
-
-    def get(self, key: str) -> dict: return self.client.get( key)
-
-    def delete(self, key: str): self.client.delete(key)
-
-    def keys(self, pattern: str='*') -> list[str]: return self.client.keys(pattern)
-
-    def clean(self): self.client.clean()
-
-    def dump(self,json_path): self.client.dump(json_path)
-
-    def load(self,json_path): self.client.load(json_path)
-
-    def dumps(self,): return self.client.dumps()
-
-    def loads(self,json_str): self.client.loads(json_str)
-
+    def add_slave(self, slave:object):              return self.client.add_slave(slave)
+    def delete_slave(self, slave:object):           return self.client.delete_slave(slave)
+    def exists(self, key: str) -> bool:             return self.client.exists(key)
+    def set(self, key: str, value: dict):           return self.client.set( key, value)
+    def get(self, key: str) -> dict:                return self.client.get( key)
+    def delete(self, key: str):                     return self.client.delete(key)
+    def keys(self, pattern: str='*') -> list[str]:  return self.client.keys(pattern)
+    def clean(self):                                return self.client.clean()
+    def dump(self,json_path):                       return self.client.dump(json_path)
+    def load(self,json_path):                       return self.client.load(json_path)
+    def dumps(self,):                               return self.client.dumps()
+    def loads(self,json_str):                       return self.client.loads(json_str)    
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs) -> None:
         super().__init__(*args,**kwargs)
