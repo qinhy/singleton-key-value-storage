@@ -27,7 +27,7 @@ class SingletonStorageController:
     def __init__(self, model):
         self.model:object = model
 
-    def slaves(self) -> list:
+    def _slaves(self) -> list:
         return self.model.__dict__.get('slaves',[])
 
     def add_slave(self, slave:object):
@@ -37,7 +37,7 @@ class SingletonStorageController:
             s:object = s
             if s.__dict__.get('uuid',None)==slave.__dict__.get('uuid',None):
                 return
-        self.slaves().append(slave)        
+        self._slaves().append(slave)        
         
     def delete_slave(self, slave:object):
         if self.model.__dict__.get('slaves',None):
@@ -49,10 +49,10 @@ class SingletonStorageController:
             self.model.__dict__['slaves'] = tmp
         
     def _set_slaves(self, key: str, value: dict):
-        [s.__dict__['set'](key, value) for s in self.slaves() if hasattr(s, 'set')]
+        [s.__dict__['set'](key, value) for s in self._slaves() if hasattr(s, 'set')]
     
     def _delete_slaves(self, key: str):
-        [s.__dict__['delete'](key) for s in self.slaves() if hasattr(s, 'delete')]
+        [s.__dict__['delete'](key) for s in self._slaves() if hasattr(s, 'delete')]
 
     def exists(self, key: str) -> bool: print(f'[{self.__class__.__name__}]: not implement')
 
@@ -432,8 +432,9 @@ class SingletonKeyValueStorage(SingletonStorageController):
         def sqlite_backend(self):
             self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
 
-    def slaves(self) -> list:
-        return self.client.model.__dict__.get('slaves',None)
+    def add_slave(self, slave:object): self.client.add_slave(slave)
+
+    def delete_slave(self, slave:object): self.client.delete_slave(slave)
 
     def exists(self, key: str) -> bool: return self.client.exists(key)
 
