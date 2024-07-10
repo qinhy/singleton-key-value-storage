@@ -1,7 +1,14 @@
 
+import sqlite3
+import threading
+import queue
+import time
+import urllib.parse
+import uuid
 import fnmatch
 import json
 import unittest
+import urllib
 from urllib.parse import urlparse
 
 def get_error(func):
@@ -21,16 +28,31 @@ class SingletonStorageController:
         self.model:object = model
 
     def slaves(self) -> list:
-        return self.model.__dict__.get('slaves',None)
+        return self.model.__dict__.get('slaves',[])
 
-    def add_slave(self, slave):
-        self.slaves().append(slave)
+    def add_slave(self, slave:object):
+        if slave.__dict__.get('uuid',None) is None:
+            slave.__dict__['uuid'] = uuid.uuid4()            
+        for s in self.model.__dict__['slaves']:
+            s:object = s
+            if s.__dict__.get('uuid',None)==slave.__dict__.get('uuid',None):
+                return
+        self.slaves().append(slave)        
+        
+    def delete_slave(self, slave:object):
+        if self.model.__dict__.get('slaves',None):
+            tmp = []
+            for s in self.model.__dict__['slaves']:
+                s:object = s
+                if s.__dict__.get('uuid',None)!=slave.__dict__.get('uuid',None):
+                    tmp.append(s)
+            self.model.__dict__['slaves'] = tmp
         
     def _set_slaves(self, key: str, value: dict):
-        [s.set(key, value) for s in self.slaves() if hasattr(s, 'set')]
+        [s.__dict__['set'](key, value) for s in self.slaves() if hasattr(s, 'set')]
     
     def _delete_slaves(self, key: str):
-        [s.delete(key) for s in self.slaves() if hasattr(s, 'delete')]
+        [s.__dict__['delete'](key) for s in self.slaves() if hasattr(s, 'delete')]
 
     def exists(self, key: str) -> bool: print(f'[{self.__class__.__name__}]: not implement')
 
@@ -75,6 +97,7 @@ if firestore_back:
                 print(f'warnning: instance changed to {google_project_id} , {google_firestore_collection}')
 
             cls._instance = super(SingletonFirestoreStorage, cls).__new__(cls)
+            cls._instance.uuid = uuid.uuid4()
             cls._instance.model = firestore.Client(project=google_project_id)
             cls._instance.collection = cls._instance.model.collection(google_firestore_collection)
             cls._instance.slaves = []
@@ -85,6 +108,7 @@ if firestore_back:
             return cls._instance
         
         def __init__(self,google_project_id:str=None,google_firestore_collection:str=None):
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
             self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
@@ -111,8 +135,7 @@ if firestore_back:
         def keys(self, pattern: str='*') -> list[str]:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
-            return fnmatch.filter(keys, pattern)
-      
+            return fnmatch.filter(keys, pattern)      
 
 if redis_back:
     import redis
@@ -130,8 +153,9 @@ if redis_back:
                 cls._instance.client.close()
                 print(f'warnning: instance changed to url {redis_URL}')
 
-            url = urlparse(redis_URL)
+            url:urllib.parse.ParseResult = urlparse(redis_URL)
             cls._instance = super(SingletonRedisStorage, cls).__new__(cls)                        
+            cls._instance.uuid = uuid.uuid4()
             cls._instance.client = redis.Redis(host=url.hostname, port=url.port, db=0, decode_responses=True)
             cls._instance.slaves = []
             cls._meta['redis_URL'] = redis_URL
@@ -139,6 +163,7 @@ if redis_back:
             return cls._instance
 
         def __init__(self, redis_URL=None):#redis://127.0.0.1:6379
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
             self.client:redis.Redis = self.client
 
@@ -170,11 +195,6 @@ if redis_back:
             return res
 
 if sqlite_back:
-    import sqlite3
-    import threading
-    import queue
-    import time
-    import uuid
     class SingletonSqliteStorage:
         _instance = None
         _meta = {}
@@ -185,6 +205,7 @@ if sqlite_back:
         def __new__(cls):
             if cls._instance is None:
                 cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                        
+                cls._instance.uuid = uuid.uuid4()
                 cls._instance.client = None
                 cls._instance.slaves = []
                 
@@ -199,6 +220,7 @@ if sqlite_back:
             return cls._instance
 
         def __init__(self):
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
             self.client:sqlite3.Connection = self.client
             self.query_queue:queue.Queue = self.query_queue 
@@ -220,6 +242,7 @@ if sqlite_back:
 
                 query, query_id = query_info['query'], query_info['id']
                 query,val = query
+                query:str = query
                 if SingletonSqliteStorage.DUMP_FILE == query[:len(SingletonSqliteStorage.DUMP_FILE)]:
                     try:
                         disk_conn = sqlite3.connect(query.split()[1])
@@ -357,11 +380,13 @@ class SingletonPythonDictStorage:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(SingletonPythonDictStorage, cls).__new__(cls)
+            cls._instance.uuid = uuid.uuid4()
             cls._instance.store = {}
             cls._instance.slaves = []
         return cls._instance
     
     def __init__(self):
+        self.uuid:str = self.uuid
         self.slaves:list = self.slaves
         self.store:dict = self.store
 
@@ -501,29 +526,3 @@ class Tests(unittest.TestCase):
         self.store.clean()
         self.store.loads(json.dumps(raw))
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
-
-
-# with pub/sub event example
-if get_error(lambda:__import__('google.cloud.pubsub_v1')) is None:
-    def test_google_pub_sub():
-        from google.cloud import pubsub_v1
-        publisher = pubsub_v1.PublisherClient()
-        # The `topic_path` method creates a fully qualified identifier
-        # in the form `projects/{project_id}/topics/{topic_id}`
-        class GooglePub:
-            def set(self,k,v):
-                future = publisher.publish(publisher.topic_path('project_id', 'topic_id'),
-                                    f"{k}".encode("utf-8"))
-                print(future.result())
-
-        ss = SingletonKeyValueStorage()
-        ss.firestore_backend('project_id','collection')
-        ss.add_slave(GooglePub())
-        ss.set('test',{'name':'yes!'})
-
-        def subcallback(message: pubsub_v1.subscriber.message.Message) -> None:
-            print(f"Received {message}.")
-            message.ack()
-        subscriber = pubsub_v1.SubscriberClient()    
-        subscriber.subscribe(
-            subscriber.subscription_path('project_id', 'topic_id'+'-sub'), callback=subcallback)
