@@ -21,16 +21,25 @@ class SingletonStorageController:
         self.model:object = model
 
     def slaves(self) -> list:
-        return self.model.__dict__.get('slaves',None)
+        return self.model.__dict__.get('slaves',[])
 
     def add_slave(self, slave):
         self.slaves().append(slave)
         
+    def delete_slave(self, slave:object):
+        if self.model.__dict__.get('slaves',None):
+            tmp = []
+            for s in self.model.__dict__['slaves']:
+                s:object = s
+                if s.__dict__.get('slaves',None)!=slave.__dict__.get('slaves',None):
+                    tmp.append(s)
+            self.model.__dict__['slaves'] = tmp
+        
     def _set_slaves(self, key: str, value: dict):
-        [s.set(key, value) for s in self.slaves() if hasattr(s, 'set')]
+        [s.__dict__['set'](key, value) for s in self.slaves() if hasattr(s, 'set')]
     
     def _delete_slaves(self, key: str):
-        [s.delete(key) for s in self.slaves() if hasattr(s, 'delete')]
+        [s.__dict__['delete'](key) for s in self.slaves() if hasattr(s, 'delete')]
 
     def exists(self, key: str) -> bool: print(f'[{self.__class__.__name__}]: not implement')
 
@@ -75,6 +84,7 @@ if firestore_back:
                 print(f'warnning: instance changed to {google_project_id} , {google_firestore_collection}')
 
             cls._instance = super(SingletonFirestoreStorage, cls).__new__(cls)
+            cls._instance.uuid = uuid.uuid4()
             cls._instance.model = firestore.Client(project=google_project_id)
             cls._instance.collection = cls._instance.model.collection(google_firestore_collection)
             cls._instance.slaves = []
@@ -85,6 +95,7 @@ if firestore_back:
             return cls._instance
         
         def __init__(self,google_project_id:str=None,google_firestore_collection:str=None):
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
             self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
@@ -111,8 +122,7 @@ if firestore_back:
         def keys(self, pattern: str='*') -> list[str]:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
-            return fnmatch.filter(keys, pattern)
-      
+            return fnmatch.filter(keys, pattern)      
 
 if redis_back:
     import redis
@@ -132,6 +142,7 @@ if redis_back:
 
             url = urlparse(redis_URL)
             cls._instance = super(SingletonRedisStorage, cls).__new__(cls)                        
+            cls._instance.uuid = uuid.uuid4()
             cls._instance.client = redis.Redis(host=url.hostname, port=url.port, db=0, decode_responses=True)
             cls._instance.slaves = []
             cls._meta['redis_URL'] = redis_URL
@@ -139,6 +150,7 @@ if redis_back:
             return cls._instance
 
         def __init__(self, redis_URL=None):#redis://127.0.0.1:6379
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
             self.client:redis.Redis = self.client
 
@@ -185,6 +197,7 @@ if sqlite_back:
         def __new__(cls):
             if cls._instance is None:
                 cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                        
+                cls._instance.uuid = uuid.uuid4()
                 cls._instance.client = None
                 cls._instance.slaves = []
                 
@@ -199,6 +212,7 @@ if sqlite_back:
             return cls._instance
 
         def __init__(self):
+            self.uuid:str = self.uuid
             self.slaves:list = self.slaves
             self.client:sqlite3.Connection = self.client
             self.query_queue:queue.Queue = self.query_queue 
@@ -357,11 +371,13 @@ class SingletonPythonDictStorage:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(SingletonPythonDictStorage, cls).__new__(cls)
+            cls._instance.uuid = uuid.uuid4()
             cls._instance.store = {}
             cls._instance.slaves = []
         return cls._instance
     
     def __init__(self):
+        self.uuid:str = self.uuid
         self.slaves:list = self.slaves
         self.store:dict = self.store
 
