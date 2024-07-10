@@ -1,7 +1,7 @@
 
 
 import threading
-from SingletonStorage.LLMstore import Model4LLM, LLMstore
+from .LLMstore import Model4LLM, LLMstore
 
 import re
 from typing import List, Dict

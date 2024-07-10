@@ -10,7 +10,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
 
-from SingletonStorage.Storages import SingletonKeyValueStorage
+from .Storages import SingletonKeyValueStorage
 
 def get_current_datetime_with_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))

@@ -1,6 +1,6 @@
 
-from SingletonStorage.LLMroom import ChatRoom
-from SingletonStorage.LLMstore import Model4LLM
+from .LLMroom import ChatRoom
+from .LLMstore import Model4LLM
 
 import threading
 from typing import List
