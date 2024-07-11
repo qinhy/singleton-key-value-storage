@@ -55,47 +55,58 @@ class Model4User:
         status: str = ""
         metadata: dict = {}
 
-        
+
         model_config = ConfigDict(arbitrary_types_allowed=True)    
         _controller: Controller4User.AbstractObjController = None
         def get_controller(self)->Controller4User.AbstractObjController: return self._controller
         def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
 
     class User(AbstractObj):
-        id:int = 'auto increatment'
+        id: str = Field(default_factory=lambda :f"User:{uuid4()}")
         email = None
-        created_at = None
-        updated_at = None
+        
+        # _controller: Controller4LLM.ContentGroupController = None
+        # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
+        # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
 
     class App(AbstractObj):
-        id:int = 'auto increatment'
+        id: str = Field(default_factory=lambda :f"App:{uuid4()}")
         parent_App_id:int = 'auto increatment'
         running_cost = None
         major_name = None
         minor_name = None
-        created_at = None
-        updated_at = None
+        
+        # _controller: Controller4LLM.ContentGroupController = None
+        # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
+        # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
 
-    class LicenseApp(AbstractObj):
-        license_App_id:int = 'auto increatment'
-        license_id:int = 'auto increatment'
-        App_id:int = 'auto increatment'
+    # class LicenseApp(AbstractObj):
+    #     license_App_id:int = 'auto increatment'
+    #     license_id:int = 'auto increatment'
+    #     App_id:int = 'auto increatment'
 
     class License(AbstractObj):
-        id:int = 'auto increatment'
+        id: str = Field(default_factory=lambda :f"License:{uuid4()}")
         user_id:int = 'auto increatment'
         access_token = None
         bought_at = None
         expiration_date = None
         running_time = None
         max_running_time = None
-        updated_at = None
+        
+        # _controller: Controller4LLM.ContentGroupController = None
+        # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
+        # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
 
     class AppUsage(AbstractObj):
-        id:int = 'auto increatment'
+        id: str = Field(default_factory=lambda :f"AppUsage:{uuid4()}")
         user_id:int = 'auto increatment'
         App_id:int = 'auto increatment'
         license_id:int = 'auto increatment'
         start_time = None
         end_time = None
         running_time_cost = None
+        
+        # _controller: Controller4LLM.ContentGroupController = None
+        # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
+        # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
