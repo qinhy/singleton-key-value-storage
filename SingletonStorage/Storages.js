@@ -324,6 +324,7 @@ class SingletonKeyValueStorage extends SingletonStorageController {
     clean() { return this.client.clean(); }
     dumps() { return this.client.dumps(); }
     loads(jsonStr) { return this.client.loads(jsonStr); }
+    randuuid() { return this.client._randuuid(); }
 }
 
 // Tests for SingletonKeyValueStorage 
