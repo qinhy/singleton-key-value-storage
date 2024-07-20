@@ -18,7 +18,7 @@ class Controller4User:
     class AbstractObjController:
         def __init__(self, store, model):
             self.model:Model4User.AbstractObj = model
-            self._store:SingletonKeyValueStorage = store
+            self._store:UsersStore = store
 
         def update(self, **kwargs):
             assert  self.model is not None, 'controller has null model!'
@@ -63,7 +63,9 @@ class Model4User:
 
     class User(AbstractObj):
         id: str = Field(default_factory=lambda :f"User:{uuid4()}")
-        email = None
+        name:str
+        role:str
+        email:str=None
         
         # _controller: Controller4LLM.ContentGroupController = None
         # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
@@ -72,9 +74,9 @@ class Model4User:
     class App(AbstractObj):
         id: str = Field(default_factory=lambda :f"App:{uuid4()}")
         parent_App_id:int = 'auto increatment'
-        running_cost = None
-        major_name = None
-        minor_name = None
+        running_cost:int = 0
+        major_name:str = None
+        minor_name:str = None
         
         # _controller: Controller4LLM.ContentGroupController = None
         # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
@@ -88,11 +90,11 @@ class Model4User:
     class License(AbstractObj):
         id: str = Field(default_factory=lambda :f"License:{uuid4()}")
         user_id:int = 'auto increatment'
-        access_token = None
-        bought_at = None
-        expiration_date = None
-        running_time = None
-        max_running_time = None
+        access_token:str = None
+        bought_at:datetime = None
+        expiration_date:datetime = None
+        running_time:int = 0
+        max_running_time:int = 0
         
         # _controller: Controller4LLM.ContentGroupController = None
         # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
@@ -103,10 +105,118 @@ class Model4User:
         user_id:int = 'auto increatment'
         App_id:int = 'auto increatment'
         license_id:int = 'auto increatment'
-        start_time = None
-        end_time = None
-        running_time_cost = None
+        start_time:datetime = None
+        end_time:datetime = None
+        running_time_cost:int = 0
         
         # _controller: Controller4LLM.ContentGroupController = None
         # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
         # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
+
+class UsersStore(SingletonKeyValueStorage):
+    
+    def __init__(self) -> None:
+        self.python_backend()
+        
+    def _client(self):
+        return self.client
+    
+    def get_class(self, id: str):
+        class_type = id.split(':')[0]
+        res = {c.__name__:c for c in [i for k,i in Model4User.__dict__.items() if '_' not in k]}.get(class_type, None)
+        if res is None:
+            raise ValueError(f'No such class of {class_type}')
+        return res
+       
+    def _store_obj(self, obj:Model4User.AbstractObj):
+        self.set(obj.id,json.loads(obj.model_dump_json()))
+        return obj
+    
+    def _add_new_obj(self, *args, **kwargs) -> Model4User.User:
+        user = self._store_obj(Model4User.User(name=name, role=role, rank=rank, metadata=metadata))
+        user.init_controller(self,user)
+        return user
+    def add_new_user(self, name, role, rank:list=[0], metadata={}) -> Model4User.User:
+        user = self._store_obj(Model4User.User(name=name, role=role, rank=rank, metadata=metadata))
+        user.init_controller(self,user)
+        return user
+    def add_new_user(self, name, role, rank:list=[0], metadata={}) -> Model4User.User:
+        user = self._store_obj(Model4User.User(name=name, role=role, rank=rank, metadata=metadata))
+        user.init_controller(self,user)
+        return user
+    
+    def ad
+    App(AbstractObj)
+    License(AbstractObj)
+    AppUsage(AbstractObj)
+
+    # def add_new_root_group(self,metadata={},rank=[0]) -> Model4User.ContentGroup:
+    #     group = self._store_obj( Model4User.ContentGroup(rank=rank, metadata=metadata) )         
+    #     group.init_controller(self,group)
+    #     return group
+    
+    # def _add_new_content_to_group(self,group:Model4User.ContentGroup,content:Model4User.AbstractContent,raw:str=None):
+    #     group.children_id.append(content.id)
+    #     self._store_obj(group)
+    #     if raw is not None and 'ContentGroup' not in content.id:
+    #         self._store_obj(content)
+    #         self._store_obj(Model4User.CommonData(id=content.data_id(), raw=raw))
+    #     else:
+    #         self._store_obj(content)
+    #     content.init_controller(self)
+    #     return group,content    
+
+    # def read_image(self, filepath):
+    #     with open(filepath, "rb") as f:
+    #         return f.read()
+        
+    # def b64encode(self, file_bytes):
+    #     return base64.b64encode(file_bytes)
+        
+    # def encode_image(self, image_bytes):
+    #     return self.b64encode(image_bytes)
+    
+    # def add_new_group_to_group(self,group:Model4User.ContentGroup,metadata={},rank=[0]):
+    #     parent,child = self._add_new_content_to_group(group, Model4User.ContentGroup(rank=rank, metadata=metadata, parent_id=group.id))
+    #     return parent,child
+
+    # def add_new_text_to_group(self,group:Model4User.ContentGroup,user_id:str,text:str):
+    #     parent,child = self._add_new_content_to_group(group,
+    #                                                   Model4User.TextContent(user_id=user_id, group_id=group.id),
+    #                                                   raw=text)
+    #     return parent,child
+    
+    # def add_new_embedding_to_group(self,group:Model4User.ContentGroup, user_id:str, content_id:str, vec:list[float]):
+    #     parent,child = self._add_new_content_to_group(group,
+    #                                                   Model4User.EmbeddingContent(user_id=user_id, 
+    #                                                                    group_id=group.id,target_id=content_id),
+    #                                                   raw=str(vec))
+    #     return parent,child
+    
+    # def add_new_image_to_group(self,group:Model4User.ContentGroup,user_id:str, filepath:str):
+    #     raw_bytes = self.read_image(filepath)
+    #     raw_base64 = self.encode_image(raw_bytes)
+    #     parent,child = self._add_new_content_to_group(group,
+    #                                                   Model4User.ImageContent(user_id=user_id,group_id=group.id),
+    #                                                   raw=raw_base64)
+    #     return parent,child
+    
+    # available for regx?
+    def find(self,id:str) -> Model4User.AbstractObj:
+        data_dict = self.get(id)
+        obj:Model4User.AbstractObj = self.get_class(id)(**data_dict)
+        obj.init_controller(self)
+        return obj
+    
+    def find_all(self,id:str=f'User:*'):
+        keys = [key for key in self.keys(id)]
+        results:list[Model4User.AbstractObj] = []
+        for key in keys:
+            obj = self.find(key)
+            results.append(obj)
+        return results
+    
+    def find_all_users(self):
+        results:list[Model4User.User] = self.find_all('User:*')
+        return results
+    
