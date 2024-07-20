@@ -31,10 +31,10 @@ class SingletonStorageController:
         return self.model.__dict__.get('slaves',[])
         
     def _set_slaves(self, key: str, value: dict):
-        [s.__dict__['set'](key, value) for s in self._slaves() if hasattr(s, 'set')]
+        [s.set(key, value) for s in self._slaves() if hasattr(s, 'set')]
     
     def _delete_slaves(self, key: str):
-        [s.__dict__['delete'](key) for s in self._slaves() if hasattr(s, 'delete')]
+        [s.delete(key) for s in self._slaves() if hasattr(s, 'delete')]
 
     def add_slave(self, slave:object) -> bool:
         if slave.__dict__.get('uuid',None) is None:
@@ -483,6 +483,7 @@ class Tests(unittest.TestCase):
         self.test_keys()
         self.test_get_nonexistent()
         self.test_dump_and_load()
+        self.test_slaves()
 
     def test_set_and_get(self):
         self.store.set('test1', {'data': 123})
@@ -520,3 +521,13 @@ class Tests(unittest.TestCase):
         self.store.clean()
         self.store.loads(json.dumps(raw))
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
+
+    def test_slaves(self):
+        if self.store.client.__class__.__name__=='SingletonPythonDictStorageController':return
+        store2 = SingletonKeyValueStorage()
+        self.store.add_slave(store2)
+        self.store.set('alpha', {'info': 'first'})
+        self.store.set('abeta', {'info': 'second'})
+        self.store.set('gamma', {'info': 'third'})
+        self.store.delete('abeta')
+        self.assertEqual(json.loads(self.store.dumps()),json.loads(store2.dumps()), "Should return the correct keys and values.")
