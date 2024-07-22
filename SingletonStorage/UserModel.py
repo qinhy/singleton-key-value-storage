@@ -207,20 +207,11 @@ class UsersStore(SingletonKeyValueStorage):
     
     # available for regx?
     def find(self,id:str) -> Model4User.AbstractObj:
-        data_dict = self.get(id)
-        obj:Model4User.AbstractObj = self.get_class(id)(**data_dict)
-        obj.init_controller(self)
-        return obj
+        return self._init_controller(self.get_class(id)(**self.get(id)))
     
-    def find_all(self,id:str=f'User:*'):
-        keys = [key for key in self.keys(id)]
-        results:list[Model4User.AbstractObj] = []
-        for key in keys:
-            obj = self.find(key)
-            results.append(obj)
-        return results
+    def find_all(self,id:str=f'User:*')->list[Model4User.AbstractObj]:
+        return [self.find(key) for key in self.keys(id)]
     
-    def find_all_users(self):
-        results:list[Model4User.User] = self.find_all('User:*')
-        return results
+    def find_all_users(self)->list[Model4User.User]:
+        return self.find_all('User:*')
     
