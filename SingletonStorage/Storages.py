@@ -445,12 +445,15 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def delete_slave(self, slave:object) -> bool:
         self.event_dispa.delete_event(slave.__dict__.get('uuid',None))
 
-    def set(self, key: str, value: dict):           
+    def set(self, key: str, value: dict):   
+        res = self.client.set( key, value)        
         self.event_dispa.dispatch('set',key,value)
-        return self.client.set( key, value)
-    def delete(self, key: str):                     
+        return res
+    
+    def delete(self, key: str):                
+        res = self.client.delete(key)     
         self.event_dispa.dispatch('delete',key)
-        return self.client.delete(key)
+        return res
 
     def exists(self, key: str) -> bool:             return self.client.exists(key)
     def get(self, key: str) -> dict:                return self.client.get( key)
