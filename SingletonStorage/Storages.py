@@ -39,7 +39,6 @@ class KeysHistoryController:
     def get_history(self,key: str):
         self.controller.get(f'_History:{self._str2base64(key)}')['result']
 
-
 class SingletonStorageController:
     def __init__(self, model):
         self.model:object = model
