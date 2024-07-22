@@ -1,5 +1,6 @@
 
 import base64
+import re
 import sqlite3
 import threading
 import queue
@@ -23,7 +24,7 @@ def get_error(func):
 firestore_back = get_error(lambda:__import__('google.cloud.firestore')) is None
 redis_back = get_error(lambda:__import__('redis')) is None
 sqlite_back = True
-
+aws_dynamo = get_error(lambda:__import__('boto3')) is None
 
 class KeysHistoryController:
     def __init__(self, controller):
@@ -106,7 +107,6 @@ if firestore_back:
         
         def __init__(self,google_project_id:str=None,google_firestore_collection:str=None):
             self.uuid:str = self.uuid
-            # self.slaves:list = self.slaves
             self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
     class SingletonFirestoreStorageController(SingletonStorageController):
@@ -158,7 +158,6 @@ if redis_back:
 
         def __init__(self, redis_URL=None):#redis://127.0.0.1:6379
             self.uuid:str = self.uuid
-            # self.slaves:list = self.slaves
             self.client:redis.Redis = self.client
 
     class SingletonRedisStorageController(SingletonStorageController):
@@ -212,7 +211,6 @@ if sqlite_back:
 
         def __init__(self):
             self.uuid:str = self.uuid
-            # self.slaves:list = self.slaves
             self.client:sqlite3.Connection = self.client
             self.query_queue:queue.Queue = self.query_queue 
             self.result_dict:dict = self.result_dict 
@@ -363,6 +361,89 @@ if sqlite_back:
             result = self._execute_query_with_res(query)
             return result
 
+if aws_dynamo:
+    import boto3
+    from botocore.exceptions import ClientError
+
+    class SingletonDynamoDBStorage:
+        _instance = None
+        
+        def __new__(cls,your_table_name):
+            if cls._instance is None:
+                cls._instance = super(SingletonDynamoDBStorage, cls).__new__(cls)
+                cls._instance.uuid = uuid.uuid4()
+                cls._instance.client = boto3.resource('dynamodb')
+                cls._instance.table = cls._instance.client.Table(your_table_name)
+            return cls._instance
+
+        def __init__(self,your_table_name):
+            self.uuid = self.uuid
+            self.client = self.client
+            self.table = self.table
+
+    class SingletonDynamoDBStorageController(SingletonStorageController):
+        def __init__(self, model:SingletonDynamoDBStorage):
+            super().__init__(model)
+        
+        def exists(self, key: str) -> bool:
+            try:
+                response = self.model.table.get_item(Key={'key': key})
+                return 'Item' in response
+            except ClientError as e:
+                print(f'Error checking existence: {e}')
+                return False
+
+        def set(self, key: str, value: dict):
+            try:
+                self.model.table.put_item(Item={'key': key, 'value': json.dumps(value)})
+            except ClientError as e:
+                print(f'Error setting value: {e}')
+
+        def get(self, key: str) -> dict:
+            try:
+                response = self.model.table.get_item(Key={'key': key})
+                if 'Item' in response:
+                    return json.loads(response['Item']['value'])
+                return None
+            except ClientError as e:
+                print(f'Error getting value: {e}')
+                return None
+
+        def delete(self, key: str):
+            try:
+                self.model.table.delete_item(Key={'key': key})
+            except ClientError as e:
+                print(f'Error deleting value: {e}')
+
+        def keys(self, pattern: str='*') -> list[str]:
+            # Convert simple wildcard patterns to regular expressions for filtering
+            regex = fnmatch.translate(pattern)
+            compiled_regex = re.compile(regex)
+
+            matched_keys = []
+            try:
+                # Scan operation with no filters - potentially very costly
+                scan_kwargs = {
+                    'ProjectionExpression': "key",
+                    'FilterExpression': "attribute_exists(key)"
+                }
+                done = False
+                start_key = None
+
+                while not done:
+                    if start_key:
+                        scan_kwargs['ExclusiveStartKey'] = start_key
+                    response = self.model.table.scan(**scan_kwargs)
+                    items = response.get('Items', [])
+                    matched_keys.extend([item['key'] for item in items if compiled_regex.match(item['key'])])
+
+                    start_key = response.get('LastEvaluatedKey', None)
+                    done = start_key is None
+            except ClientError as e:
+                print(f'Error scanning keys: {e}')
+
+            return matched_keys
+
 class SingletonPythonDictStorage:
     _instance = None
     _meta = {}
@@ -376,7 +457,6 @@ class SingletonPythonDictStorage:
     
     def __init__(self):
         self.uuid:str = self.uuid
-        # self.slaves:list = self.slaves
         self.store:dict = self.store
 
 class SingletonPythonDictStorageController(SingletonStorageController):
