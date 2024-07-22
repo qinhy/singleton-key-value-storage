@@ -399,7 +399,6 @@ class SingletonPythonDictStorageController(SingletonStorageController):
     def keys(self, pattern: str='*') -> list[str]:
         return fnmatch.filter(self.model.store.keys(), pattern)
 
-
 class PythonDictStorage:
     def __init__(self):
         self.uuid = uuid.uuid4()
@@ -459,8 +458,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
             self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
 
     def add_slave(self, slave:object, event_names=['set','delete']) -> bool:
-        if slave.__dict__.get('uuid',None) is None:
-            slave.__dict__['uuid'] = uuid.uuid4()
+        if slave.__dict__.get('uuid',None) is None: slave.__dict__['uuid'] = uuid.uuid4()
         for m in event_names:
             if hasattr(slave, m):
                 self.event_dispa.set_event(m,getattr(slave,m),slave.__dict__.get('uuid',None))
