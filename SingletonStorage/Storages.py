@@ -385,35 +385,35 @@ class PythonDictStorage:
 class EventDispatcherController:
     ROOT_KEY = 'Event'
 
-    def __init__(self, store=None):
-        if store is None:
-            store = SingletonPythonDictStorageController(PythonDictStorage())
-        self.store:SingletonStorageController = store
+    def __init__(self, client=None):
+        if client is None:
+            client = SingletonPythonDictStorageController(PythonDictStorage())
+        self.client:SingletonStorageController = client
     
     def events(self):
-        return list(zip(self.store.keys(f'*'),[self.store.get(k) for k in self.store.keys(f'*')]))
+        return list(zip(self.client.keys(f'*'),[self.client.get(k) for k in self.client.keys(f'*')]))
 
     def _find_event(self, uuid: str):
-        es = self.store.keys(f'*:{uuid}')
-        return [None] if len(es)==0 else self.store.get(es[0])
+        es = self.client.keys(f'*:{uuid}')
+        return [None] if len(es)==0 else self.client.get(es[0])
 
     def get_event(self, uuid: str):
-        return self.store.get(self._find_event(uuid)[0])
+        return self.client.get(self._find_event(uuid)[0])
     
     def delete_event(self, uuid: str):
-        return [self.store.delete(k) for k in self._find_event(uuid)]
+        return [self.client.delete(k) for k in self._find_event(uuid)]
     
     def set_event(self, event_name: str, callback, id:str=None):
         if id is None:id = uuid.uuid4()
-        self.store.set(f'{EventDispatcherController.ROOT_KEY}:{event_name}:{id}', callback)
+        self.client.set(f'{EventDispatcherController.ROOT_KEY}:{event_name}:{id}', callback)
         return id
     
     def dispatch(self, event_name, *args, **kwargs):
-        for event_full_uuid in self.store.keys(f'{EventDispatcherController.ROOT_KEY}:{event_name}:*'):
-            self.store.get(event_full_uuid)(*args, **kwargs)
+        for event_full_uuid in self.client.keys(f'{EventDispatcherController.ROOT_KEY}:{event_name}:*'):
+            self.client.get(event_full_uuid)(*args, **kwargs)
 
     def clean(self):
-        return self.store.clean()
+        return self.client.clean()
 class SingletonKeyValueStorage(SingletonStorageController):
 
     def __init__(self) -> None:
