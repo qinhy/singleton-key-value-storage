@@ -425,7 +425,8 @@ class SingletonKeyValueStorage(SingletonStorageController):
     
     if firestore_back:
         def firestore_backend(self,google_project_id=None,google_firestore_collection=None):
-            self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage(google_project_id,google_firestore_collection))
+            self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage(
+                                                    google_project_id,google_firestore_collection))
 
     if redis_back:
         def redis_backend(self,redis_URL='redis://127.0.0.1:6379'):
@@ -517,13 +518,15 @@ class Tests(unittest.TestCase):
         self.store.set('abeta', {'info': 'second'})
         self.store.set('gamma', {'info': 'third'})
         expected_keys = ['alpha', 'abeta']
-        self.assertEqual(sorted(self.store.keys('a*')), sorted(expected_keys), "Should return the correct keys matching the pattern.")
+        self.assertEqual(sorted(self.store.keys('a*')), sorted(expected_keys), 
+                         "Should return the correct keys matching the pattern.")
 
     def test_get_nonexistent(self):
         self.assertEqual(self.store.get('nonexistent'), None, "Getting a non-existent key should return None.")
         
     def test_dump_and_load(self):
-        raw = {"test1": {"data": 123}, "test2": {"data": 456}, "alpha": {"info": "first"}, "abeta": {"info": "second"}, "gamma": {"info": "third"}}
+        raw = {"test1": {"data": 123}, "test2": {"data": 456}, "alpha": {"info": "first"}, 
+               "abeta": {"info": "second"}, "gamma": {"info": "third"}}
         self.store.dump('test.json')
 
         self.store.clean()
