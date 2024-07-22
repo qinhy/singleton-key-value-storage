@@ -1,10 +1,6 @@
 
-import base64
 from datetime import datetime
-import io
 import json
-import os
-from typing import Any, List
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
@@ -45,7 +41,58 @@ class Controller4User:
             updated_metadata = {**self.model.metadata, key: value}
             self.update(metadata = updated_metadata)
             return self
+    
+    class UserController:
+        def __init__(self, store, model):
+            self.model:Model4User.User = model
+            self._store:UsersStore = store
+
+        def mail2user(self,message):
+            pass
+
+        def set_password(self,):
+            pass
+
+        def set_name(self,):
+            pass
+
+        def set_role(self,):
+            pass
+
+        def get_licenses(self,):
+            pass
+
+        def add_license(self,):
+            pass
+
+        def delete_license(self,):
+            pass
+
+        def get_appusages(self,):
+            pass
+
+        def add_appusage(self,):
+            pass
+
+        def delete_appusage(self,):
+            pass
         
+    class LicenseController:
+        def __init__(self, store, model):
+            self.model:Model4User.License = model
+            self._store:UsersStore = store
+
+        def delete(self):
+            pass
+
+    class AppUsageController:
+        def __init__(self, store, model):
+            self.model:Model4User.AppUsage = model
+            self._store:UsersStore = store
+
+        def delete(self):
+            pass
+
 class Model4User:
     class AbstractObj(BaseModel):
         id: str
@@ -153,57 +200,8 @@ class UsersStore(SingletonKeyValueStorage):
         return self._init_controller(
             self._store_obj(Model4User.AppUsage())
         )
+    
 
-    # def add_new_root_group(self,metadata={},rank=[0]) -> Model4User.ContentGroup:
-    #     group = self._store_obj( Model4User.ContentGroup(rank=rank, metadata=metadata) )         
-    #     group.init_controller(self,group)
-    #     return group
-    
-    # def _add_new_content_to_group(self,group:Model4User.ContentGroup,content:Model4User.AbstractContent,raw:str=None):
-    #     group.children_id.append(content.id)
-    #     self._store_obj(group)
-    #     if raw is not None and 'ContentGroup' not in content.id:
-    #         self._store_obj(content)
-    #         self._store_obj(Model4User.CommonData(id=content.data_id(), raw=raw))
-    #     else:
-    #         self._store_obj(content)
-    #     content.init_controller(self)
-    #     return group,content    
-
-    # def read_image(self, filepath):
-    #     with open(filepath, "rb") as f:
-    #         return f.read()
-        
-    # def b64encode(self, file_bytes):
-    #     return base64.b64encode(file_bytes)
-        
-    # def encode_image(self, image_bytes):
-    #     return self.b64encode(image_bytes)
-    
-    # def add_new_group_to_group(self,group:Model4User.ContentGroup,metadata={},rank=[0]):
-    #     parent,child = self._add_new_content_to_group(group, Model4User.ContentGroup(rank=rank, metadata=metadata, parent_id=group.id))
-    #     return parent,child
-
-    # def add_new_text_to_group(self,group:Model4User.ContentGroup,user_id:str,text:str):
-    #     parent,child = self._add_new_content_to_group(group,
-    #                                                   Model4User.TextContent(user_id=user_id, group_id=group.id),
-    #                                                   raw=text)
-    #     return parent,child
-    
-    # def add_new_embedding_to_group(self,group:Model4User.ContentGroup, user_id:str, content_id:str, vec:list[float]):
-    #     parent,child = self._add_new_content_to_group(group,
-    #                                                   Model4User.EmbeddingContent(user_id=user_id, 
-    #                                                                    group_id=group.id,target_id=content_id),
-    #                                                   raw=str(vec))
-    #     return parent,child
-    
-    # def add_new_image_to_group(self,group:Model4User.ContentGroup,user_id:str, filepath:str):
-    #     raw_bytes = self.read_image(filepath)
-    #     raw_base64 = self.encode_image(raw_bytes)
-    #     parent,child = self._add_new_content_to_group(group,
-    #                                                   Model4User.ImageContent(user_id=user_id,group_id=group.id),
-    #                                                   raw=raw_base64)
-    #     return parent,child
     
     # available for regx?
     def find(self,id:str) -> Model4User.AbstractObj:
