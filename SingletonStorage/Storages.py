@@ -416,10 +416,10 @@ class EventDispatcherController:
 
     def _find_event(self, uuid: str):
         es = self.client.keys(f'*:{uuid}')
-        return [None] if len(es)==0 else self.client.get(es[0])
-
+        return [None] if len(es)==0 else es
+    
     def get_event(self, uuid: str):
-        return self.client.get(self._find_event(uuid)[0])
+        return [self.client.get(k) for k in self._find_event(uuid)]
     
     def delete_event(self, uuid: str):
         return [self.client.delete(k) for k in self._find_event(uuid)]
