@@ -77,6 +77,13 @@ class Controller4User:
         def delete_appusage(self,):
             pass
         
+    class AppController:
+        def __init__(self, store, model):
+            self.model:Model4User.App = model
+            self._store:UsersStore = store
+
+        def delete(self):
+            pass
     class LicenseController:
         def __init__(self, store, model):
             self.model:Model4User.License = model
@@ -114,9 +121,9 @@ class Model4User:
         role:str
         email:str=None
         
-        # _controller: Controller4LLM.ContentGroupController = None
-        # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
-        # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
+        _controller: Controller4User.UserController = None
+        def get_controller(self)->Controller4User.UserController: return self._controller
+        def init_controller(self,store):self._controller = Controller4User.UserController(store,self)
 
     class App(AbstractObj):
         id: str = Field(default_factory=lambda :f"App:{uuid4()}")
@@ -125,14 +132,9 @@ class Model4User:
         major_name:str = None
         minor_name:str = None
         
-        # _controller: Controller4LLM.ContentGroupController = None
-        # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
-        # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
-
-    # class LicenseApp(AbstractObj):
-    #     license_App_id:int = 'auto increatment'
-    #     license_id:int = 'auto increatment'
-    #     App_id:int = 'auto increatment'
+        _controller: Controller4User.AppController = None
+        def get_controller(self)->Controller4User.AppController: return self._controller
+        def init_controller(self,store):self._controller = Controller4User.AppController(store,self)
 
     class License(AbstractObj):
         id: str = Field(default_factory=lambda :f"License:{uuid4()}")
@@ -143,9 +145,9 @@ class Model4User:
         running_time:int = 0
         max_running_time:int = 0
         
-        # _controller: Controller4LLM.ContentGroupController = None
-        # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
-        # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
+        _controller: Controller4User.LicenseController = None
+        def get_controller(self)->Controller4User.LicenseController: return self._controller
+        def init_controller(self,store):self._controller = Controller4User.LicenseController(store,self)
 
     class AppUsage(AbstractObj):
         id: str = Field(default_factory=lambda :f"AppUsage:{uuid4()}")
@@ -156,9 +158,9 @@ class Model4User:
         end_time:datetime = None
         running_time_cost:int = 0
         
-        # _controller: Controller4LLM.ContentGroupController = None
-        # def get_controller(self)->Controller4User.AbstractObjController: return self._controller
-        # def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
+        _controller: Controller4User.AppUsageController = None
+        def get_controller(self)->Controller4User.AppUsageController: return self._controller
+        def init_controller(self,store):self._controller = Controller4User.AppUsageController(store,self)
 
 class UsersStore(SingletonKeyValueStorage):
     
@@ -200,8 +202,6 @@ class UsersStore(SingletonKeyValueStorage):
         return self._init_controller(
             self._store_obj(Model4User.AppUsage())
         )
-    
-
     
     # available for regx?
     def find(self,id:str) -> Model4User.AbstractObj:
