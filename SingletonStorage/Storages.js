@@ -1,18 +1,5 @@
 class SingletonStorageController {
-    slaves() { return this.model.slaves; }
-    add_slave(slave) { if(!slave.uuid)slave.uuid=self._randuuid();this.slaves().push(slave);}
-    delete_slave(slave) { this.model.slaves = this.model.slaves.filter(s=>s.uuid!=slave.uuid)}
-
-    _set_slaves(key, value) {
-        this.slaves().forEach(slave => {
-            if (slave.set) { slave.set(key, value); }
-        });
-    }
-    _delete_slaves(key) {
-        this.slaves().forEach(slave => {
-            if (slave.delete) { slave.delete(key); }
-        });
-    }
+    
     exists(key) { console.log(`[${this.constructor.name}]: not implemented`); }
     set(key, value) { console.log(`[${this.constructor.name}]: not implemented`); }
     get(key) { console.log(`[${this.constructor.name}]: not implemented`); }
@@ -37,7 +24,6 @@ class SingletonJavascriptDictStorage {
         if (!SingletonJavascriptDictStorage._instance) {
             SingletonJavascriptDictStorage._instance = this;
             this.store = {};
-            this.slaves = [];
         }
         return SingletonJavascriptDictStorage._instance;
     }
@@ -56,14 +42,12 @@ class SingletonJavascriptDictStorageController extends SingletonStorageControlle
 
     set(key, value) {
         this.model.get()[key] = value;
-        this._set_slaves(key, value);
     }
 
     get(key) { return this.model.get()[key] || null; }
 
     delete(key) {
         if (key in this.model.get()) { delete this.model.get()[key]; }
-        this._delete_slaves(key);
     }
 
     keys(pattern = '*') {
@@ -89,7 +73,6 @@ class SingletonVueStorage {
                 this.store = null;
             }
 
-            this.slaves = [];
         }
         return SingletonVueStorage._instance;
     }
@@ -114,7 +97,6 @@ class SingletonIndexedDBStorage {
         if (!SingletonIndexedDBStorage._instance) {
             SingletonIndexedDBStorage._instance = this;
             this.dbPromise = this.initializeDB();
-            this.slaves = [];
         }
         return SingletonIndexedDBStorage._instance;
     }
@@ -163,7 +145,6 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
             const request = objectStore.put({ id: key, value: value });
             return new Promise((resolve, reject) => {
                 request.onsuccess = () => {
-                    this._set_slaves(key, value);
                     resolve();
                 };
                 request.onerror = () => reject(request.error);
@@ -190,7 +171,6 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
             const request = objectStore.delete(key);
             return new Promise((resolve, reject) => {
                 request.onsuccess = () => {
-                    this._delete_slaves(key);
                     resolve();
                 };
                 request.onerror = () => reject(request.error);
@@ -287,7 +267,6 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
                 return new Promise((resolve, reject) => {
                     const request = objectStore.put({ id: key, value: value });
                     request.onsuccess = () => {
-                        this._set_slaves(key, value);
                         resolve();
                     };
                     request.onerror = () => reject(request.error);
@@ -302,23 +281,98 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
 }
 
 
+class JavascriptDictStorage {
+    constructor() {
+        this.uuid = this._randuuid();
+        this.store = {};
+    }
+    _randuuid(prefix = '') {
+        return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
+            return Math.floor(Math.random() * 16).toString(16);
+        });
+    }
+}
+
+class EventDispatcherController {
+    static ROOT_KEY = 'Event';
+
+    constructor(client = null) {
+        if (client === null) {
+            client = new SingletonJavascriptDictStorageController(new JavascriptDictStorage());
+        }
+        this.client = client;
+    }
+
+    events() {
+        return this.client.keys('*').map(k => [k, this.client.get(k)]);
+    }
+
+    _find_event(uuid) {
+        const events = this.client.keys(`*:${uuid}`);
+        return events.length === 0 ? [null] : this.client.get(events[0]);
+    }
+
+    get_event(uuid) {
+        const event = this._find_event(uuid);
+        return this.client.get(event[0]);
+    }
+
+    delete_event(uuid) {
+        this._find_event(uuid).forEach(k => this.client.delete(k));
+    }
+
+    set_event(eventName, callback, id = null) {
+        if (id === null) id = this.client._randuuid();
+        this.client.set(`${EventDispatcherController.ROOT_KEY}:${eventName}:${id}`, callback);
+        return id;
+    }
+
+    dispatch(event_name, ...args) {
+        this.client.keys(`${EventDispatcherController.ROOT_KEY}:${event_name}:*`).forEach(eventFullUuid => {
+            this.client.get(eventFullUuid)(...args);
+        });
+    }
+
+    clean() {
+        return this.client.clean();
+    }
+}
+
 class SingletonKeyValueStorage extends SingletonStorageController {
     constructor() {
         super();
         this.js_backend();
+        this.event_dispa = new EventDispatcherController();
     }
 
     js_backend() { this.client = new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()); return this; }
     vue_backend() { this.client = new SingletonVueStorageController(new SingletonVueStorage()); return this; }
     indexedDB_backend() { this.client = new SingletonIndexedDBStorageController(new SingletonIndexedDBStorage()); return this; }
 
-    slaves() { return this.client.slaves(); }
-    add_slave(slave) { if(!slave.uuid)slave.uuid=self._randuuid();this.slaves().push(slave);}
-    delete_slave(slave) { this.client.model.slaves = this.client.model.slaves.filter(s=>s.uuid!=slave.uuid)}
+    add_slave(slave, event_names = ['set', 'delete']) {
+        slave.uuid = slave.uuid??this.client._randuuid();
+        event_names.forEach(eventName => {
+            if (typeof slave[eventName] === 'function') {
+                this.event_dispa.set_event(eventName, slave[eventName], slave.uuid);
+            }
+        });
+    }
+    delete_slave(slave) { 
+        this.event_dispa.delete_event(slave.uuid);
+    }
+    set(key, value) {
+        const result = this.client.set(key, value);
+        this.event_dispa.dispatch('set', key, value);
+        return result;
+    }
+    
+    delete(key) {
+        const result = this.client.delete(key);
+        this.event_dispa.dispatch('delete', key);
+        return result;
+    }
 
     exists(key) { return this.client.exists(key); }
-    set(key, value) { return this.client.set(key, value); }
-    get(key) { return this.client.get(key); }
     delete(key) { return this.client.delete(key); }
     keys(pattern = '*') { return this.client.keys(pattern); }
     clean() { return this.client.clean(); }
