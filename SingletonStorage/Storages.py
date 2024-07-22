@@ -42,24 +42,24 @@ class KeysHistoryController:
 class SingletonStorageController:
     def __init__(self, model):
         self.model:object = model
-        self.hist_con = KeysHistoryController(self)
+        self._hist_con = KeysHistoryController(self)
 
     def exists(self, key: str) -> bool: 
-        return self.hist_con.get_history(key)
+        return self._hist_con.get_history(key)
         #print(f'[{self.__class__.__name__}]: not implement')
 
     def set(self, key: str, value: dict): 
-        self.hist_con.reset()
+        self._hist_con.reset()
         #print(f'[{self.__class__.__name__}]: not implement')
 
     def get(self, key: str) -> dict: print(f'[{self.__class__.__name__}]: not implement')
 
     def delete(self, key: str): 
-        self.hist_con.reset()
+        self._hist_con.reset()
         #print(f'[{self.__class__.__name__}]: not implement')
 
     def keys(self, pattern: str='*') -> list[str]: 
-        return self.hist_con.get_history(pattern)
+        return self._hist_con.get_history(pattern)
         #print(f'[{self.__class__.__name__}]: not implement')
     
     def clean(self): [self.delete(k) for k in self.keys('*')]
