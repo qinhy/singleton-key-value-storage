@@ -31,10 +31,10 @@ class SingletonStorageController:
         return self.model.__dict__.get('slaves',[])
         
     def _set_slaves(self, key: str, value: dict):
-        [s.set(key, value) for s in self._slaves() if hasattr(s, 'set')]
+        [getattr(s,'set')(key, value) for s in self._slaves() if hasattr(s, 'set')]
     
     def _delete_slaves(self, key: str):
-        [s.delete(key) for s in self._slaves() if hasattr(s, 'delete')]
+        [getattr(s,'delete')(key) for s in self._slaves() if hasattr(s, 'delete')]
 
     def add_slave(self, slave:object) -> bool:
         if slave.__dict__.get('uuid',None) is None:
