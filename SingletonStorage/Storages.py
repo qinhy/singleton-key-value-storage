@@ -440,7 +440,10 @@ class SingletonKeyValueStorage(SingletonStorageController):
             slave.__dict__['uuid'] = uuid.uuid4()
         for m in ['set','delete']:
             if hasattr(slave, m):
-                self.event_dispa.set_event(m,getattr(slave,m),slave.__dict__['uuid'])
+                self.event_dispa.set_event(m,getattr(slave,m),slave.__dict__.get('uuid',None))
+                
+    def delete_slave(self, slave:object) -> bool:
+        self.event_dispa.delete_event(slave.__dict__.get('uuid',None))
 
     def set(self, key: str, value: dict):           
         self.event_dispa.dispatch('set',key,value)
