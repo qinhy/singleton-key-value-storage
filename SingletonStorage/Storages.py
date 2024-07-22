@@ -3,12 +3,12 @@ import sqlite3
 import threading
 import queue
 import time
-import urllib.parse
 import uuid
 import fnmatch
 import json
 import unittest
 import urllib
+import urllib.parse
 from urllib.parse import urlparse
 
 def get_error(func):
@@ -321,6 +321,7 @@ if sqlite_back:
             else:
                 query = f"INSERT INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
                 result = self._execute_query_with_res(query)
+            return result
 
 
         def get(self, key: str) -> dict:
@@ -332,7 +333,7 @@ if sqlite_back:
         
         def delete(self, key: str):
             query = f"DELETE FROM KeyValueStore WHERE key = '{key}'"
-            result = self._execute_query_with_res(query)
+            return self._execute_query_with_res(query)
 
         def keys(self, pattern: str='*') -> list[str]:
             pattern = pattern.replace('*', '%').replace('?', '_')  # Translate fnmatch pattern to SQL LIKE pattern
