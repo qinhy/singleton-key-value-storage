@@ -435,10 +435,10 @@ class SingletonKeyValueStorage(SingletonStorageController):
         def sqlite_backend(self):
             self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
 
-    def add_slave(self, slave:object) -> bool:
+    def add_slave(self, slave:object, event_names=['set','delete']) -> bool:
         if slave.__dict__.get('uuid',None) is None:
             slave.__dict__['uuid'] = uuid.uuid4()
-        for m in ['set','delete']:
+        for m in event_names:
             if hasattr(slave, m):
                 self.event_dispa.set_event(m,getattr(slave,m),slave.__dict__.get('uuid',None))
                 
