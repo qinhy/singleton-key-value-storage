@@ -132,23 +132,27 @@ class UsersStore(SingletonKeyValueStorage):
         self.set(obj.id,json.loads(obj.model_dump_json()))
         return obj
     
-    def _add_new_obj(self, *args, **kwargs) -> Model4User.User:
-        user = self._store_obj(Model4User.User(name=name, role=role, rank=rank, metadata=metadata))
-        user.init_controller(self,user)
-        return user
+    def _init_controller(self,obj:Model4User.AbstractObj):
+        obj.init_controller(self,obj)
+        return obj
+
     def add_new_user(self, name, role, rank:list=[0], metadata={}) -> Model4User.User:
-        user = self._store_obj(Model4User.User(name=name, role=role, rank=rank, metadata=metadata))
-        user.init_controller(self,user)
-        return user
-    def add_new_user(self, name, role, rank:list=[0], metadata={}) -> Model4User.User:
-        user = self._store_obj(Model4User.User(name=name, role=role, rank=rank, metadata=metadata))
-        user.init_controller(self,user)
-        return user
-    
-    def ad
-    App(AbstractObj)
-    License(AbstractObj)
-    AppUsage(AbstractObj)
+        return self._init_controller(
+            self._store_obj(Model4User.User(name=name, role=role, rank=rank, metadata=metadata))
+        )
+    def add_new_app(self, major_name:str,minor_name:str,running_cost:int=0,parent_App_id:str=None) -> Model4User.App:
+        return self._init_controller(
+            self._store_obj(Model4User.App(major_name=major_name,minor_name=minor_name,
+                                           running_cost=running_cost,parent_App_id=parent_App_id))
+        )
+    def add_new_license(self) -> Model4User.License:
+        return self._init_controller(
+            self._store_obj(Model4User.License())
+        )
+    def add_new_appUsage(self) -> Model4User.AppUsage:
+        return self._init_controller(
+            self._store_obj(Model4User.AppUsage())
+        )
 
     # def add_new_root_group(self,metadata={},rank=[0]) -> Model4User.ContentGroup:
     #     group = self._store_obj( Model4User.ContentGroup(rank=rank, metadata=metadata) )         
