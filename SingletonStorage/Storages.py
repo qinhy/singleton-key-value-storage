@@ -592,13 +592,13 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def delete_slave(self, slave:object) -> bool:
         self.event_dispa.delete_event(slave.__dict__.get('uuid',None))
 
-    def set(self, key: str, value: dict):   
-        res = self.client.set( key, value)        
+    def set(self, key: str, value: dict):
+        res = self.client.set(key,value)
         self.event_dispa.dispatch('set',key,value)
         return res
     
-    def delete(self, key: str):                
-        res = self.client.delete(key)     
+    def delete(self, key: str):
+        res = self.client.delete(key)
         self.event_dispa.dispatch('delete',key)
         return res
 
@@ -610,7 +610,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def load(self,json_path):                       return self.client.load(json_path)
     def dumps(self,):                               return self.client.dumps()
     def loads(self,json_str):                       return self.client.loads(json_str)
-    
+
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs) -> None:
         super().__init__(*args,**kwargs)
