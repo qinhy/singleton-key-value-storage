@@ -35,7 +35,7 @@ class KeysHistoryController:
 
     def reset(self):
         self.controller.set('_History:',{})
-    def set_history(self,key: str, result):
+    def set_history(self,key: str, result:dict):
         self.controller.set(f'_History:{self._str2base64(key)}',{'result':result})
     def get_history(self,key: str):
         self.controller.get(f'_History:{self._str2base64(key)}')['result']
@@ -444,10 +444,7 @@ if aws_dynamo:
 
             return matched_keys
 
-# import uuid
-# import json
 # from azure.data.tables import TableServiceClient
-# import fnmatch
 
 # class SingletonAzureTableStorage:
 #     _instance = None
@@ -612,7 +609,8 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def dump(self,json_path):                       return self.client.dump(json_path)
     def load(self,json_path):                       return self.client.load(json_path)
     def dumps(self,):                               return self.client.dumps()
-    def loads(self,json_str):                       return self.client.loads(json_str)    
+    def loads(self,json_str):                       return self.client.loads(json_str)
+    
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs) -> None:
         super().__init__(*args,**kwargs)
