@@ -15,7 +15,20 @@ class SingletonStorageController {
         });
     }
 }
-
+class JavascriptDictStorage {
+    constructor() {
+        this.uuid = this._randuuid();
+        this.store = {};
+    }
+    _randuuid(prefix = '') {
+        return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
+            return Math.floor(Math.random() * 16).toString(16);
+        });
+    }
+    get() {
+        return this.store;
+    }
+}
 class SingletonJavascriptDictStorage {
     static _instance = null;
     static _meta = {};
@@ -53,6 +66,89 @@ class SingletonJavascriptDictStorageController extends SingletonStorageControlle
     keys(pattern = '*') {
         const regex = new RegExp(pattern.replace(/\*/g, '.*'));
         return Object.keys(this.model.get()).filter(key => key.match(regex));
+    }
+}
+
+
+class EventDispatcherController {
+    static ROOT_KEY = 'Event';
+
+    constructor(client = null) {
+        if (client === null) {
+            client = new SingletonJavascriptDictStorageController(new JavascriptDictStorage());
+        }
+        this.client = client;
+    }
+
+    events() {
+        return this.client.keys('*').map(k => [k, this.client.get(k)]);
+    }
+
+    _find_event(uuid) {
+        const es = this.client.keys(`*:${uuid}`);
+        return es.length === 0 ? [null] : es;
+    }
+
+    get_event(uuid) {
+        return this._find_event(uuid).map(k => this.client.get(k));
+    }
+
+    delete_event(uuid) {
+        return this._find_event(uuid).forEach(k => this.client.delete(k));
+    }
+
+    set_event(event_name, callback, id = null) {
+        if (id === null) id = uuidv4();
+        this.client.set(`${EventDispatcherController.ROOT_KEY}:${event_name}:${id}`, callback);
+        return id;
+    }
+
+    dispatch(event_name, ...args) {
+        this.client.keys(`${EventDispatcherController.ROOT_KEY}:${event_name}:*`).forEach(event_full_uuid => {
+            this.client.get(event_full_uuid)(...args);
+        });
+    }
+
+    clean() {
+        return this.client.clean();
+    }
+}
+
+class KeysHistoryController {
+    constructor(client = null) {
+        if (client === null) {
+            client = new SingletonJavascriptDictStorageController(new JavascriptDictStorage());
+        }
+        this.client = client;
+    }
+
+    _str2base64(key) {
+        return btoa(key);
+    }
+
+    reset() {
+        this.client.set('_History:', {});
+    }
+
+    set_history(key, result) {
+        if (result) {
+            this.client.set(`_History:${this._str2base64(key)}`, { result });
+        }
+        return result;
+    }
+
+    get_history(key) {
+        const res = this.client.get(`_History:${this._str2base64(key)}`);
+        return res ? res.result : null;
+    }
+
+    try_history(key, result_func = () => null) {
+        let res = this.get_history(key);
+        if (res === null) {
+            res = result_func();
+            if (res) this.set_history(key, res);
+        }
+        return res;
     }
 }
 
@@ -216,8 +312,6 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
                         // Delete each entry one by one
                         const deleteRequest = cursor.delete();
                         deleteRequest.onsuccess = () => {
-                            // Continue deleting next entry
-                            this._delete_slaves(cursor.key);
                             cursor.continue();
                         };
                         deleteRequest.onerror = () => reject(deleteRequest.error);
@@ -280,111 +374,61 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
     }
 }
 
-
-class JavascriptDictStorage {
-    constructor() {
-        this.uuid = this._randuuid();
-        this.store = {};
-    }
-    _randuuid(prefix = '') {
-        return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
-            return Math.floor(Math.random() * 16).toString(16);
-        });
-    }
-}
-
-class EventDispatcherController {
-    static ROOT_KEY = 'Event';
-
-    constructor(client = null) {
-        if (client === null) {
-            client = new SingletonJavascriptDictStorageController(new JavascriptDictStorage());
-        }
-        this.client = client;
-    }
-
-    events() {
-        return this.client.keys('*').map(k => [k, this.client.get(k)]);
-    }
-
-    _find_event(uuid) {
-        const events = this.client.keys(`*:${uuid}`);
-        return events.length === 0 ? [null] : this.client.get(events[0]);
-    }
-
-    get_event(uuid) {
-        const event = this._find_event(uuid);
-        return this.client.get(event[0]);
-    }
-
-    delete_event(uuid) {
-        this._find_event(uuid).forEach(k => this.client.delete(k));
-    }
-
-    set_event(eventName, callback, id = null) {
-        if (id === null) id = this.client._randuuid();
-        this.client.set(`${EventDispatcherController.ROOT_KEY}:${eventName}:${id}`, callback);
-        return id;
-    }
-
-    dispatch(event_name, ...args) {
-        this.client.keys(`${EventDispatcherController.ROOT_KEY}:${event_name}:*`).forEach(eventFullUuid => {
-            this.client.get(eventFullUuid)(...args);
-        });
-    }
-
-    clean() {
-        return this.client.clean();
-    }
-}
-
 class SingletonKeyValueStorage extends SingletonStorageController {
+
     constructor() {
         super();
+        this.conn = null;
         this.js_backend();
-        this.event_dispa = new EventDispatcherController();
     }
 
-    js_backend() { this.client = new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()); return this; }
-    vue_backend() { this.client = new SingletonVueStorageController(new SingletonVueStorage()); return this; }
-    indexedDB_backend() { this.client = new SingletonIndexedDBStorageController(new SingletonIndexedDBStorage()); return this; }
+    init() {
+        this.event_dispa = new EventDispatcherController();
+        this._hist = new KeysHistoryController();
+    }
 
+    js_backend() { this.init(); this.conn = new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()); return this; }
+    vue_backend() { this.init(); this.conn = new SingletonVueStorageController(new SingletonVueStorage()); return this; }
+    indexedDB_backend() { this.init(); this.conn = new SingletonIndexedDBStorageController(new SingletonIndexedDBStorage()); return this; }
+    
     add_slave(slave, event_names = ['set', 'delete']) {
-        slave.uuid = slave.uuid??this.client._randuuid();
-        event_names.forEach(eventName => {
-            if (typeof slave[eventName] === 'function') {
-                this.event_dispa.set_event(eventName, slave[eventName], slave.uuid);
+        if (!slave.uuid) slave.uuid = this.randuuid();
+        event_names.forEach(m => {
+            if (slave[m]) {
+                this.event_dispa.set_event(m, slave[m], slave.uuid);
             }
         });
     }
-    delete_slave(slave) { 
+
+    delete_slave(slave) {
         this.event_dispa.delete_event(slave.uuid);
     }
-    set(key, value) {
-        const result = this.client.set(key, value);
-        this.event_dispa.dispatch('set', key, value);
-        return result;
-    }
-    
-    delete(key) {
-        const result = this.client.delete(key);
-        this.event_dispa.dispatch('delete', key);
-        return result;
-    }
 
-    exists(key) { return this.client.exists(key); }
-    delete(key) { return this.client.delete(key); }
-    keys(pattern = '*') { return this.client.keys(pattern); }
-    clean() { return this.client.clean(); }
-    dumps() { return this.client.dumps(); }
-    loads(jsonStr) { return this.client.loads(jsonStr); }
-    randuuid() { return this.client._randuuid(); }
+    _edit(func_name, key, value = null) {
+        this._hist.reset();
+        const func = this.conn[func_name];
+        const args = value ? [key, value] : [key];
+        const res = func.apply(this.conn, args);
+        this.event_dispa.dispatch(func_name, ...args);
+        return res;
+    }
+    set(key, value) { return this._edit('set', key, value); }
+    delete(key) { return this._edit('delete', key); }
+
+    exists(key) { return this._hist.try_history(key, () => this.conn.exists(key)); }
+    keys(regx = '*') { return this._hist.try_history(regx, () => this.conn.keys(regx)); }
+
+    get(key) { return this.conn.get(key); }
+    clean() { return this.conn.clean(); }
+    dumps() { return this.conn.dumps(); }
+    loads(json_str) { return this.conn.loads(json_str); }
+    randuuid() { return this.conn._randuuid(); }
 }
 
 // Tests for SingletonKeyValueStorage 
 [new SingletonKeyValueStorage().js_backend(), new SingletonKeyValueStorage().vue_backend(), new SingletonKeyValueStorage().indexedDB_backend()]
     .forEach(storage => {
-        console.log(`Testing ${storage.client.constructor.name}...`);
+        console.log(`Testing ${storage.conn.constructor.name}...`);
 
         // Test 1: Set and Get
         storage.set('key1', { data: 'value1' });
