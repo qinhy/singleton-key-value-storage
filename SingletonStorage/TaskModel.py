@@ -1,11 +1,15 @@
 
 from datetime import datetime
 import json
+import queue
+from threading import Thread
+import time
+from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
 
-from .Storages import SingletonKeyValueStorage
+from Storages import EventDispatcherController, SingletonKeyValueStorage
 
 def get_current_datetime_with_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
@@ -56,16 +60,22 @@ class Controller4Task:
             pass
 
         def set_status(self,status:str=PENDING):
-            self.update({'status':status})
+            self.update(status=status)
 
         def set_pending(self):
             self.set_status(Controller4Task.TaskController.PENDING)
+        def set_processing(self):
+            self.set_status(Controller4Task.TaskController.PROCESSING)
+        def set_success(self):
+            self.set_status(Controller4Task.TaskController.SUCCESS)
+        def set_failure(self):
+            self.set_status(Controller4Task.TaskController.FAILURE)
 
         def set_result(self,result:dict):
-            self.update({'result':result})
+            self.update(result=result)
 
         def set_error(self,error:dict):
-            self.update({'error':error})
+            self.update(error=error)
 
         
 class Model4Task:
@@ -77,7 +87,6 @@ class Model4Task:
         status: str = ""
         metadata: dict = {}
 
-
         model_config = ConfigDict(arbitrary_types_allowed=True)    
         _controller: Controller4Task.AbstractObjController = None
         def get_controller(self)->Controller4Task.AbstractObjController: return self._controller
@@ -87,9 +96,9 @@ class Model4Task:
         id: str = Field(default_factory=lambda :f"Task:{uuid4()}")
         status: str = "pending"
         name:str
-        args:dict
-        result:dict = None
-        error:dict = None
+        args:list
+        result:Any = None
+        error:Any = None
         
         _controller: Controller4Task.TaskController = None
         def get_controller(self)->Controller4Task.TaskController: return self._controller
@@ -99,8 +108,15 @@ class Model4Task:
 class TaskStore(SingletonKeyValueStorage):
     
     def __init__(self) -> None:
-        self.python_backend()
-        
+        self.python_backend() # only python backend works
+        self.event_dispa = EventDispatcherController()
+    
+        if self.get('_task_queue') is None:
+            self.set('_task_queue',queue.Queue())
+    
+    def get_task_queue(self)->queue.Queue:
+        return self.get('_task_queue')
+
     def _client(self):
         return self.client
     
@@ -112,15 +128,12 @@ class TaskStore(SingletonKeyValueStorage):
         return res
     
     def _init_controller(self,obj:Model4Task.AbstractObj):
-        obj.init_controller(self,obj)
+        obj.init_controller(self)
         return obj
        
     def _store_obj(self, obj:Model4Task.AbstractObj):
         self.set(obj.id,json.loads(obj.model_dump_json()))
         return self._init_controller(obj)
-
-    def add_new_task(self, name, args={}, rank:list=[0], metadata={}) -> Model4Task.Task:
-        return self._store_obj(Model4Task.Task(name=name, args=args, rank=rank, metadata=metadata))
     
     # available for regx?
     def find(self,id:str) -> Model4Task.AbstractObj:
@@ -143,28 +156,67 @@ class TaskStore(SingletonKeyValueStorage):
 # - get runnable task list by task_id.
 # - get all tasks id list.
 
-    def task_runnable_list():
-        pass
+    def add_new_task(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
+        task = self._store_obj(Model4Task.Task(name=name, args=args, rank=rank, metadata=metadata))
+        self.get_task_queue().put(task)
+        return task
 
-    def task_id_list():
-        pass
+    def add_runnable(self, runnable_name, runnable):
+        self.set(f'_Runnable:{runnable_name}',runnable)
 
-    def task_status(self, id):
-        t = self.find_task(id)
-        return t.status
+    def runnable_list(self):
+        return self.keys('_Runnable:*')
 
-    def task_result(self, id):
-        t = self.find_task(id)
-        return t.result
+    def task_worker(self,uuid):
+        while not self.get(uuid).__dict__.get('stop',True):
+            if not self.get_task_queue().empty():
+                res = 'NULL'
+                task:Model4Task.Task = self.get_task_queue().get()
+                try:
+                    task.get_controller().set_pending()
+                    res = self.get(f'_Runnable:{task.name}')(*task.args)
+                except Exception as e:
+                    task.get_controller().set_failure()
+                    task.get_controller().set_error(e)
+                task.get_controller().set_success()
+                if res != 'NULL':
+                    task.get_controller().set_result(res)
+                self.get_task_queue().task_done()
+            time.sleep(1)
+
+    def get_workers(self)->list[Thread]:
+        return [self.get(k) for k in self.keys('_Worker:*')]
     
-    def task_error(self, id):
-        t = self.find_task(id)
-        return t.error
-    
-    def task_args(self, id):
-        t = self.find_task(id)
-        return t.args
+    def stop_workers(self):
+        [self.delete_worker(k) for k in self.keys('_Worker:*')]
 
-    def task_function_name(self, id):
-        t = self.find_task(id)
-        return t.name
+    def add_worker(self):
+        id = f'_Worker:{uuid4()}'
+        thread = Thread(target=self.task_worker, args=(id,))
+        thread.stop = False
+        self.set(id,thread)
+        thread.start()
+        return id
+    
+    def delete_worker(self,id):
+        thread:Thread = self.get(id)
+        thread.stop = True
+        thread.join()
+        self.delete(id)
+
+    def task_list(self)->list[Model4Task.Task]:
+        return self.find_all('Task:*')
+
+    def get_task(self, id)->Model4Task.Task:
+        return self.find_task(id)
+
+
+
+##### testing
+ts = TaskStore()
+w = ts.add_worker()
+ts.add_runnable('print',print)
+t = ts.add_new_task('print',[1,2,3,4])
+# 1 2 3 4
+ts.task_list()
+ts.stop_workers()
