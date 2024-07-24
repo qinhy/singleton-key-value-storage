@@ -98,7 +98,7 @@ class EventDispatcherController {
     }
 
     set_event(event_name, callback, id = null) {
-        if (id === null) id = uuidv4();
+        if (id === null) id = this.client._randuuid();
         this.client.set(`${EventDispatcherController.ROOT_KEY}:${event_name}:${id}`, callback);
         return id;
     }
