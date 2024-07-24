@@ -545,7 +545,7 @@ if mongo_back:
         def delete(self, key: str):
             self.model.collection.delete_one({self._ID_KEY(): key})
 
-        def keys(self, pattern: str = '*') -> list:
+        def keys(self, pattern: str = '*') -> list[str]:
             regex = '^'+pattern.replace('*', '.*')
             return [doc['_id'] for doc in self.model.collection.find({self._ID_KEY(): {"$regex": regex}})]
 
