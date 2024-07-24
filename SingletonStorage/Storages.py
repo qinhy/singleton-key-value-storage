@@ -563,7 +563,7 @@ class EventDispatcherController:
         self.client:SingletonStorageController = client
     
     def events(self):
-        return list(zip(self.client.keys(f'*'),[self.client.get(k) for k in self.client.keys(f'*')]))
+        return list(zip(self.client.keys('*'),[self.client.get(k) for k in self.client.keys('*')]))
 
     def _find_event(self, uuid: str):
         es = self.client.keys(f'*:{uuid}')
@@ -589,16 +589,19 @@ class EventDispatcherController:
     
 
 class KeysHistoryController:
-    def __init__(self, controller):
-        self.controller:SingletonKeyValueStorage = controller        
+    def __init__(self, client=None):
+        if client is None:
+            client = SingletonPythonDictStorageController(PythonDictStorage())
+        self.client:SingletonStorageController = client
+
     def _str2base64(self,key: str):
         return base64.b64encode(key.encode())
     def reset(self):
-        self.controller.set('_History:',{})
+        self.client.set('_History:',{})
     def set_history(self,key: str, result:dict):
-        self.controller.set(f'_History:{self._str2base64(key)}',{'result':result})
+        self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
     def get_history(self,key: str):
-        res = self.controller.get(f'_History:{self._str2base64(key)}')
+        res = self.client.get(f'_History:{self._str2base64(key)}')
         return res.get('result',None) if res else None
 
 class SingletonKeyValueStorage(SingletonStorageController):
@@ -608,7 +611,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
     
     def init(self):        
         self.event_dispa = EventDispatcherController()
-        self._hist_con = KeysHistoryController(SingletonPythonDictStorageController(PythonDictStorage()))
+        self._hist_con = KeysHistoryController()
     
     def python_backend(self):
         self.init()
