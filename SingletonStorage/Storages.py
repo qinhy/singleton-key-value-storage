@@ -525,26 +525,29 @@ if mongo_back:
             self.collection:collection.Collection = self.collection
 
     class SingletonMongoDBStorageController(SingletonStorageController):
+        
         def __init__(self, model: SingletonMongoDBStorage):
             self.model: SingletonMongoDBStorage = model
 
+        def _ID_KEY(self):return '_id'
+
         def exists(self, key: str) -> bool:
-            return self.model.collection.find_one({"_id": key}) is not None
+            return self.model.collection.find_one({self._ID_KEY(): key}) is not None
 
         def set(self, key: str, value: dict):
-            self.model.collection.update_one({"_id": key}, {"$set": value}, upsert=True)
+            self.model.collection.update_one({self._ID_KEY(): key}, {"$set": value}, upsert=True)
 
         def get(self, key: str) -> dict:
-            res = self.model.collection.find_one({"_id": key})            
+            res = self.model.collection.find_one({self._ID_KEY(): key})            
             if res: del res['_id']
             return res
 
         def delete(self, key: str):
-            self.model.collection.delete_one({"_id": key})
+            self.model.collection.delete_one({self._ID_KEY(): key})
 
         def keys(self, pattern: str = '*') -> list:
             regex = '^'+pattern.replace('*', '.*')
-            return [doc['_id'] for doc in self.model.collection.find({"_id": {"$regex": regex}})]
+            return [doc['_id'] for doc in self.model.collection.find({self._ID_KEY(): {"$regex": regex}})]
 
 
 class PythonDictStorage:
