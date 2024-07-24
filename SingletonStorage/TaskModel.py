@@ -71,10 +71,10 @@ class Controller4Task:
         def set_failure(self):
             self.set_status(Controller4Task.TaskController.FAILURE)
 
-        def set_result(self,result:dict):
+        def set_result(self,result):
             self.update(result=result)
 
-        def set_error(self,error:dict):
+        def set_error(self,error):
             self.update(error=error)
 
         
