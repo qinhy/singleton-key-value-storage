@@ -53,6 +53,10 @@ class SingletonStorageController:
     def load(self,path):
         with open(path, "r") as tf: self.loads(tf.read())
 
+class PythonDictStorage:
+    def __init__(self):
+        self.uuid = uuid.uuid4()
+        self.store = {}
 class SingletonPythonDictStorage:
     _instance = None
     _meta = {}
@@ -72,17 +76,14 @@ class SingletonPythonDictStorageController(SingletonStorageController):
     def __init__(self, model:SingletonPythonDictStorage):
         self.model:SingletonPythonDictStorage = model
 
-    def exists(self, key: str)->bool:
-        return key in self.model.store
+    def exists(self, key: str)->bool: return key in self.model.store
 
-    def set(self, key: str, value: dict):
-        self.model.store[key] = value
+    def set(self, key: str, value: dict): self.model.store[key] = value
 
-    def get(self, key: str)->dict:
-        return self.model.store.get(key,None)
+    def get(self, key: str)->dict: return self.model.store.get(key,None)
 
     def delete(self, key: str):
-        if key in self.model.store:
+        if key in self.model.store:     
             del self.model.store[key]
 
     def keys(self, pattern: str='*')->list[str]:
@@ -560,11 +561,6 @@ if mongo_back:
             regex = '^'+pattern.replace('*', '.*')
             return [doc['_id'] for doc in self.model.collection.find({self._ID_KEY(): {"$regex": regex}})]
 
-
-class PythonDictStorage:
-    def __init__(self):
-        self.uuid = uuid.uuid4()
-        self.store = {}
 class EventDispatcherController:
     ROOT_KEY = 'Event'
 
@@ -598,7 +594,6 @@ class EventDispatcherController:
     def clean(self):
         return self.client.clean()
     
-
 class KeysHistoryController:
     def __init__(self, client=None):
         if client is None:
