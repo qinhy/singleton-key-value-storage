@@ -595,14 +595,24 @@ class KeysHistoryController:
         self.client:SingletonStorageController = client
 
     def _str2base64(self,key: str):
-        return base64.b64encode(key.encode())
+        return base64.b64encode(key.encode()).decode()
     def reset(self):
         self.client.set('_History:',{})
     def set_history(self,key: str, result:dict):
-        self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
+        if result:
+            self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
+        return result
+    
     def get_history(self,key: str):
         res = self.client.get(f'_History:{self._str2base64(key)}')
         return res.get('result',None) if res else None
+
+    def get_or_set_history(self,key: str, result_func=lambda :None):
+        res = self.get_history(key)
+        if res is None:
+            res = result_func()
+            if res : self.set_history(key,res)
+        return res
 
 class SingletonKeyValueStorage(SingletonStorageController):
 
@@ -647,25 +657,25 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def delete_slave(self, slave:object) -> bool:
         self.event_dispa.delete_event(slave.__dict__.get('uuid',None))
 
-    def set(self, key: str, value: dict):
+    def _edit(self,func_name:str, key:str, value:dict=None):
         self._hist_con.reset()
-        res = self.client.set(key,value)
-        self.event_dispa.dispatch('set',key,value)
+        func = getattr(self.client,func_name)
+        args = [key,value] if value else [key] 
+        res = func(*args)
+        self.event_dispa.dispatch(func_name,*args)
         return res
+
+    def set(self, key: str, value: dict):
+        return self._edit('set',key,value)
     
     def delete(self, key: str):
-        self._hist_con.reset()
-        res = self.client.delete(key)
-        self.event_dispa.dispatch('delete',key)
-        return res
+        return self._edit('delete',key)
     
     def exists(self, key: str) -> bool: 
-        res = self._hist_con.get_history(key)
-        return res if res else self.client.exists(key)
+        return self._hist_con.get_or_set_history(key, lambda:self.client.exists(key))
     
     def keys(self, pattern: str='*') -> list[str]:
-        res = self._hist_con.get_history(pattern)
-        return res if res else self.client.keys(pattern)
+        return self._hist_con.get_or_set_history(pattern, lambda:self.client.keys(pattern))
 
     def get(self, key: str) -> dict:  return self.client.get( key)
     def clean(self):                  return self.client.clean()
