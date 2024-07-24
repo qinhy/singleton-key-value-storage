@@ -58,6 +58,9 @@ class Controller4Task:
         def set_status(self,status:str=PENDING):
             self.update({'status':status})
 
+        def set_pending(self):
+            self.set_status(Controller4Task.TaskController.PENDING)
+
         def set_result(self,result:dict):
             self.update({'result':result})
 
