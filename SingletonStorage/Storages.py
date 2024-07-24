@@ -509,17 +509,26 @@ if mongo_back:
     
     class SingletonMongoDBStorage:
         _instance = None
+        _meta = {}
         
-        def __new__(cls, connection_string: str = "mongodb://localhost:27017/", db_name: str = "SingletonDB", collection_name: str = "store"):
+        def __new__(cls, mongo_URL: str = "mongodb://localhost:27017/", db_name: str = "SingletonDB", collection_name: str = "store"):            
+            same_url = cls._meta.get('mongo_URL',None)==mongo_URL
+            same_db = cls._meta.get('db_name',None)==db_name
+            same_col = cls._meta.get('collection_name',None)==collection_name
+
+            if not (same_url and same_db and same_col):
+                cls._instance = None
+
             if cls._instance is None:
                 cls._instance = super(SingletonMongoDBStorage, cls).__new__(cls)
                 cls._instance.uuid = uuid.uuid4()
-                client = MongoClient(connection_string)
+                client = MongoClient(mongo_URL)
                 cls._instance.db = client.get_database(db_name)
                 cls._instance.collection = cls._instance.db.get_collection(collection_name)
+                cls._instance._meta = dict(mongo_URL=mongo_URL,db_name=db_name,collection_name=collection_name)
             return cls._instance
 
-        def __init__(self, connection_string: str = "mongodb://localhost:27017/", db_name: str = "SingletonDB", collection_name: str = "store"):
+        def __init__(self, mongo_URL: str = "mongodb://localhost:27017/", db_name: str = "SingletonDB", collection_name: str = "store"):
             self.uuid: str = self.uuid
             self.db:database.Database = self.db
             self.collection:collection.Collection = self.collection
@@ -644,9 +653,10 @@ class SingletonKeyValueStorage(SingletonStorageController):
             self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
 
     if mongo_back:
-        def mongo_backend(self):            
+        def mongo_backend(self, mongo_URL: str = "mongodb://localhost:27017/",
+                          db_name: str = "SingletonDB", collection_name: str = "store"):
             self.init()
-            self.client = SingletonMongoDBStorageController(SingletonMongoDBStorage())
+            self.client = SingletonMongoDBStorageController(SingletonMongoDBStorage(mongo_URL,db_name,collection_name))
 
     def add_slave(self, slave:object, event_names=['set','delete']) -> bool:
         if slave.__dict__.get('uuid',None) is None: slave.__dict__['uuid'] = uuid.uuid4()
