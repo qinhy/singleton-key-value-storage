@@ -72,10 +72,10 @@ class Controller4Task:
             self.set_status(Controller4Task.TaskController.FAILURE)
 
         def set_result(self,result):
-            self.update(result=result)
+            self.update(result=str(result))
 
         def set_error(self,error):
-            self.update(error=error)
+            self.update(error=str(error))
 
         
 class Model4Task:
