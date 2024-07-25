@@ -266,7 +266,9 @@ class TaskStore(SingletonKeyValueStorage):
     
     def dumps(self) -> str:
         self.stop_workers()
-        return super().dumps()
+        res = super().dumps()
+        self.start_workers()
+        return res
     
     def clean(self):
         self.stop_workers()
@@ -275,6 +277,8 @@ class TaskStore(SingletonKeyValueStorage):
     def add_new_task(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
         task = self._store_obj(Model4Task.Task(name=name, args=args, rank=rank, metadata=metadata))
         self._get_task_queue().put(task)
+        if len([w for w in self.get_workers() if not w.stop]):
+            self.start_workers()
         return task
     
     def add_new_worker(self, metadata={})->Model4Task.Task:
