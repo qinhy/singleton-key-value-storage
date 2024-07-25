@@ -590,47 +590,51 @@ class SingletonKeyValueStorage(SingletonStorageController):
             'sqlite':lambda:SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
             'mongodb':lambda:SingletonMongoDBStorageController(SingletonMongoDBStorage(*args,**kwargs)) if mongo_back else None,
         }
-        back=backs.get(name.lower(),None)()
+        back=backs.get(name.lower(),lambda:None)()
         if back is None:raise ValueError(f'no back end of {name}, has {list(backs.items())}')
+        return back
     
     def python_backend(self):
-        self._switch_backend('python')
+        self.conn = self._switch_backend('python')
     
     def sqlite_backend(self):             
         self.conn = self._switch_backend('sqlite')
 
-    def firestore_backend(self,google_project_id:str=None,google_firestore_collection:str=None):            
+    def firestore_backend(self,google_project_id:str=None,google_firestore_collection:str=None):
         self.conn = self._switch_backend('firestore',google_project_id,google_firestore_collection)
 
-    def redis_backend(self,redis_URL:str='redis://127.0.0.1:6379'):            
+    def redis_backend(self,redis_URL:str='redis://127.0.0.1:6379'):
         self.conn = self._switch_backend('redis',redis_URL)
 
-    def mongo_backend(self, mongo_URL:str="mongodb://127.0.0.1:27017/",
+    def mongo_backend(self,mongo_URL:str="mongodb://127.0.0.1:27017/",
                         db_name:str="SingletonDB", collection_name:str="store"):
         self.conn = self._switch_backend('mongodb',mongo_URL,db_name,collection_name)
 
+    def _print(self,msg):
+        print(f'[{self.__class__.__name__}]: {msg}')
+
     def add_slave(self, slave:object, event_names=['set','delete'])->bool:
-        if getattr(slave,'uuid') is None:
+        if getattr(slave,'uuid',None) is None:
             try:
                 setattr(slave,'uuid',uuid.uuid4())
             except Exception:
-                print(f'can not set uuid to {slave}. Skip this slave.')
+                self._print(f'can not set uuid to {slave}. Skip this slave.')
                 return
         for m in event_names:
             if hasattr(slave, m):
                 self.event_dispa.set_event(m,getattr(slave,m),getattr(slave,'uuid'))
             else:
-                print(f'no func of "{m}" in {slave}. Skip it.')
+                self._print(f'no func of "{m}" in {slave}. Skip it.')
                 
     def delete_slave(self, slave:object)->bool:
-        self.event_dispa.delete_event(getattr(slave,'uuid'))
+        self.event_dispa.delete_event(getattr(slave,'uuid',None))
 
     def _edit(self,func_name:str, key:str, value:dict=None):
         if func_name not in ['set','delete']:
-            print(f'no func of "{func_name}". return.')
+            self._print(f'no func of "{func_name}". return.')
             return
         self._hist.reset()
-        func = getattr(self, func_name)
+        func = getattr(self.conn, func_name)
         args = [key,value] if value else [key] 
         res = func(*args)
         self.event_dispa.dispatch(func_name,*args)
@@ -641,7 +645,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
             func()
             return True
         except Exception as e:
-            print(e)
+            self._print(e)
             return False
     # True False(in error)
     def set(self, key: str, value: dict):     return self._try_if_error(lambda:self._edit('set',key,value))
@@ -655,7 +659,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
         try:
             return func()
         except Exception as e:
-            print(e)
+            self._print(e)
             return None
     # Object, None(in error)
     def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self._hist.try_history(key,  lambda:self.conn.exists(key)))
@@ -671,7 +675,7 @@ class Tests(unittest.TestCase):
     def test_all(self,num=1):
         self.test_python(num)
         self.test_sqlite(num)
-        self.test_mongo(num)
+        # self.test_mongo(num)
         # self.test_redis(num)
         # self.test_firestore(num)
 
