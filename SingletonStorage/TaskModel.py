@@ -263,6 +263,10 @@ class TaskStore(SingletonKeyValueStorage):
     def _store_obj(self, obj:Model4Task.AbstractObj):
         self.set(obj.id,json.loads(obj.model_dump_json()))
         return self._init_controller(obj)
+    
+    def clean(self):
+        self.stop_workers()
+        return super().clean()
 
     def add_new_task(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
         task = self._store_obj(Model4Task.Task(name=name, args=args, rank=rank, metadata=metadata))
