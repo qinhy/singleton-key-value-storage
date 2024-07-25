@@ -636,7 +636,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
         self.event_dispa.dispatch(func_name,*args)
         return res
     
-    def _try_if_error(func):
+    def _try_if_error(self,func):
         try:
             func()
             return True
@@ -651,7 +651,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def load(self,json_path):                 return self._try_if_error(lambda:self.conn.load(json_path))
     def loads(self,json_str):                 return self._try_if_error(lambda:self.conn.loads(json_str))
     
-    def _try_obj_error(func):
+    def _try_obj_error(self,func):
         try:
             return func()
         except Exception as e:
