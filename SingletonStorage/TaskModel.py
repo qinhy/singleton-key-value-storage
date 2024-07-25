@@ -277,7 +277,7 @@ class TaskStore(SingletonKeyValueStorage):
     def add_new_task(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
         task = self._store_obj(Model4Task.Task(name=name, args=args, rank=rank, metadata=metadata))
         self._get_task_queue().put(task)
-        if len([w for w in self.get_workers() if not w.stop]):
+        if len([w for w in self.get_workers() if not w.stop]) == 0:
             self.start_workers()
         return task
     
@@ -357,12 +357,12 @@ class ExmpalePowerFunction(Model4Task.Function):
         return a**b
 
 ### tests 
-# ts = TaskStore()
-# w = ts.add_new_worker()
-# ts.add_new_function(ExmpalePowerFunction())
-# ts.add_new_task('ExmpalePowerFunction',[3,4])
-# ts.add_new_function(ExmpalePrintFunction())
-# ts.add_new_task('ExmpalePrintFunction',['3,4'])
+ts = TaskStore()
+w = ts.add_new_worker()
+ts.add_new_function(ExmpalePowerFunction())
+ts.add_new_task('ExmpalePowerFunction',[3,4])
+ts.add_new_function(ExmpalePrintFunction())
+ts.add_new_task('ExmpalePrintFunction',['3,4'])
 # ts.stop_workers()
 # print(ts.task_list())
 
