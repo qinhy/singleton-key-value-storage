@@ -557,7 +557,7 @@ class KeysHistoryController:
     def _str2base64(self,key: str):
         return base64.b64encode(key.encode()).decode()
     def reset(self):
-        self.client.set('_History:',{})
+        self.client = SingletonPythonDictStorageController(PythonDictStorage())        
     def set_history(self,key: str, result:dict):
         if result:
             self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
@@ -664,6 +664,8 @@ class SingletonKeyValueStorage(SingletonStorageController):
     # Object, None(in error)
     def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self._hist.try_history(key,  lambda:self.conn.exists(key)))
     def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self._hist.try_history(regx, lambda:self.conn.keys(regx)))
+    # def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self.conn.exists(key))
+    # def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self.conn.keys(regx))
     def get(self, key: str)->dict:            return self._try_obj_error(lambda:self.conn.get(key))
     def dumps(self)->str:                     return self._try_obj_error(lambda:self.conn.dumps())
 

@@ -1,4 +1,5 @@
 
+import ctypes
 from datetime import datetime
 import json
 import queue
@@ -86,29 +87,51 @@ class Controller4Task:
         def __init__(self, store, model):
             self.model:Model4Task.Worker = model
             self._store:TaskStore = store
-            if self.model._thread is None:
-                self.model._thread = Thread(target=self.task_worker)
-            
+            if self.model.thread_memo_id<0:
+                thread = Thread(target=self.task_worker)
+                self.set_memo_id(id(thread))
+                thread.start()
+                
+        def set_memo_id(self,memo_id=-1):
+            self.update(thread_memo_id=memo_id)
+        
+        def _get_thread(self)->Thread:
+            if self.model.thread_memo_id>0:
+                return ctypes.cast(self.model.thread_memo_id, ctypes.py_object).value
+            return Thread()
+
+        def revoke(self):
+            self.set_memo_id(-1)
+            # do terminate
+
+        def is_stop(self):
+            self.model:Model4Task.Worker = self._store.find(self.model.id)
+            return self.model.stop
+
         def task_worker(self):
-            while not self._store.find(self.model.id).stop:
-                if not self._store.get_task_queue().empty():
-                    res = 'NULL'
-                    task:Model4Task.Task = self._store.get_task_queue().get()
-                    try:
-                        task.get_controller().set_pending()
-                        res = self._store.get(f'_Runnable:{task.name}')(*task.args)
-                    except Exception as e:
-                        task.get_controller().set_failure()
-                        task.get_controller().set_error(e)
-                    task.get_controller().set_success()
-                    if res != 'NULL':
-                        task.get_controller().set_result(res)
-                    self._store.get_task_queue().task_done()
-                time.sleep(1)
+            try:
+                while not self.is_stop():
+                    if not self._store.get_task_queue().empty():
+                        res = 'NULL'
+                        task:Model4Task.Task = self._store.get_task_queue().get()
+                        try:
+                            task.get_controller().set_pending()
+                            res = self._store.get(f'_Runnable:{task.name}')(*task.args)
+                        except Exception as e:
+                            task.get_controller().set_failure()
+                            task.get_controller().set_error(e)
+                        task.get_controller().set_success()
+                        if res != 'NULL':
+                            task.get_controller().set_result(res)
+                        self._store.get_task_queue().task_done()
+                    time.sleep(1)
+            except Exception as e:
+                print(e)
+                self.set_memo_id(-1)
         
         def delete(self, wait=True):
-            self.model._thread.stop = True
-            if wait : self.model._thread.join()
+            self.update(stop=True)
+            if wait : self._get_thread().join()
             self._store.delete(self.model.id)
 
 class Model4Task:
@@ -140,8 +163,8 @@ class Model4Task:
     class Worker(AbstractObj):
         id: str = Field(default_factory=lambda :f"Worker:{uuid4()}")
         stop:bool = False
-        
-        _thread:Thread = None
+        thread_memo_id:int = -1
+
         _controller: Controller4Task.WorkerController = None
         def get_controller(self)->Controller4Task.WorkerController: return self._controller
         def init_controller(self,store):self._controller = Controller4Task.WorkerController(store,self)
@@ -149,7 +172,7 @@ class Model4Task:
 class TaskStore(SingletonKeyValueStorage):
     
     def __init__(self) -> None:
-        super.__init__()
+        super().__init__()
         self.python_backend() # only python backend works
         self._task_queue=queue.Queue()
     
@@ -176,13 +199,9 @@ class TaskStore(SingletonKeyValueStorage):
         self.get_task_queue().put(task)
         return task
     
-    def add_new_worker(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
-        task = self._store_obj(Model4Task.Worker(_thread=Thread()))
-        thread = Thread(target=self.task_worker, args=(id,))
-        thread.stop = False
-        self.set(id,thread)
-        thread.start()
-        return task
+    def add_new_worker(self, metadata={}) -> Model4Task.Task:
+        worker = self._store_obj(Model4Task.Worker(metadata=metadata))
+        return worker
     
     # available for regx?
     def find(self,id:str) -> Model4Task.AbstractObj:
@@ -217,13 +236,6 @@ class TaskStore(SingletonKeyValueStorage):
     def stop_workers(self):
         [self.delete_worker(k.id) for k in self.find_all('Worker:*')]
 
-    def add_worker(self):
-
-        thread = Thread(target=self.task_worker, args=(id,))
-        thread.stop = False
-        self.set(id,thread)
-        thread.start()
-        return id
     
     def delete_worker(self,id):
         c:Controller4Task.WorkerController = self.find(id).get_controller()
@@ -239,9 +251,10 @@ class TaskStore(SingletonKeyValueStorage):
 
 ##### testing
 ts = TaskStore()
-w = ts.add_worker()
+w = ts.add_new_worker()
 ts.add_runnable('print',print)
-t = ts.add_new_task('print',[1,2,3,4])
+print(ts.get_workers())
+# t = ts.add_new_task('print',[1,2,3,4])
 # 1 2 3 4
-ts.task_list()
-ts.stop_workers()
+# ts.task_list()
+# ts.stop_workers()
