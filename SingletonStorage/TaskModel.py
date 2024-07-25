@@ -134,10 +134,10 @@ class Controller4Task:
             try:
                 while not self.is_stop():
                     self.set_sleeping()
-                    if not self._store.get_task_queue().empty():
+                    if not self._store._get_task_queue().empty():
                         self.set_processing()
                         res = 'NULL'
-                        task:Model4Task.Task = self._store.get_task_queue().get()
+                        task:Model4Task.Task = self._store._get_task_queue().get()
                         try:
                             task.get_controller().set_pending()
                             res = self._store.find_function(f'Function:{task.name}')(*task.args)
@@ -146,7 +146,7 @@ class Controller4Task:
                             task.get_controller().set_error(e)                        
                         if res != 'NULL':
                             task.get_controller().set_result(res)
-                        self._store.get_task_queue().task_done()
+                        self._store._get_task_queue().task_done()
                     
                     self.set_sleeping()
                     time.sleep(1)
@@ -219,6 +219,7 @@ class Model4Task:
                 list: "array",dict: "object"
                 # ... add more mappings if needed
             }
+            self.required = []
             for name, param in sig.parameters.items():
                 param_type = type_map.get(param.annotation, "object")
                 self._properties[name] = Model4Task.Function.Parameter(
@@ -245,7 +246,7 @@ class TaskStore(SingletonKeyValueStorage):
         self.python_backend() # only python backend works
         self._task_queue=queue.Queue()
     
-    def get_task_queue(self)->queue.Queue:
+    def _get_task_queue(self)->queue.Queue:
         return self._task_queue
     
     def _get_class(self, id: str):
@@ -265,7 +266,7 @@ class TaskStore(SingletonKeyValueStorage):
 
     def add_new_task(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
         task = self._store_obj(Model4Task.Task(name=name, args=args, rank=rank, metadata=metadata))
-        self.get_task_queue().put(task)
+        self._get_task_queue().put(task)
         return task
     
     def add_new_worker(self, metadata={})->Model4Task.Task:
@@ -311,9 +312,6 @@ class TaskStore(SingletonKeyValueStorage):
 
     def task_list(self)->list[Model4Task.Task]:
         return self.find_all('Task:*')
-
-    def get_task(self, id)->Model4Task.Task:
-        return self.find_task(id)
 
 ##### testing
 class ExmpalePrintFunction(Model4Task.Function):
