@@ -264,6 +264,10 @@ class TaskStore(SingletonKeyValueStorage):
         self.set(obj.id,json.loads(obj.model_dump_json()))
         return self._init_controller(obj)
     
+    def dumps(self) -> str:
+        self.stop_workers()
+        return super().dumps()
+    
     def clean(self):
         self.stop_workers()
         return super().clean()
