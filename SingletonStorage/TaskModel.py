@@ -86,9 +86,11 @@ class Controller4Task:
         def __init__(self, store, model):
             self.model:Model4Task.Worker = model
             self._store:TaskStore = store
+            if self.model._thread is None:
+                self.model._thread = Thread(target=self.task_worker)
             
-        def task_worker(self,uuid):
-            while not self._store.get(uuid).__dict__.get('stop',True):
+        def task_worker(self):
+            while not self._store.find(self.model.id).stop:
                 if not self._store.get_task_queue().empty():
                     res = 'NULL'
                     task:Model4Task.Task = self._store.get_task_queue().get()
@@ -137,6 +139,7 @@ class Model4Task:
 
     class Worker(AbstractObj):
         id: str = Field(default_factory=lambda :f"Worker:{uuid4()}")
+        stop:bool = False
         
         _thread:Thread = None
         _controller: Controller4Task.WorkerController = None
@@ -167,6 +170,19 @@ class TaskStore(SingletonKeyValueStorage):
     def _store_obj(self, obj:Model4Task.AbstractObj):
         self.set(obj.id,json.loads(obj.model_dump_json()))
         return self._init_controller(obj)
+
+    def add_new_task(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
+        task = self._store_obj(Model4Task.Task(name=name, args=args, rank=rank, metadata=metadata))
+        self.get_task_queue().put(task)
+        return task
+    
+    def add_new_worker(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
+        task = self._store_obj(Model4Task.Worker(_thread=Thread()))
+        thread = Thread(target=self.task_worker, args=(id,))
+        thread.stop = False
+        self.set(id,thread)
+        thread.start()
+        return task
     
     # available for regx?
     def find(self,id:str) -> Model4Task.AbstractObj:
@@ -189,11 +205,6 @@ class TaskStore(SingletonKeyValueStorage):
 # - get runnable task list by task_id.
 # - get all tasks id list.
 
-    def add_new_task(self, name, args=[], rank:list=[0], metadata={}) -> Model4Task.Task:
-        task = self._store_obj(Model4Task.Task(name=name, args=args, rank=rank, metadata=metadata))
-        self.get_task_queue().put(task)
-        return task
-
     def add_runnable(self, runnable_name, runnable):
         self.set(f'_Runnable:{runnable_name}',runnable)
 
@@ -207,7 +218,7 @@ class TaskStore(SingletonKeyValueStorage):
         [self.delete_worker(k.id) for k in self.find_all('Worker:*')]
 
     def add_worker(self):
-        
+
         thread = Thread(target=self.task_worker, args=(id,))
         thread.stop = False
         self.set(id,thread)
