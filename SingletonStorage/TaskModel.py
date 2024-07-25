@@ -318,6 +318,9 @@ class TaskStore(SingletonKeyValueStorage):
     def stop_workers(self):
         [w.get_controller().revoke() for w in self.get_workers()]
 
+    def start_workers(self):
+        [w.get_controller().start() for w in self.get_workers()]
+
     def task_list(self)->list[Model4Task.Task]:
         return self.find_all('Task:*')
 
