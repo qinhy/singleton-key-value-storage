@@ -1,11 +1,12 @@
 
 import ctypes
 from datetime import datetime
+import inspect
 import json
 import queue
 from threading import Thread
 import time
-from typing import Any
+from typing import Any, Dict
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
@@ -77,62 +78,85 @@ class Controller4Task:
 
         def set_error(self,error):
             self.update(error=str(error))
+            self.set_failure()
 
     class WorkerController(AbstractObjController):
         FAILURE='failure'
         SLEEPING='sleeping'
         PROCESSING='processing'
-        STOPPED='stopped'
         
+        def set_status(self,status:str=SLEEPING):
+            self.update(status=status)
+        def set_sleeping(self):
+            self.set_status(Controller4Task.WorkerController.SLEEPING)
+        def set_processing(self):
+            self.set_status(Controller4Task.WorkerController.PROCESSING)
+        def set_failure(self):
+            self.set_status(Controller4Task.WorkerController.FAILURE)
+
         def __init__(self, store, model):
             self.model:Model4Task.Worker = model
             self._store:TaskStore = store
-            if self.model.thread_memo_id<0:
+            if not self.model.stop and self.model.thread_memo_id<0:
                 thread = Thread(target=self.task_worker)
                 self.set_memo_id(id(thread))
                 thread.start()
                 
         def set_memo_id(self,memo_id=-1):
             self.update(thread_memo_id=memo_id)
+                
+        def get_memo_id(self):
+            return self._store.find_worker(self.model.id).thread_memo_id
         
         def _get_thread(self)->Thread:
-            if self.model.thread_memo_id>0:
-                return ctypes.cast(self.model.thread_memo_id, ctypes.py_object).value
-            return Thread()
+            thread_memo_id = self.get_memo_id()
+            if thread_memo_id>0:
+                return ctypes.cast(thread_memo_id, ctypes.py_object).value
+            return None
 
-        def revoke(self):
+        def start(self):
+            if self.is_stop():
+                thread = Thread(target=self.task_worker)
+                self.set_memo_id(id(thread))
+                self.update(stop=False)
+                thread.start()
+
+        def revoke(self,wait=True):
+            self.update(stop=True)
+            thread = self._get_thread()
+            if thread is not None and wait : self._get_thread().join()
             self.set_memo_id(-1)
-            # do terminate
 
         def is_stop(self):
-            self.model:Model4Task.Worker = self._store.find(self.model.id)
-            return self.model.stop
+            return self._store.find_worker(self.model.id).stop
 
         def task_worker(self):
             try:
                 while not self.is_stop():
+                    self.set_sleeping()
                     if not self._store.get_task_queue().empty():
+                        self.set_processing()
                         res = 'NULL'
                         task:Model4Task.Task = self._store.get_task_queue().get()
                         try:
                             task.get_controller().set_pending()
-                            res = self._store.get(f'_Runnable:{task.name}')(*task.args)
+                            res = self._store.find_function(f'Function:{task.name}')(*task.args)
+                            task.get_controller().set_success()
                         except Exception as e:
-                            task.get_controller().set_failure()
-                            task.get_controller().set_error(e)
-                        task.get_controller().set_success()
+                            task.get_controller().set_error(e)                        
                         if res != 'NULL':
                             task.get_controller().set_result(res)
                         self._store.get_task_queue().task_done()
+                    
+                    self.set_sleeping()
                     time.sleep(1)
             except Exception as e:
                 print(e)
+                self.set_failure()
                 self.set_memo_id(-1)
         
         def delete(self, wait=True):
-            self.update(stop=True)
-            if wait : self._get_thread().join()
-            self._store.delete(self.model.id)
+            self.revoke(wait)
 
 class Model4Task:
     class AbstractObj(BaseModel):
@@ -169,6 +193,51 @@ class Model4Task:
         def get_controller(self)->Controller4Task.WorkerController: return self._controller
         def init_controller(self,store):self._controller = Controller4Task.WorkerController(store,self)
 
+    class Function(AbstractObj):
+        class Parameter(BaseModel):
+            type: str
+            description: str            
+
+        id: str = Field(default_factory=lambda :f"Function:{uuid4()}")
+        name: str = 'NULL'
+        description: str = None
+        # arguments: Dict[str, Any] = None
+        _properties: Dict[str, Parameter] = {}
+        parameters: Dict[str, Any] = {"type": "object",'properties':_properties}
+        required: list[str] = []        
+        _parameters_description: Dict[str, str] = {}
+        _string_arguments: str='\{\}'
+
+        def _extract_signature(self):
+            self.name=self.__class__.__name__
+            self.id = f"Function:{self.name}"
+            sig = inspect.signature(self.__call__)
+            # Map Python types to more generic strings
+            type_map = {
+                int: "integer",float: "number",
+                str: "string",bool: "boolean",
+                list: "array",dict: "object"
+                # ... add more mappings if needed
+            }
+            for name, param in sig.parameters.items():
+                param_type = type_map.get(param.annotation, "object")
+                self._properties[name] = Model4Task.Function.Parameter(
+                    type=param_type, description=self._parameters_description.get(name,''))
+                if param.default is inspect._empty:
+                    self.required.append(name)
+            self.parameters['properties']=self._properties
+
+        def __call__(self):
+            print('this is root class , not implement')
+        
+        def get_description(self):
+            return self.model_dump()#exclude=['arguments'])
+
+        _controller: Controller4Task.AbstractObjController = None
+        def get_controller(self)->Controller4Task.AbstractObjController: return self._controller
+        def init_controller(self,store):self._controller = Controller4Task.AbstractObjController(store,self)
+
+
 class TaskStore(SingletonKeyValueStorage):
     
     def __init__(self) -> None:
@@ -199,16 +268,23 @@ class TaskStore(SingletonKeyValueStorage):
         self.get_task_queue().put(task)
         return task
     
-    def add_new_worker(self, metadata={}) -> Model4Task.Task:
-        worker = self._store_obj(Model4Task.Worker(metadata=metadata))
-        return worker
+    def add_new_worker(self, metadata={})->Model4Task.Task:
+        return self._store_obj(Model4Task.Worker(stop=False, metadata=metadata))    
+
+    def add_new_function(self, function_obj:Model4Task.Function)->Model4Task.Function:    
+        setattr(Model4Task,function_obj.__class__.__name__,function_obj.__class__)
+        return self._store_obj(function_obj)
     
     # available for regx?
     def find(self,id:str) -> Model4Task.AbstractObj:
         return self._init_controller(self._get_class(id)(**self.get(id)))
     
-    def find_task(self,id:str) -> Model4Task.Task:
-        return self.find(id)
+    def find_task(self,id:str) -> Model4Task.Task: return self.find(id)
+
+    def find_worker(self,id:str) -> Model4Task.Worker: return self.find(id)
+    
+    def find_function(self,id:str) -> Model4Task.Function:
+        return self._init_controller(self._get_class(id.replace('Function:',''))(**self.get(id)))
     
     def find_all(self,id:str=f'Task:*')->list[Model4Task.AbstractObj]:
         return [self.find(key) for key in self.keys(id)]
@@ -224,22 +300,14 @@ class TaskStore(SingletonKeyValueStorage):
 # - get runnable task list by task_id.
 # - get all tasks id list.
 
-    def add_runnable(self, runnable_name, runnable):
-        self.set(f'_Runnable:{runnable_name}',runnable)
+    def function_list(self):
+        return [self.find_function(k) for k in self.keys('Function:*')]
 
-    def runnable_list(self):
-        return self.keys('_Runnable:*')
-
-    def get_workers(self)->list[Thread]:
+    def get_workers(self)->list[Model4Task.Worker]:
         return self.find_all('Worker:*')
     
     def stop_workers(self):
-        [self.delete_worker(k.id) for k in self.find_all('Worker:*')]
-
-    
-    def delete_worker(self,id):
-        c:Controller4Task.WorkerController = self.find(id).get_controller()
-        c.delete()
+        [w.get_controller().revoke() for w in self.get_workers()]
 
     def task_list(self)->list[Model4Task.Task]:
         return self.find_all('Task:*')
@@ -247,14 +315,45 @@ class TaskStore(SingletonKeyValueStorage):
     def get_task(self, id)->Model4Task.Task:
         return self.find_task(id)
 
-
-
 ##### testing
+class ExmpalePrintFunction(Model4Task.Function):
+    description: str = 'just print some thing'
+    _parameters_description = dict(
+        msg='string to print',
+    )
+
+    def __init__(self, *args, **kwargs):
+        super(self.__class__, self).__init__(*args, **kwargs)
+        self._extract_signature()
+
+    def __call__(self,msg:str):
+        print(msg)
+
+class ExmpalePowerFunction(Model4Task.Function):
+    description: str = 'just power a number'
+    _parameters_description = dict(
+        a='base number',
+        b='exponent number',
+    )
+
+    def __init__(self, *args, **kwargs):
+        super(self.__class__, self).__init__(*args, **kwargs)
+        self._extract_signature()
+
+    def __call__(self,a:int,b:int):
+        return a**b
+    
 ts = TaskStore()
 w = ts.add_new_worker()
-ts.add_runnable('print',print)
-print(ts.get_workers())
-# t = ts.add_new_task('print',[1,2,3,4])
-# 1 2 3 4
-# ts.task_list()
-# ts.stop_workers()
+ts.add_new_function(ExmpalePowerFunction())
+ts.add_new_task('ExmpalePowerFunction',[3,4])
+ts.add_new_function(ExmpalePrintFunction())
+ts.add_new_task('ExmpalePrintFunction',['3,4'])
+ts.stop_workers()
+print(ts.task_list())
+
+w = ts.get_workers()[0]
+w.get_controller().start()
+ts.add_new_task('ExmpalePrintFunction',['3,4'])
+print(ts.task_list())
+ts.stop_workers()

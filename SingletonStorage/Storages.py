@@ -629,13 +629,13 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def delete_slave(self, slave:object)->bool:
         self.event_dispa.delete_event(getattr(slave,'uuid',None))
 
-    def _edit(self,func_name:str, key:str, value:dict=None):
-        if func_name not in ['set','delete']:
+    def _edit(self,func_name:str, key:str=None, value:dict=None):
+        if func_name not in ['set','delete','clean','load','loads']:
             self._print(f'no func of "{func_name}". return.')
             return
         self._hist.reset()
         func = getattr(self.conn, func_name)
-        args = [key,value] if value else [key] 
+        args = list(filter(lambda x:x is not None, [key,value]))
         res = func(*args)
         self.event_dispa.dispatch(func_name,*args)
         return res
@@ -650,10 +650,10 @@ class SingletonKeyValueStorage(SingletonStorageController):
     # True False(in error)
     def set(self, key: str, value: dict):     return self._try_if_error(lambda:self._edit('set',key,value))
     def delete(self, key: str):               return self._try_if_error(lambda:self._edit('delete',key))
-    def clean(self):                          return self._try_if_error(lambda:self.conn.clean())
+    def clean(self):                          return self._try_if_error(lambda:self._edit('clean'))
+    def load(self,json_path):                 return self._try_if_error(lambda:self._edit('load', json_path))
+    def loads(self,json_str):                 return self._try_if_error(lambda:self._edit('loads',json_str))
     def dump(self,json_path):                 return self._try_if_error(lambda:self.conn.dump(json_path))
-    def load(self,json_path):                 return self._try_if_error(lambda:self.conn.load(json_path))
-    def loads(self,json_str):                 return self._try_if_error(lambda:self.conn.loads(json_str))
     
     def _try_obj_error(self,func):
         try:
