@@ -356,18 +356,21 @@ class ExmpalePowerFunction(Model4Task.Function):
     def __call__(self,a:int,b:int):
         return a**b
 
-### tests 
-ts = TaskStore()
-w = ts.add_new_worker()
-ts.add_new_function(ExmpalePowerFunction())
-ts.add_new_task('ExmpalePowerFunction',[3,4])
-ts.add_new_function(ExmpalePrintFunction())
-ts.add_new_task('ExmpalePrintFunction',['3,4'])
-# ts.stop_workers()
-# print(ts.task_list())
 
-# w = ts.get_workers()[0]
-# w.get_controller().start()
-# ts.add_new_task('ExmpalePrintFunction',['3,4'])
-# print(ts.task_list())
-# ts.stop_workers()
+def test():
+    ### tests 
+    ts = TaskStore()
+    w = ts.add_new_worker()
+    ts.add_new_function(ExmpalePowerFunction())
+    ts.add_new_task('ExmpalePowerFunction',[3,4])
+    ts.add_new_function(ExmpalePrintFunction())
+    ts.add_new_task('ExmpalePrintFunction',['3,4'])
+    # ts.stop_workers()
+    # print(ts.task_list())
+
+    # w = ts.get_workers()[0]
+    # w.get_controller().start()
+    # ts.add_new_task('ExmpalePrintFunction',['3,4'])
+    # print(ts.task_list())
+    # ts.stop_workers()
+    return ts
