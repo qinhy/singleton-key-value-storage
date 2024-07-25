@@ -584,13 +584,13 @@ class SingletonKeyValueStorage(SingletonStorageController):
         self.event_dispa = EventDispatcherController()
         self._hist = KeysHistoryController()
         backs={
-            'python':SingletonPythonDictStorageController(SingletonPythonDictStorage(*args,**kwargs)),
-            'firestore':SingletonFirestoreStorageController(SingletonFirestoreStorage(*args,**kwargs)) if firestore_back else None,
-            'redis':SingletonRedisStorageController(SingletonRedisStorage(*args,**kwargs)) if redis_back else None,
-            'sqlite':SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
-            'mongodb':SingletonMongoDBStorageController(SingletonMongoDBStorage(*args,**kwargs)) if mongo_back else None,
+            'python':lambda:SingletonPythonDictStorageController(SingletonPythonDictStorage(*args,**kwargs)),
+            'firestore':lambda:SingletonFirestoreStorageController(SingletonFirestoreStorage(*args,**kwargs)) if firestore_back else None,
+            'redis':lambda:SingletonRedisStorageController(SingletonRedisStorage(*args,**kwargs)) if redis_back else None,
+            'sqlite':lambda:SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
+            'mongodb':lambda:SingletonMongoDBStorageController(SingletonMongoDBStorage(*args,**kwargs)) if mongo_back else None,
         }
-        back=backs.get(name.lower(),None)
+        back=backs.get(name.lower(),None)()
         if back is None:raise ValueError(f'no back end of {name}, has {list(backs.items())}')
     
     def python_backend(self):
