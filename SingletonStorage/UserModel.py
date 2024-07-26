@@ -118,9 +118,11 @@ class Model4User:
     class User(AbstractObj):
         id:str = Field(default_factory=lambda :f"User:{uuid4()}")
         name:str
+        full_name: str
         role:str
-        password:str
+        hashed_password:str
         email:str
+        disabled: bool=False
         
         _controller: Controller4User.UserController = None
         def get_controller(self)->Controller4User.UserController: return self._controller
