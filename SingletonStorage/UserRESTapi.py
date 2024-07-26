@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import os
 import re
 import secrets
+from zoneinfo import ZoneInfo
 import bcrypt
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -162,9 +163,9 @@ class AuthService:
     def create_access_token(*, data: dict, expires_delta: timedelta = None):
         to_encode = data.copy()
         if expires_delta:
-            expire = datetime.now(datetime.UTC) + expires_delta
+            expire = datetime.now().replace(tzinfo=ZoneInfo("UTC")) + expires_delta
         else:
-            expire = datetime.now(datetime.UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = datetime.now().replace(tzinfo=ZoneInfo("UTC")) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         to_encode.update({"exp": expire})
         return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     
@@ -175,8 +176,8 @@ class AuthService:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            username: str = payload.get("sub")
+            payload:dict = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            username: str = payload.get("sub",None)
             if username is None:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
@@ -192,7 +193,7 @@ class AuthService:
     async def get_current_user_token(token: str = Depends(oauth2_scheme)):
         try:
             payload:dict = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            username: str = payload.get("sub")
+            username: str = payload.get("sub",None)
             if username is None:
                 raise AuthService.credentials_exception
             token_data = AuthService.TokenData(username=username)
