@@ -40,45 +40,45 @@ api.add_middleware(
     allow_headers=["*"],
 )
 api.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=SESSION_DURATION)
-class RESTapi:   
-    class Item(BaseModel):
-        key: str
-        value: dict = None
+# class RESTapi:   
+#     class Item(BaseModel):
+#         key: str
+#         value: dict = None
         
-    @api.post("/store/set/")
-    async def set_item(item: Item):
-        return store.set(item.key, item.value)
+#     @api.post("/store/set/")
+#     async def set_item(item: Item):
+#         return store.set(item.key, item.value)
 
-    @api.get("/store/get/{key}")
-    async def get_item(key: str):
-        result = store.get(key)
-        if result is None:
-            raise HTTPException(status_code=404, detail="Item not found")
-        return result
+#     @api.get("/store/get/{key}")
+#     async def get_item(key: str):
+#         result = store.get(key)
+#         if result is None:
+#             raise HTTPException(status_code=404, detail="Item not found")
+#         return result
 
-    @api.delete("/store/delete/{key}")
-    async def delete_item(key: str):
-        success = store.delete(key)
-        if not success:
-            raise HTTPException(status_code=404, detail="Item not found to delete")
-        return {"deleted": key}
+#     @api.delete("/store/delete/{key}")
+#     async def delete_item(key: str):
+#         success = store.delete(key)
+#         if not success:
+#             raise HTTPException(status_code=404, detail="Item not found to delete")
+#         return {"deleted": key}
 
-    @api.get("/store/exists/{key}")
-    async def exists_item(key: str):
-        return {"exists": store.exists(key)}
+#     @api.get("/store/exists/{key}")
+#     async def exists_item(key: str):
+#         return {"exists": store.exists(key)}
 
-    @api.get("/store/keys/{pattern}")
-    async def get_keys(pattern: str = '*'):
-        return store.keys(pattern)
+#     @api.get("/store/keys/{pattern}")
+#     async def get_keys(pattern: str = '*'):
+#         return store.keys(pattern)
 
-    @api.post("/store/loads/")
-    async def load_items(item_json: str):
-        store.loads(item_json)
-        return {"loaded": True}
+#     @api.post("/store/loads/")
+#     async def load_items(item_json: str):
+#         store.loads(item_json)
+#         return {"loaded": True}
 
-    @api.get("/store/dumps/")
-    async def dump_items():
-        return store.dumps()
+#     @api.get("/store/dumps/")
+#     async def dump_items():
+#         return store.dumps()
 
 #######################################################################################
 
@@ -145,14 +145,14 @@ class UserService:
         #     conn.execute("UPDATE users SET full_name=?, email=?, hashed_password=?, disabled=?", (full_name, email, hashed_password, disabled))
 
     @staticmethod
-    def remove_user(username: str):
+    def remove_user(uuid: str):
         pass
         # with sqlite3.connect(DATABASE) as conn:
         #     conn.execute("DELETE FROM users WHERE username=?", (username,))
 
 class AuthService:
     class TokenData(BaseModel):        
-        username: str = ''
+        useruuid: str = ''
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -177,14 +177,14 @@ class AuthService:
 
         try:
             payload:dict = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            username: str = payload.get("sub",None)
-            if username is None:
+            useruuid: str = payload.get("useruuid",None)
+            if useruuid is None:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
         except JWTError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
 
-        user = UserService.get_user_by_name(username)
+        user = UserService.get_user_by_uuid(useruuid)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         return user
@@ -193,13 +193,13 @@ class AuthService:
     async def get_current_user_token(token: str = Depends(oauth2_scheme)):
         try:
             payload:dict = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            username: str = payload.get("sub",None)
-            if username is None:
+            useruuid: str = payload.get("useruuid",None)
+            if useruuid is None:
                 raise AuthService.credentials_exception
-            token_data = AuthService.TokenData(username=username)
+            token_data = AuthService.TokenData(useruuid=useruuid)
         except JWTError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
-        user = UserService.get_user_by_name(token_data.username)
+        user = UserService.get_user_by_uuid(token_data.useruuid)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         return user
@@ -268,7 +268,7 @@ class OAuthRoutes:
             raise HTTPException(status_code=400, detail="Incorrect password")
             
         try:
-            UserService.remove_user(current_user.username)
+            UserService.remove_user(current_user.id)
             return {"status": "success", "message": "User account removed successfully"}
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to remove account: {e}")
@@ -290,15 +290,12 @@ class OAuthRoutes:
         user:Model4User.User = UserService.get_user_by_name(form_data.username)
         if not user or not UserService.verify_password(form_data.password, user.hashed_password):
             raise HTTPException(status_code=400, detail="Incorrect username or password")
-        
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = AuthService.create_access_token(
-            data={"sub": user.name}, expires_delta=access_token_expires
+            data={"useruuid": user.id}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         )
-        request.session["uuid"] = user.id        
-        request.session["user_access_token"] = access_token
-        
-        return {"user_access_token": access_token, "token_type": "bearer", "uuid": user.id}
+        # request.session["uuid"] = user.id
+        request.session["user_access_token"] = access_token        
+        return {"user_access_token": access_token, "token_type": "bearer"}#, "uuid": user.id}
 
     @staticmethod
     @api.get(BASE_URL+"/me")
@@ -326,11 +323,6 @@ class OAuthRoutes:
     @staticmethod
     @api.get(BASE_URL+"/logout")
     async def logout(request: Request, current_user: Model4User.User = Depends(AuthService.get_current_user)):
-        # user_uuid = current_user.id
-        # Stop and remove the Docker container:
-        # container = docker_client.containers.get(user_uuid)
-        # container.stop()
-        # container.remove()
         # Clear the session
         request.session.clear()
         return {"status": "logged out"}
