@@ -102,11 +102,11 @@ class Controller4User:
 
 class Model4User:
     class AbstractObj(BaseModel):
-        id: str
+        id:str
         rank: list = [0]
         create_time: datetime = Field(default_factory=get_current_datetime_with_utc)
         update_time: datetime = Field(default_factory=get_current_datetime_with_utc)
-        status: str = ""
+        status:str = ""
         metadata: dict = {}
 
 
@@ -116,18 +116,19 @@ class Model4User:
         def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
 
     class User(AbstractObj):
-        id: str = Field(default_factory=lambda :f"User:{uuid4()}")
+        id:str = Field(default_factory=lambda :f"User:{uuid4()}")
         name:str
         role:str
-        email:str=None
+        password:str
+        email:str
         
         _controller: Controller4User.UserController = None
         def get_controller(self)->Controller4User.UserController: return self._controller
         def init_controller(self,store):self._controller = Controller4User.UserController(store,self)
 
     class App(AbstractObj):
-        id: str = Field(default_factory=lambda :f"App:{uuid4()}")
-        parent_App_id:int = 'auto increatment'
+        id:str = Field(default_factory=lambda :f"App:{uuid4()}")
+        parent_App_id:str
         running_cost:int = 0
         major_name:str = None
         minor_name:str = None
@@ -137,8 +138,8 @@ class Model4User:
         def init_controller(self,store):self._controller = Controller4User.AppController(store,self)
 
     class License(AbstractObj):
-        id: str = Field(default_factory=lambda :f"License:{uuid4()}")
-        user_id:int = 'auto increatment'
+        id:str = Field(default_factory=lambda :f"License:{uuid4()}")
+        user_id:str
         access_token:str = None
         bought_at:datetime = None
         expiration_date:datetime = None
@@ -150,10 +151,10 @@ class Model4User:
         def init_controller(self,store):self._controller = Controller4User.LicenseController(store,self)
 
     class AppUsage(AbstractObj):
-        id: str = Field(default_factory=lambda :f"AppUsage:{uuid4()}")
-        user_id:int = 'auto increatment'
-        App_id:int = 'auto increatment'
-        license_id:int = 'auto increatment'
+        id:str = Field(default_factory=lambda :f"AppUsage:{uuid4()}")
+        user_id:str
+        App_id:str
+        license_id:str
         start_time:datetime = None
         end_time:datetime = None
         running_time_cost:int = 0
@@ -163,14 +164,12 @@ class Model4User:
         def init_controller(self,store):self._controller = Controller4User.AppUsageController(store,self)
 
 class UsersStore(SingletonKeyValueStorage):
-    
+
     def __init__(self) -> None:
+        super().__init__()
         self.python_backend()
-        
-    def _client(self):
-        return self.client
-    
-    def get_class(self, id: str):
+            
+    def get_class(self, id:str):
         class_type = id.split(':')[0]
         res = {c.__name__:c for c in [i for k,i in Model4User.__dict__.items() if '_' not in k]}.get(class_type, None)
         if res is None:
@@ -185,9 +184,10 @@ class UsersStore(SingletonKeyValueStorage):
         obj.init_controller(self,obj)
         return obj
 
-    def add_new_user(self, name, role, rank:list=[0], metadata={}) -> Model4User.User:
+    def add_new_user(self, name:str,role:str,password:str,email:str, rank:list=[0], metadata={}) -> Model4User.User:
         return self._init_controller(
-            self._store_obj(Model4User.User(name=name, role=role, rank=rank, metadata=metadata))
+            self._store_obj(Model4User.User(name=name, role=role,password=password,
+                                            email=email,rank=rank, metadata=metadata))
         )
     def add_new_app(self, major_name:str,minor_name:str,running_cost:int=0,parent_App_id:str=None) -> Model4User.App:
         return self._init_controller(
