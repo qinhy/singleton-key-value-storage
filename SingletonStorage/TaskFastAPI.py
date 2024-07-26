@@ -1,3 +1,4 @@
+import json
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -9,11 +10,9 @@ task_manager = TaskStore()
 task_manager.add_new_function(ExmpalePowerFunction())
 task_manager.add_new_function(ExmpalePrintFunction())
 
-#/tasks/ExmpalePrintFunction/['3,4']
-#/tasks/ExmpalePowerFunction/[3,4]
-@app.get("/tasks/{name}/{args}",description="you can try /tasks/ExmpalePrintFunction/['3,4'] or /tasks/ExmpalePowerFunction/[3,4]")
-def add_new_task(name:str,args:str):
-    return task_manager.add_new_task(name, eval(args))
+@app.get("/tasks/{name}/{kwargs}",description='you can try /tasks/ExmpalePrintFunction/{"msg":"hello"} or /tasks/ExmpalePowerFunction/{"a":3,"b":4}')
+def add_new_task(name:str,kwargs_json:str):
+    return task_manager.add_new_task(name, json.loads(kwargs_json))
 
 @app.get("/workers/new")
 def add_new_worker():
