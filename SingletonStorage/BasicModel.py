@@ -4,6 +4,7 @@ from datetime import datetime
 import io
 import json
 import os
+import unittest
 from PIL import Image
 from typing import Any, List
 from uuid import uuid4
@@ -40,7 +41,6 @@ class Controller4Basic:
             return self
 
         def delete(self):
-            # self._store.delete_obj(self.model)    
             self._store.delete(self.model.get_id())
             self.model._controller = None
 
@@ -58,13 +58,16 @@ class Model4Basic:
         status: str = ""
         metadata: dict = {}
 
+        def model_dump_json_dict(self):
+            return json.loads(self.model_dump_json())
+
         def class_name(self): return self.__class__.__name__
 
         def set_id(self,id:str):
             self._id = id
             return self
         
-        def gen_new_id(self): return self.set_id(f"{self.class_name()}:{uuid4()}")
+        def gen_new_id(self): return self.set_id(f"{self.class_name()}:{uuid4()}").get_id()
 
         def get_id(self): return self._id
         
@@ -81,29 +84,82 @@ class BasicStore(SingletonKeyValueStorage):
 
     def _get_class(self, id: str, modelclass=Model4Basic):
         class_type = id.split(':')[0]
-        res = {c.__name__:c for c in [i for k,i in modelclass.__dict__.items() if '_' not in k]}.get(class_type, None)
+        res = {c.__name__:c for c in [i for k,i in modelclass.__dict__.items() if '_' not in k]}
+        res = res.get(class_type, None)
         if res is None: raise ValueError(f'No such class of {class_type}')
         return res
        
     def _store_new_obj(self, obj:Model4Basic.AbstractObj):
-        id = obj.gen_new_id()
-        self.set(id,json.loads(obj.model_dump_json()))
-        return self._get_as_obj(id,json.loads(obj.model_dump_json()))
-        
-    # def add_new_obj(self,name, role, rank:list=[0], metadata={}) -> Model4Basic.Author:
-    #     auther = self._store_new_obj(Model4Basic.Author(name=name, role=role, rank=rank, metadata=metadata))
-    #     auther.init_controller(self,auther)
-    #     return auther
+        assert obj.get_id() is None
+        id,d = obj.gen_new_id(),obj.model_dump_json_dict()
+        self.set(id,d)
+        return self._get_as_obj(id,d)
     
     def _get_as_obj(self,id,data_dict)->Model4Basic.AbstractObj:
         obj:Model4Basic.AbstractObj = self._get_class(id)(**data_dict)
         obj.set_id(id).init_controller(self)
         return obj
         
+    def add_new_obj(self,obj:Model4Basic.AbstractObj) -> Model4Basic.AbstractObj:
+        return self._store_new_obj(obj)
+        
     # available for regx?
     def find(self,id:str) -> Model4Basic.AbstractObj:
-        return self._get_as_obj(id,self.get(id))
+        raw = self.get(id)
+        if raw is None:return None
+        return self._get_as_obj(id,raw)
     
     def find_all(self,id:str=f'AbstractObj:*')->list[Model4Basic.AbstractObj]:
-        results = [self.find(k) for k in self.keys(id)]
-        return results
+        return [self.find(k) for k in self.keys(id)]
+
+
+class Tests(unittest.TestCase):
+    def __init__(self,*args,**kwargs)->None:
+        super().__init__(*args,**kwargs)
+        self.store = BasicStore()
+
+    def test_all(self,num=1):
+        self.test_python(num)
+
+    def test_python(self,num=1):
+        self.store.python_backend()
+        for i in range(num):self.test_all_cases()
+        self.store.clean()
+
+    def test_all_cases(self):
+        self.store.clean()
+        self.test_add_and_get()
+        self.test_find_all()
+        # self.test_exists()
+        self.test_delete()
+        self.test_get_nonexistent()
+        self.test_dump_and_load()
+        # self.test_slaves()
+
+    def test_get_nonexistent(self):
+        self.assertEqual(self.store.find('nonexistent'), None, "Getting a non-existent key should return None.")
+        
+    def test_add_and_get(self):
+        obj = self.store.add_new_obj(Model4Basic.AbstractObj())
+        objr = self.store.find(obj.get_id())
+        self.assertEqual(obj.model_dump_json_dict(),
+                        objr.model_dump_json_dict(),
+                         "The retrieved value should match the set value.")
+    def test_find_all(self):
+        self.store.add_new_obj(Model4Basic.AbstractObj())
+        self.assertEqual(len(self.store.find_all()),2,
+                         "The retrieved value should match number of objs.")
+
+    def test_dump_and_load(self):
+        a = self.store.find_all()
+        js = self.store.dumps()
+        self.store.clean()
+        self.store.loads(js)
+        b = self.store.find_all()
+        self.assertTrue(all([x.model_dump_json_dict()==y.model_dump_json_dict() for x,y in zip(a,b)]),
+                         "The same before dumps and loads.")
+
+    def test_delete(self):
+        obj = self.store.find_all()[0]
+        obj.get_controller().delete()
+        self.assertFalse(self.store.exists(obj.get_id()), "Key should not exist after being deleted.")
