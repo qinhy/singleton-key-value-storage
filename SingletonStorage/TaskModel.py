@@ -197,13 +197,22 @@ class Controller4Task:
 
 class Model4Task:
     class AbstractObj(BaseModel):
-        id: str
+        _id: str=None
         rank: list = [0]
         create_time: datetime = Field(default_factory=get_current_datetime_with_utc)
         update_time: datetime = Field(default_factory=get_current_datetime_with_utc)
         status: str = ""
         metadata: dict = {}
 
+        def set_id(self,id:str):
+            self._id = id
+            return self
+        
+        def get_id(self,create=False):
+            if self._id is None and create:
+                self.set_id(f"{self.__class__.__name__}:{uuid4()}")
+            return self._id
+        
         model_config = ConfigDict(arbitrary_types_allowed=True)    
         _controller: Controller4Task.AbstractObjController = None
         def get_controller(self)->Controller4Task.AbstractObjController: return self._controller
@@ -337,6 +346,10 @@ class TaskStore(SingletonKeyValueStorage):
         setattr(Model4Task,function_obj.__class__.__name__,function_obj.__class__)
         return self._store_obj(function_obj)
     
+    def _get_as_obj(self,data_dict)->Model4Task.AbstractObj:
+        obj:Model4Task.AbstractObj = self._get_class(id)(**data_dict)
+        obj.set_id(id).init_controller(self)
+        return obj
     # available for regx?
     def find(self,id:str) -> Model4Task.AbstractObj:
         return self._init_controller(self._get_class(id)(**self.get(id)))
