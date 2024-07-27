@@ -67,7 +67,7 @@ class Model4Basic:
             self._id = id
             return self
         
-        def gen_new_id(self): return self.set_id(f"{self.class_name()}:{uuid4()}").get_id()
+        def gen_new_id(self): return f"{self.class_name()}:{uuid4()}"
 
         def get_id(self): return self._id
         
@@ -88,20 +88,17 @@ class BasicStore(SingletonKeyValueStorage):
         res = res.get(class_type, None)
         if res is None: raise ValueError(f'No such class of {class_type}')
         return res
-       
-    def _store_new_obj(self, obj:Model4Basic.AbstractObj):
-        assert obj.get_id() is None
-        id,d = obj.gen_new_id(),obj.model_dump_json_dict()
-        self.set(id,d)
-        return self._get_as_obj(id,d)
     
     def _get_as_obj(self,id,data_dict)->Model4Basic.AbstractObj:
         obj:Model4Basic.AbstractObj = self._get_class(id)(**data_dict)
         obj.set_id(id).init_controller(self)
         return obj
-        
-    def add_new_obj(self,obj:Model4Basic.AbstractObj) -> Model4Basic.AbstractObj:
-        return self._store_new_obj(obj)
+    
+    def add_new_obj(self, obj:Model4Basic.AbstractObj):
+        assert obj.get_id() is None
+        id,d = obj.gen_new_id(),obj.model_dump_json_dict()
+        self.set(id,d)
+        return self._get_as_obj(id,d)
         
     # available for regx?
     def find(self,id:str) -> Model4Basic.AbstractObj:
