@@ -1,4 +1,6 @@
 
+import base64
+import re
 import sqlite3
 import threading
 import queue
@@ -11,7 +13,7 @@ import urllib
 import urllib.parse
 from urllib.parse import urlparse
 
-def get_error(func):
+def try_if_error(func):
     try:
         func()
     except Exception as e:
@@ -19,23 +21,25 @@ def get_error(func):
         return e
 
 # self checking
-firestore_back = get_error(lambda:__import__('google.cloud.firestore')) is None
-redis_back = get_error(lambda:__import__('redis')) is None
+firestore_back = try_if_error(lambda:__import__('google.cloud.firestore')) is None
+redis_back = try_if_error(lambda:__import__('redis')) is None
 sqlite_back = True
+aws_dynamo = try_if_error(lambda:__import__('boto3')) is None
+mongo_back = try_if_error(lambda:__import__('pymongo')) is None
 
 class SingletonStorageController:
     def __init__(self, model):
         self.model:object = model
 
-    def exists(self, key: str) -> bool: print(f'[{self.__class__.__name__}]: not implement')
+    def exists(self, key: str)->bool: print(f'[{self.__class__.__name__}]: not implement')
 
     def set(self, key: str, value: dict): print(f'[{self.__class__.__name__}]: not implement')
 
-    def get(self, key: str) -> dict: print(f'[{self.__class__.__name__}]: not implement')
+    def get(self, key: str)->dict: print(f'[{self.__class__.__name__}]: not implement')
 
     def delete(self, key: str): print(f'[{self.__class__.__name__}]: not implement')
 
-    def keys(self, pattern: str='*') -> list[str]: print(f'[{self.__class__.__name__}]: not implement')
+    def keys(self, pattern: str='*')->list[str]: print(f'[{self.__class__.__name__}]: not implement')
     
     def clean(self): [self.delete(k) for k in self.keys('*')]
 
@@ -48,6 +52,43 @@ class SingletonStorageController:
 
     def load(self,path):
         with open(path, "r") as tf: self.loads(tf.read())
+
+class PythonDictStorage:
+    def __init__(self):
+        self.uuid = uuid.uuid4()
+        self.store = {}
+class SingletonPythonDictStorage:
+    _instance = None
+    _meta = {}
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(SingletonPythonDictStorage, cls).__new__(cls)
+            cls._instance.uuid = uuid.uuid4()
+            cls._instance.store = {}
+        return cls._instance
+    
+    def __init__(self):
+        self.uuid:str = self.uuid
+        self.store:dict = self.store
+
+class SingletonPythonDictStorageController(SingletonStorageController):
+    def __init__(self, model:SingletonPythonDictStorage):
+        self.model:SingletonPythonDictStorage = model
+
+    def exists(self, key: str)->bool: return key in self.model.store
+
+    def set(self, key: str, value: dict): self.model.store[key] = value
+
+    def get(self, key: str)->dict: return self.model.store.get(key,None)
+
+    def delete(self, key: str):
+        if key in self.model.store:     
+            del self.model.store[key]
+
+    def keys(self, pattern: str='*')->list[str]:
+        return fnmatch.filter(self.model.store.keys(), pattern)
+
 
 if firestore_back:
     from google.cloud import firestore
@@ -73,7 +114,6 @@ if firestore_back:
             cls._instance.uuid = uuid.uuid4()
             cls._instance.model = firestore.Client(project=google_project_id)
             cls._instance.collection = cls._instance.model.collection(google_firestore_collection)
-            # cls._instance.slaves = []
 
             cls._meta['google_project_id']=google_project_id
             cls._meta['google_firestore_collection']=google_firestore_collection
@@ -82,28 +122,27 @@ if firestore_back:
         
         def __init__(self,google_project_id:str=None,google_firestore_collection:str=None):
             self.uuid:str = self.uuid
-            # self.slaves:list = self.slaves
             self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
     class SingletonFirestoreStorageController(SingletonStorageController):
         def __init__(self, model: SingletonFirestoreStorage):
             self.model:SingletonFirestoreStorage = model
 
-        def exists(self, key: str) -> bool:
+        def exists(self, key: str)->bool:
             doc = self.model.collection.document(key).get()
             return doc.exists
         
         def set(self, key: str, value: dict):
             self.model.collection.document(key).set(value)
 
-        def get(self, key: str) -> dict:
+        def get(self, key: str)->dict:
             doc = self.model.collection.document(key).get()
             return doc.to_dict() if doc.exists else None
         
         def delete(self, key: str):
             self.model.collection.document(key).delete()
 
-        def keys(self, pattern: str='*') -> list[str]:
+        def keys(self, pattern: str='*')->list[str]:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
             return fnmatch.filter(keys, pattern)      
@@ -128,27 +167,25 @@ if redis_back:
             cls._instance = super(SingletonRedisStorage, cls).__new__(cls)                        
             cls._instance.uuid = uuid.uuid4()
             cls._instance.client = redis.Redis(host=url.hostname, port=url.port, db=0, decode_responses=True)
-            # cls._instance.slaves = []
             cls._meta['redis_URL'] = redis_URL
 
             return cls._instance
 
         def __init__(self, redis_URL=None):#redis://127.0.0.1:6379
             self.uuid:str = self.uuid
-            # self.slaves:list = self.slaves
             self.client:redis.Redis = self.client
 
     class SingletonRedisStorageController(SingletonStorageController):
         def __init__(self, model: SingletonRedisStorage):
             self.model:SingletonRedisStorage = model
 
-        def exists(self, key: str) -> bool:
+        def exists(self, key: str)->bool:
             return self.model.client.exists(key)
 
         def set(self, key: str, value: dict):
             self.model.client.set(key, json.dumps(value))
 
-        def get(self, key: str) -> dict:
+        def get(self, key: str)->dict:
             res = self.model.client.get(key)
             if res: res = json.loads(res)
             return res
@@ -156,7 +193,7 @@ if redis_back:
         def delete(self, key: str):
             self.model.client.delete(key)
 
-        def keys(self, pattern: str='*') -> list[str]:            
+        def keys(self, pattern: str='*')->list[str]:            
             try:
                 res = self.model.client.keys(pattern)
             except Exception as e:
@@ -176,7 +213,6 @@ if sqlite_back:
                 cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                        
                 cls._instance.uuid = uuid.uuid4()
                 cls._instance.client = None
-                # cls._instance.slaves = []
                 
                 cls._instance.query_queue = queue.Queue()
                 cls._instance.result_dict = {}
@@ -190,7 +226,6 @@ if sqlite_back:
 
         def __init__(self):
             self.uuid:str = self.uuid
-            # self.slaves:list = self.slaves
             self.client:sqlite3.Connection = self.client
             self.query_queue:queue.Queue = self.query_queue 
             self.result_dict:dict = self.result_dict 
@@ -309,7 +344,7 @@ if sqlite_back:
             result = self.model._pop_result(query_id)
             return result['result']
 
-        def exists(self, key: str) -> bool:
+        def exists(self, key: str)->bool:
             query = f"SELECT EXISTS(SELECT * FROM KeyValueStore WHERE key = '{key}');"
             result = self._execute_query_with_res(query)
             return result[0]!='0'
@@ -324,7 +359,7 @@ if sqlite_back:
             return result
 
 
-        def get(self, key: str) -> dict:
+        def get(self, key: str)->dict:
             query = f"SELECT value FROM KeyValueStore WHERE key = '{key}'"
             result = self._execute_query_with_res(query)
             if result is None:return None
@@ -335,54 +370,151 @@ if sqlite_back:
             query = f"DELETE FROM KeyValueStore WHERE key = '{key}'"
             return self._execute_query_with_res(query)
 
-        def keys(self, pattern: str='*') -> list[str]:
+        def keys(self, pattern: str='*')->list[str]:
             pattern = pattern.replace('*', '%').replace('?', '_')  # Translate fnmatch pattern to SQL LIKE pattern
             query = f"SELECT key FROM KeyValueStore WHERE key LIKE '{pattern}'"
             result = self._execute_query_with_res(query)
             return result
 
-class SingletonPythonDictStorage:
-    _instance = None
-    _meta = {}
+if aws_dynamo:
+    import boto3
+    from botocore.exceptions import ClientError
+
+    class SingletonDynamoDBStorage:
+        _instance = None
+        
+        def __new__(cls,your_table_name):
+            if cls._instance is None:
+                cls._instance = super(SingletonDynamoDBStorage, cls).__new__(cls)
+                cls._instance.uuid = uuid.uuid4()
+                cls._instance.client = boto3.resource('dynamodb')
+                cls._instance.table = cls._instance.client.Table(your_table_name)
+            return cls._instance
+
+        def __init__(self,your_table_name):
+            self.uuid = self.uuid
+            self.client = self.client
+            self.table = self.table
+
+    class SingletonDynamoDBStorageController(SingletonStorageController):
+        def __init__(self, model:SingletonDynamoDBStorage):
+            self.model:SingletonDynamoDBStorage = model
+        
+        def exists(self, key: str)->bool:
+            try:
+                response = self.model.table.get_item(Key={'key': key})
+                return 'Item' in response
+            except ClientError as e:
+                print(f'Error checking existence: {e}')
+                return False
+
+        def set(self, key: str, value: dict):
+            try:
+                self.model.table.put_item(Item={'key': key, 'value': json.dumps(value)})
+            except ClientError as e:
+                print(f'Error setting value: {e}')
+
+        def get(self, key: str)->dict:
+            try:
+                response = self.model.table.get_item(Key={'key': key})
+                if 'Item' in response:
+                    return json.loads(response['Item']['value'])
+                return None
+            except ClientError as e:
+                print(f'Error getting value: {e}')
+                return None
+
+        def delete(self, key: str):
+            try:
+                self.model.table.delete_item(Key={'key': key})
+            except ClientError as e:
+                print(f'Error deleting value: {e}')
+
+        def keys(self, pattern: str='*')->list[str]:
+            # Convert simple wildcard patterns to regular expressions for filtering
+            regex = fnmatch.translate(pattern)
+            compiled_regex = re.compile(regex)
+
+            matched_keys = []
+            try:
+                # Scan operation with no filters - potentially very costly
+                scan_kwargs = {
+                    'ProjectionExpression': "key",
+                    'FilterExpression': "attribute_exists(key)"
+                }
+                done = False
+                start_key = None
+
+                while not done:
+                    if start_key:
+                        scan_kwargs['ExclusiveStartKey'] = start_key
+                    response = self.model.table.scan(**scan_kwargs)
+                    items = response.get('Items', [])
+                    matched_keys.extend([item['key'] for item in items if compiled_regex.match(item['key'])])
+
+                    start_key = response.get('LastEvaluatedKey', None)
+                    done = start_key is None
+            except ClientError as e:
+                print(f'Error scanning keys: {e}')
+
+            return matched_keys
+
+if mongo_back:
+    from pymongo import MongoClient, database, collection
     
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(SingletonPythonDictStorage, cls).__new__(cls)
-            cls._instance.uuid = uuid.uuid4()
-            cls._instance.store = {}
-            # cls._instance.slaves = []
-        return cls._instance
-    
-    def __init__(self):
-        self.uuid:str = self.uuid
-        # self.slaves:list = self.slaves
-        self.store:dict = self.store
+    class SingletonMongoDBStorage:
+        _instance = None
+        _meta = {}
+        
+        def __new__(cls, mongo_URL: str = "mongodb://127.0.0.1:27017/", 
+                        db_name: str = "SingletonDB", collection_name: str = "store"):            
+            same_url = cls._meta.get('mongo_URL',None)==mongo_URL
+            same_db = cls._meta.get('db_name',None)==db_name
+            same_col = cls._meta.get('collection_name',None)==collection_name
 
-class SingletonPythonDictStorageController(SingletonStorageController):
-    def __init__(self, model:SingletonPythonDictStorage):
-        self.model:SingletonPythonDictStorage = model
+            if not (same_url and same_db and same_col):
+                cls._instance = None
 
-    def exists(self, key: str) -> bool:
-        return key in self.model.store
+            if cls._instance is None:
+                cls._instance = super(SingletonMongoDBStorage, cls).__new__(cls)
+                cls._instance.uuid = uuid.uuid4()
+                client = MongoClient(mongo_URL)
+                cls._instance.db = client.get_database(db_name)
+                cls._instance.collection = cls._instance.db.get_collection(collection_name)
+                cls._instance._meta = dict(mongo_URL=mongo_URL,db_name=db_name,collection_name=collection_name)
+            return cls._instance
 
-    def set(self, key: str, value: dict):
-        self.model.store[key] = value
+        def __init__(self, mongo_URL: str = "mongodb://127.0.0.1:27017/", 
+                        db_name: str = "SingletonDB", collection_name: str = "store"):
+            self.uuid: str = self.uuid
+            self.db:database.Database = self.db
+            self.collection:collection.Collection = self.collection
 
-    def get(self, key: str) -> dict:
-        return self.model.store.get(key,None)
+    class SingletonMongoDBStorageController(SingletonStorageController):
+        
+        def __init__(self, model: SingletonMongoDBStorage):
+            self.model: SingletonMongoDBStorage = model
 
-    def delete(self, key: str):
-        if key in self.model.store:
-            del self.model.store[key]
+        def _ID_KEY(self):return '_id'
 
-    def keys(self, pattern: str='*') -> list[str]:
-        return fnmatch.filter(self.model.store.keys(), pattern)
+        def exists(self, key: str)->bool:
+            return self.model.collection.find_one({self._ID_KEY(): key}) is not None
 
+        def set(self, key: str, value: dict):
+            self.model.collection.update_one({self._ID_KEY(): key}, {"$set": value}, upsert=True)
 
-class PythonDictStorage:
-    def __init__(self):
-        self.uuid = uuid.uuid4()
-        self.store = {}
+        def get(self, key: str)->dict:
+            res = self.model.collection.find_one({self._ID_KEY(): key})            
+            if res: del res['_id']
+            return res
+
+        def delete(self, key: str):
+            self.model.collection.delete_one({self._ID_KEY(): key})
+
+        def keys(self, pattern: str = '*')->list[str]:
+            regex = '^'+pattern.replace('*', '.*')
+            return [doc['_id'] for doc in self.model.collection.find({self._ID_KEY(): {"$regex": regex}})]
+
 class EventDispatcherController:
     ROOT_KEY = 'Event'
 
@@ -392,14 +524,14 @@ class EventDispatcherController:
         self.client:SingletonStorageController = client
     
     def events(self):
-        return list(zip(self.client.keys(f'*'),[self.client.get(k) for k in self.client.keys(f'*')]))
+        return list(zip(self.client.keys('*'),[self.client.get(k) for k in self.client.keys('*')]))
 
     def _find_event(self, uuid: str):
         es = self.client.keys(f'*:{uuid}')
-        return [None] if len(es)==0 else self.client.get(es[0])
-
+        return [None] if len(es)==0 else es
+    
     def get_event(self, uuid: str):
-        return self.client.get(self._find_event(uuid)[0])
+        return [self.client.get(k) for k in self._find_event(uuid)]
     
     def delete_event(self, uuid: str):
         return [self.client.delete(k) for k in self._find_event(uuid)]
@@ -415,64 +547,137 @@ class EventDispatcherController:
 
     def clean(self):
         return self.client.clean()
+    
+class KeysHistoryController:
+    def __init__(self, client=None):
+        if client is None:
+            client = SingletonPythonDictStorageController(PythonDictStorage())
+        self.client:SingletonStorageController = client
+
+    def _str2base64(self,key: str):
+        return base64.b64encode(key.encode()).decode()
+    def reset(self):
+        self.client = SingletonPythonDictStorageController(PythonDictStorage())        
+    def set_history(self,key: str, result:dict):
+        if result:
+            self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
+        return result
+    
+    def get_history(self,key: str):
+        res = self.client.get(f'_History:{self._str2base64(key)}')
+        return res.get('result',None) if res else None
+
+    def try_history(self,key: str, result_func=lambda :None):
+        res = self.get_history(key)
+        if res is None:
+            res = result_func()
+            if res : self.set_history(key,res)
+        return res
+
 class SingletonKeyValueStorage(SingletonStorageController):
 
-    def __init__(self) -> None:
+    def __init__(self)->None:
+        self.conn:SingletonStorageController = None
         self.python_backend()
+    
+    def _switch_backend(self,name:str='python',*args,**kwargs):
         self.event_dispa = EventDispatcherController()
+        self._hist = KeysHistoryController()
+        backs={
+            'python':lambda:SingletonPythonDictStorageController(SingletonPythonDictStorage(*args,**kwargs)),
+            'firestore':lambda:SingletonFirestoreStorageController(SingletonFirestoreStorage(*args,**kwargs)) if firestore_back else None,
+            'redis':lambda:SingletonRedisStorageController(SingletonRedisStorage(*args,**kwargs)) if redis_back else None,
+            'sqlite':lambda:SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
+            'mongodb':lambda:SingletonMongoDBStorageController(SingletonMongoDBStorage(*args,**kwargs)) if mongo_back else None,
+        }
+        back=backs.get(name.lower(),lambda:None)()
+        if back is None:raise ValueError(f'no back end of {name}, has {list(backs.items())}')
+        return back
     
     def python_backend(self):
-        self.client = SingletonPythonDictStorageController(SingletonPythonDictStorage())
+        self.conn = self._switch_backend('python')
     
-    if firestore_back:
-        def firestore_backend(self,google_project_id=None,google_firestore_collection=None):
-            self.client = SingletonFirestoreStorageController(SingletonFirestoreStorage(
-                                                    google_project_id,google_firestore_collection))
+    def sqlite_backend(self):             
+        self.conn = self._switch_backend('sqlite')
 
-    if redis_back:
-        def redis_backend(self,redis_URL='redis://127.0.0.1:6379'):
-            self.client = SingletonRedisStorageController(SingletonRedisStorage(redis_URL))
+    def firestore_backend(self,google_project_id:str=None,google_firestore_collection:str=None):
+        self.conn = self._switch_backend('firestore',google_project_id,google_firestore_collection)
 
-    if sqlite_back:
-        def sqlite_backend(self):
-            self.client = SingletonSqliteStorageController(SingletonSqliteStorage())
+    def redis_backend(self,redis_URL:str='redis://127.0.0.1:6379'):
+        self.conn = self._switch_backend('redis',redis_URL)
 
-    def add_slave(self, slave:object, event_names=['set','delete']) -> bool:
-        if slave.__dict__.get('uuid',None) is None:
-            slave.__dict__['uuid'] = uuid.uuid4()
+    def mongo_backend(self,mongo_URL:str="mongodb://127.0.0.1:27017/",
+                        db_name:str="SingletonDB", collection_name:str="store"):
+        self.conn = self._switch_backend('mongodb',mongo_URL,db_name,collection_name)
+
+    def _print(self,msg):
+        print(f'[{self.__class__.__name__}]: {msg}')
+
+    def add_slave(self, slave:object, event_names=['set','delete'])->bool:
+        if getattr(slave,'uuid',None) is None:
+            try:
+                setattr(slave,'uuid',uuid.uuid4())
+            except Exception:
+                self._print(f'can not set uuid to {slave}. Skip this slave.')
+                return
         for m in event_names:
             if hasattr(slave, m):
-                self.event_dispa.set_event(m,getattr(slave,m),slave.__dict__.get('uuid',None))
+                self.event_dispa.set_event(m,getattr(slave,m),getattr(slave,'uuid'))
+            else:
+                self._print(f'no func of "{m}" in {slave}. Skip it.')
                 
-    def delete_slave(self, slave:object) -> bool:
-        self.event_dispa.delete_event(slave.__dict__.get('uuid',None))
+    def delete_slave(self, slave:object)->bool:
+        self.event_dispa.delete_event(getattr(slave,'uuid',None))
 
-    def set(self, key: str, value: dict):   
-        res = self.client.set( key, value)        
-        self.event_dispa.dispatch('set',key,value)
+    def _edit(self,func_name:str, key:str=None, value:dict=None):
+        if func_name not in ['set','delete','clean','load','loads']:
+            self._print(f'no func of "{func_name}". return.')
+            return
+        self._hist.reset()
+        func = getattr(self.conn, func_name)
+        args = list(filter(lambda x:x is not None, [key,value]))
+        res = func(*args)
+        self.event_dispa.dispatch(func_name,*args)
         return res
     
-    def delete(self, key: str):                
-        res = self.client.delete(key)     
-        self.event_dispa.dispatch('delete',key)
-        return res
+    def _try_if_error(self,func):
+        try:
+            func()
+            return True
+        except Exception as e:
+            self._print(e)
+            return False
+    # True False(in error)
+    def set(self, key: str, value: dict):     return self._try_if_error(lambda:self._edit('set',key,value))
+    def delete(self, key: str):               return self._try_if_error(lambda:self._edit('delete',key))
+    def clean(self):                          return self._try_if_error(lambda:self._edit('clean'))
+    def load(self,json_path):                 return self._try_if_error(lambda:self._edit('load', json_path))
+    def loads(self,json_str):                 return self._try_if_error(lambda:self._edit('loads',json_str))
+    def dump(self,json_path):                 return self._try_if_error(lambda:self.conn.dump(json_path))
+    
+    def _try_obj_error(self,func):
+        try:
+            return func()
+        except Exception as e:
+            self._print(e)
+            return None
+    # Object, None(in error)
+    # def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self._hist.try_history(key,  lambda:self.conn.exists(key)))
+    # def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self._hist.try_history(regx, lambda:self.conn.keys(regx)))
+    def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self.conn.exists(key))
+    def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self.conn.keys(regx))
+    def get(self, key: str)->dict:            return self._try_obj_error(lambda:self.conn.get(key))
+    def dumps(self)->str:                     return self._try_obj_error(lambda:self.conn.dumps())
 
-    def exists(self, key: str) -> bool:             return self.client.exists(key)
-    def get(self, key: str) -> dict:                return self.client.get( key)
-    def keys(self, pattern: str='*') -> list[str]:  return self.client.keys(pattern)
-    def clean(self):                                return self.client.clean()
-    def dump(self,json_path):                       return self.client.dump(json_path)
-    def load(self,json_path):                       return self.client.load(json_path)
-    def dumps(self,):                               return self.client.dumps()
-    def loads(self,json_str):                       return self.client.loads(json_str)    
 class Tests(unittest.TestCase):
-    def __init__(self,*args,**kwargs) -> None:
+    def __init__(self,*args,**kwargs)->None:
         super().__init__(*args,**kwargs)
         self.store = SingletonKeyValueStorage()
 
     def test_all(self,num=1):
         self.test_python(num)
         self.test_sqlite(num)
+        # self.test_mongo(num)
         # self.test_redis(num)
         # self.test_firestore(num)
 
@@ -490,6 +695,10 @@ class Tests(unittest.TestCase):
 
     def test_firestore(self,num=1):
         self.store.firestore_backend()
+        for i in range(num):self.test_all_cases()
+
+    def test_mongo(self,num=1):
+        self.store.mongo_backend()
         for i in range(num):self.test_all_cases()
 
     def test_all_cases(self):
@@ -541,7 +750,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
 
     def test_slaves(self):
-        if self.store.client.__class__.__name__=='SingletonPythonDictStorageController':return
+        if self.store.conn.__class__.__name__=='SingletonPythonDictStorageController':return
         store2 = SingletonKeyValueStorage()
         self.store.add_slave(store2)
         self.store.set('alpha', {'info': 'first'})
