@@ -371,18 +371,10 @@ class LLMstore(BasicStore):
                                                       raw=raw_base64)
         return parent,child
     
-    # available for regx?
-    def find(self,id:str) -> Model4LLM.AbstractObj:
-        return self._get_as_obj(self.get(id))
     
     def find_group(self,id:str) -> Model4LLM.ContentGroup:
         assert 'Group:' in id, 'this id is not a id for goup'
-        return self._get_as_obj(self.get(id))
+        return self.find(id)
     
-    def find_all(self,id:str=f'Author:*')->list[Model4LLM.AbstractObj]:
-        results = [self.find(k) for k in self.keys(id)]
-        return results
-    
-    def find_all_authors(self):
-        results:list[Model4LLM.Author] = self.find_all('Author:*')
-        return results
+    def find_all_authors(self)->list[Model4LLM.Author]:
+        return self.find_all('Author:*')
