@@ -64,12 +64,15 @@ class Model4Basic:
         def class_name(self): return self.__class__.__name__
 
         def set_id(self,id:str):
+            assert self._id is None, 'this obj is been setted! can not set again!'
             self._id = id
             return self
         
         def gen_new_id(self): return f"{self.class_name()}:{uuid4()}"
 
-        def get_id(self): return self._id
+        def get_id(self):
+            assert self._id is not None, 'this obj is not setted!'
+            return self._id
         
         model_config = ConfigDict(arbitrary_types_allowed=True)    
         _controller: Controller4Basic.AbstractObjController = None
