@@ -39,7 +39,7 @@ class Controller4LLM:
 
         def delete(self):
             # self._store.delete_obj(self.model)    
-            self._store.delete(self.model.id)
+            self._store.delete(self.model.get_id())
             self.model._controller = None
 
         def update_metadata(self, key, value):
@@ -62,13 +62,10 @@ class Controller4LLM:
             self.model: Model4LLM.AbstractContent = model
             self._store:LLMstore = store
 
-        def data_id(self):
-            return f"CommonData:{self.model.id}"
-
         def delete(self):
             self.get_data()._controller.delete()        
             # self._store.delete_obj(self.model)        
-            self._store.delete(self.model.id)
+            self._store.delete(self.model.get_id())
             self.model._controller = None
 
         def get_author(self):
@@ -80,7 +77,7 @@ class Controller4LLM:
             return res
         
         def get_data(self):
-            res:Model4LLM.CommonData = self._store.find(self.data_id())
+            res:Model4LLM.CommonData = self._store.find(self.model.data_id())
             return res
 
         def get_data_raw(self):
@@ -131,7 +128,7 @@ class Controller4LLM:
         def prints(self):
             res = '########################################################\n'
             for content, depth in self.yield_children_content_recursive():
-                res += f"{'    ' * depth}{content.id}\n"
+                res += f"{'    ' * depth}{content.get_id()}\n"
             res += '########################################################\n'
             print(res)
             return res
@@ -164,7 +161,7 @@ class Controller4LLM:
         def remove_child(self, child_id:str):
             remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
             for content in self.get_children_content():
-                if content._controller.model.id == child_id:
+                if content._controller.model.get_id() == child_id:
                     if child_id.startswith('ContentGroup'):
                         group:Controller4LLM.ContentGroupController = content._controller
                         group.delete_recursive_from_keyValue_storage()
@@ -275,7 +272,7 @@ class Controller4LLM:
     
 class Model4LLM:
     class AbstractObj(BaseModel):
-        id: str
+        _id: str = None
         rank: list = [0]
         create_time: datetime = Field(default_factory=get_current_datetime_with_utc)
         update_time: datetime = Field(default_factory=get_current_datetime_with_utc)
@@ -283,6 +280,15 @@ class Model4LLM:
         metadata: dict = {}
         model_config = ConfigDict(arbitrary_types_allowed=True)    
         _controller: Controller4LLM.AbstractObjController = None
+
+        def set_id(self,id:str):
+            self._id = id
+            return self
+        
+        def get_id(self):
+            if self._id is None:
+                self.set_id(f"{self.__class__.__name__}:{uuid4()}")
+            return self._id
 
         def get_controller(self)->Controller4LLM.AbstractObjController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.AbstractObjController(store,self)
@@ -296,7 +302,6 @@ class Model4LLM:
         def get_controller(self)->Controller4LLM.CommonDataController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.CommonDataController(store,self)
     class Author(AbstractObj):
-        id: str = Field(default_factory=lambda :f"Author:{uuid4()}")
         name: str = ''
         role: str = ''
         _controller: Controller4LLM.AuthorController = None
@@ -311,7 +316,7 @@ class Model4LLM:
         def get_controller(self)->Controller4LLM.AbstractContentController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.AbstractContentController(store,self)
 
-        def data_id(self):return f"CommonData:{self.id}"
+        def data_id(self):return f"CommonData:{self.get_id()}"
     class AbstractGroup(AbstractObj):
         author_id: str=''
         parent_id: str = ''
@@ -321,40 +326,34 @@ class Model4LLM:
         def get_controller(self)->Controller4LLM.AbstractGroupController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.AbstractGroupController(store,self)
     class ContentGroup(AbstractGroup):
-        id: str = Field(default_factory=lambda :f"ContentGroup:{uuid4()}")
         _controller: Controller4LLM.ContentGroupController = None
         
         def get_controller(self)->Controller4LLM.ContentGroupController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.ContentGroupController(store,self)
     class TextContent(AbstractContent):
-        id: str = Field(default_factory=lambda :f"TextContent:{uuid4()}")
         _controller: Controller4LLM.TextContentController = None
         
         def get_controller(self)->Controller4LLM.TextContentController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.TextContentController(store,self)
 
     class EmbeddingContent(AbstractContent):
-        id: str = Field(default_factory=lambda :f"EmbeddingContent:{uuid4()}")
         _controller: Controller4LLM.EmbeddingContentController = None
         
         def get_controller(self)->Controller4LLM.EmbeddingContentController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.EmbeddingContentController(store,self)
         target_id: str
     class FileLinkContent(AbstractContent):
-        id: str = Field(default_factory=lambda :f"FileLinkContent:{uuid4()}")
         _controller: Controller4LLM.FileLinkContentController = None
         
         def get_controller(self)->Controller4LLM.FileLinkContentController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.FileLinkContentController(store,self)
     class BinaryFileContent(AbstractContent):
-        id: str = Field(default_factory=lambda :f"BinaryFileContent:{uuid4()}")
         _controller: Controller4LLM.BinaryFileContentController = None
         
         def get_controller(self)->Controller4LLM.BinaryFileContentController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.BinaryFileContentController(store,self)
             
     class ImageContent(BinaryFileContent):
-        id: str = Field(default_factory=lambda :f"ImageContent:{uuid4()}")
         _controller: Controller4LLM.ImageContentController = None
         
         def get_controller(self)->Controller4LLM.ImageContentController: return self._controller
@@ -376,7 +375,7 @@ class LLMstore(SingletonKeyValueStorage):
         return res
        
     def _store_obj(self, obj:Model4LLM.AbstractObj):
-        self.set(obj.id,json.loads(obj.model_dump_json()))
+        self.set(obj.get_id(),json.loads(obj.model_dump_json()))
         return obj
         
     def add_new_author(self,name, role, rank:list=[0], metadata={}) -> Model4LLM.Author:
@@ -390,9 +389,9 @@ class LLMstore(SingletonKeyValueStorage):
         return group
     
     def _add_new_content_to_group(self,group:Model4LLM.ContentGroup,content:Model4LLM.AbstractContent,raw:str=None):
-        group.children_id.append(content.id)
+        group.children_id.append(content.get_id())
         self._store_obj(group)
-        if raw is not None and 'ContentGroup' not in content.id:
+        if raw is not None and 'ContentGroup' not in content.get_id():
             self._store_obj(content)
             self._store_obj(Model4LLM.CommonData(id=content.data_id(), raw=raw))
         else:
@@ -411,19 +410,19 @@ class LLMstore(SingletonKeyValueStorage):
         return self.b64encode(image_bytes)
     
     def add_new_group_to_group(self,group:Model4LLM.ContentGroup,metadata={},rank=[0]):
-        parent,child = self._add_new_content_to_group(group, Model4LLM.ContentGroup(rank=rank, metadata=metadata, parent_id=group.id))
+        parent,child = self._add_new_content_to_group(group, Model4LLM.ContentGroup(rank=rank, metadata=metadata, parent_id=group.get_id()))
         return parent,child
 
     def add_new_text_to_group(self,group:Model4LLM.ContentGroup,author_id:str,text:str):
         parent,child = self._add_new_content_to_group(group,
-                                                      Model4LLM.TextContent(author_id=author_id, group_id=group.id),
+                                                      Model4LLM.TextContent(author_id=author_id, group_id=group.get_id()),
                                                       raw=text)
         return parent,child
     
     def add_new_embedding_to_group(self,group:Model4LLM.ContentGroup, author_id:str, content_id:str, vec:list[float]):
         parent,child = self._add_new_content_to_group(group,
                                                       Model4LLM.EmbeddingContent(author_id=author_id, 
-                                                                       group_id=group.id,target_id=content_id),
+                                                                       group_id=group.get_id(),target_id=content_id),
                                                       raw=str(vec))
         return parent,child
     
@@ -431,30 +430,25 @@ class LLMstore(SingletonKeyValueStorage):
         raw_bytes = self.read_image(filepath)
         raw_base64 = self.encode_image(raw_bytes)
         parent,child = self._add_new_content_to_group(group,
-                                                      Model4LLM.ImageContent(author_id=author_id,group_id=group.id),
+                                                      Model4LLM.ImageContent(author_id=author_id,group_id=group.get_id()),
                                                       raw=raw_base64)
         return parent,child
     
+    def _get_as_obj(self,data_dict)->Model4LLM.AbstractObj:
+        obj:Model4LLM.AbstractObj = self.get_class(id)(**data_dict)
+        obj.set_id(id).init_controller(self)
+        return obj
+        
     # available for regx?
     def find(self,id:str) -> Model4LLM.AbstractObj:
-        data_dict = self.get(id)
-        obj:Model4LLM.AbstractObj = self.get_class(id)(**data_dict)
-        obj.init_controller(self)
-        return obj
+        return self._get_as_obj(self.get(id))
     
     def find_group(self,id:str) -> Model4LLM.ContentGroup:
         assert 'Group:' in id, 'this id is not a id for goup'
-        data_dict = self.get(id)
-        obj:Model4LLM.ContentGroup = self.get_class(id)(**data_dict)
-        obj.init_controller(self)
-        return obj
+        return self._get_as_obj(self.get(id))
     
-    def find_all(self,id:str=f'Author:*'):
-        keys = [key for key in self.keys(id)]
-        results:list[Model4LLM.AbstractObj] = []
-        for key in keys:
-            obj = self.find(key)
-            results.append(obj)
+    def find_all(self,id:str=f'Author:*')->list[Model4LLM.AbstractObj]:
+        results = [self.find(k) for k in self.keys(id)]
         return results
     
     def find_all_authors(self):
