@@ -11,41 +11,14 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
 
 from .Storages import SingletonKeyValueStorage
+from .BasicModel import BasicStore, Controller4Basic, Model4Basic
 
 def get_current_datetime_with_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
 
 class Controller4LLM:
-    class AbstractObjController:
-        def __init__(self, store, model):
-            self.model:Model4LLM.AbstractObj = model
-            self._store:LLMstore = store
-
-        def update(self, **kwargs):
-            assert  self.model is not None, 'controller has null model!'
-            for key, value in kwargs.items():
-                if hasattr(self.model, key):
-                    setattr(self.model, key, value)
-            self._update_timestamp()
-            self.store()
-
-        def _update_timestamp(self):
-            assert  self.model is not None, 'controller has null model!'
-            self.model.update_time = get_current_datetime_with_utc()
-            
-        def store(self):
-            self._store._store_obj(self.model)
-            return self
-
-        def delete(self):
-            # self._store.delete_obj(self.model)    
-            self._store.delete(self.model.get_id())
-            self.model._controller = None
-
-        def update_metadata(self, key, value):
-            updated_metadata = {**self.model.metadata, key: value}
-            self.update(metadata = updated_metadata)
-            return self
+    class AbstractObjController(Controller4Basic.AbstractObjController):
+        pass
 
     class CommonDataController(AbstractObjController):
         def __init__(self, store, model):
@@ -271,27 +244,9 @@ class Controller4LLM:
             return self.get_data_rLOD(lod=2)
     
 class Model4LLM:
-    class AbstractObj(BaseModel):
-        _id: str = None
-        rank: list = [0]
-        create_time: datetime = Field(default_factory=get_current_datetime_with_utc)
-        update_time: datetime = Field(default_factory=get_current_datetime_with_utc)
-        status: str = ""
-        metadata: dict = {}
-        model_config = ConfigDict(arbitrary_types_allowed=True)    
-        _controller: Controller4LLM.AbstractObjController = None
+    class AbstractObj(Model4Basic.AbstractObj):
+        pass
 
-        def set_id(self,id:str):
-            self._id = id
-            return self
-        
-        def get_id(self):
-            if self._id is None:
-                self.set_id(f"{self.__class__.__name__}:{uuid4()}")
-            return self._id
-
-        def get_controller(self)->Controller4LLM.AbstractObjController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.AbstractObjController(store,self)
     class CommonData(AbstractObj):
         raw: str = ''
         rLOD0: str = ''
@@ -359,43 +314,25 @@ class Model4LLM:
         def get_controller(self)->Controller4LLM.ImageContentController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.ImageContentController(store,self)
 
-class LLMstore(SingletonKeyValueStorage):
+class LLMstore(BasicStore):
     
     def __init__(self) -> None:
         self.python_backend()
         
-    def _client(self):
-        return self.client
-    
-    def get_class(self, id: str):
-        class_type = id.split(':')[0]
-        res = {c.__name__:c for c in [i for k,i in Model4LLM.__dict__.items() if '_' not in k]}.get(class_type, None)
-        if res is None:
-            raise ValueError(f'No such class of {class_type}')
-        return res
-       
-    def _store_obj(self, obj:Model4LLM.AbstractObj):
-        self.set(obj.get_id(),json.loads(obj.model_dump_json()))
-        return obj
-        
     def add_new_author(self,name, role, rank:list=[0], metadata={}) -> Model4LLM.Author:
-        auther = self._store_obj(Model4LLM.Author(name=name, role=role, rank=rank, metadata=metadata))
-        auther.init_controller(self,auther)
-        return auther
+        return self.add_new_obj(Model4LLM.Author(name=name, role=role, rank=rank, metadata=metadata))
     
     def add_new_root_group(self,metadata={},rank=[0]) -> Model4LLM.ContentGroup:
-        group = self._store_obj( Model4LLM.ContentGroup(rank=rank, metadata=metadata) )         
-        group.init_controller(self,group)
-        return group
+        return self.add_new_obj( Model4LLM.ContentGroup(rank=rank, metadata=metadata) )
     
     def _add_new_content_to_group(self,group:Model4LLM.ContentGroup,content:Model4LLM.AbstractContent,raw:str=None):
         group.children_id.append(content.get_id())
-        self._store_obj(group)
+        self.add_new_obj(group)
         if raw is not None and 'ContentGroup' not in content.get_id():
-            self._store_obj(content)
-            self._store_obj(Model4LLM.CommonData(id=content.data_id(), raw=raw))
+            self.add_new_obj(content)
+            self.add_new_obj(Model4LLM.CommonData(raw=raw),id=content.data_id())
         else:
-            self._store_obj(content)
+            self.add_new_obj(content)
         content.init_controller(self)
         return group,content    
 
@@ -434,11 +371,6 @@ class LLMstore(SingletonKeyValueStorage):
                                                       raw=raw_base64)
         return parent,child
     
-    def _get_as_obj(self,data_dict)->Model4LLM.AbstractObj:
-        obj:Model4LLM.AbstractObj = self.get_class(id)(**data_dict)
-        obj.set_id(id).init_controller(self)
-        return obj
-        
     # available for regx?
     def find(self,id:str) -> Model4LLM.AbstractObj:
         return self._get_as_obj(self.get(id))
