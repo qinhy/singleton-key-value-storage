@@ -30,19 +30,14 @@ mongo_back = try_if_error(lambda:__import__('pymongo')) is None
 class SingletonStorageController:
     def __init__(self, model):
         self.model:object = model
-        self.hist_con = KeysHistoryController(self)
 
     def exists(self, key: str)->bool: print(f'[{self.__class__.__name__}]: not implement')
 
-    def set(self, key: str, value: dict): 
-        self.hist_con.reset()
-        #print(f'[{self.__class__.__name__}]: not implement')
+    def set(self, key: str, value: dict): print(f'[{self.__class__.__name__}]: not implement')
 
     def get(self, key: str)->dict: print(f'[{self.__class__.__name__}]: not implement')
 
-    def delete(self, key: str): 
-        self.hist_con.reset()
-        #print(f'[{self.__class__.__name__}]: not implement')
+    def delete(self, key: str): print(f'[{self.__class__.__name__}]: not implement')
 
     def keys(self, pattern: str='*')->list[str]: print(f'[{self.__class__.__name__}]: not implement')
     
@@ -463,52 +458,6 @@ if aws_dynamo:
                 print(f'Error scanning keys: {e}')
 
             return matched_keys
-
-# from azure.data.tables import TableServiceClient
-
-# class SingletonAzureTableStorage:
-#     _instance = None
-#     _meta = {}
-
-#     def __new__(cls):
-#         if cls._instance is None:
-#             cls._instance = super(SingletonAzureTableStorage, cls).__new__(cls)
-#             # Setup Azure Table connection here (adjust as necessary)
-#             cls._instance.table_service_client = TableServiceClient.from_connection_string("Your_Connection_String")
-#             cls._instance.table_client = cls._instance.table_service_client.get_table_client(table_name="Your_Table_Name")
-#         return cls._instance
-    
-#     def __init__(self):
-#         self.table_client = self.table_client
-
-# class SingletonAzureTableStorageController(SingletonStorageController):
-#     def __init__(self, model: SingletonAzureTableStorage):
-#         self.model:SingletonAzureTableStorage = model
-
-#     def exists(self, key: str)->bool:
-#         try:
-#             entity = self.model.table_client.get_entity(partition_key="default", row_key=key)
-#             return True
-#         except Exception as e:
-#             return False
-
-#     def set(self, key: str, value: dict):
-#         entity = {"partition_key": "default", "row_key": key, **value}
-#         self.model.table_client.upsert_entity(entity)
-
-#     def get(self, key: str)->dict:
-#         try:
-#             entity = self.model.table_client.get_entity(partition_key="default", row_key=key)
-#             return {k: v for k, v in entity.items() if k not in ["partition_key", "row_key", "Timestamp", "etag"]}
-#         except Exception as e:
-#             return None
-
-#     def delete(self, key: str):
-#         self.model.table_client.delete_entity(partition_key="default", row_key=key)
-
-#     def keys(self, pattern: str = '*')->list[str]:
-#         entities = self.model.table_client.list_entities()
-#         return [entity['row_key'] for entity in entities if fnmatch.fnmatch(entity['row_key'], pattern)]
 
 if mongo_back:
     from pymongo import MongoClient, database, collection
