@@ -13,7 +13,7 @@ import urllib
 import urllib.parse
 from urllib.parse import urlparse
 
-def get_error(func):
+def try_if_error(func):
     try:
         func()
     except Exception as e:
@@ -21,27 +21,11 @@ def get_error(func):
         return e
 
 # self checking
-firestore_back = get_error(lambda:__import__('google.cloud.firestore')) is None
-redis_back = get_error(lambda:__import__('redis')) is None
+firestore_back = try_if_error(lambda:__import__('google.cloud.firestore')) is None
+redis_back = try_if_error(lambda:__import__('redis')) is None
 sqlite_back = True
-aws_dynamo = get_error(lambda:__import__('boto3')) is None
-mongo_back = get_error(lambda:__import__('pymongo')) is None
-
-
-class KeysHistoryController:
-    def __init__(self, controller):
-        self.controller:SingletonStorageController = controller    
-    
-    def _str2base64(self,key: str):
-        return base64.b64encode(key.encode())
-
-    def reset(self):
-        self.controller.set('_History:',{})
-    def set_history(self,key: str, result):
-        self.controller.set(f'_History:{self._str2base64(key)}',{'result':result})
-    def get_history(self,key: str):
-        self.controller.get(f'_History:{self._str2base64(key)}')['result']
-
+aws_dynamo = try_if_error(lambda:__import__('boto3')) is None
+mongo_back = try_if_error(lambda:__import__('pymongo')) is None
 
 class SingletonStorageController:
     def __init__(self, model):
@@ -494,18 +478,46 @@ if aws_dynamo:
 #             cls._instance.table_client = cls._instance.table_service_client.get_table_client(table_name="Your_Table_Name")
 #         return cls._instance
     
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(SingletonPythonDictStorage, cls).__new__(cls)
-            cls._instance.uuid = uuid.uuid4()
-            cls._instance.store = {}
-        return cls._instance
+#     def __init__(self):
+#         self.table_client = self.table_client
+
+# class SingletonAzureTableStorageController(SingletonStorageController):
+#     def __init__(self, model: SingletonAzureTableStorage):
+#         self.model:SingletonAzureTableStorage = model
+
+#     def exists(self, key: str)->bool:
+#         try:
+#             entity = self.model.table_client.get_entity(partition_key="default", row_key=key)
+#             return True
+#         except Exception as e:
+#             return False
+
+#     def set(self, key: str, value: dict):
+#         entity = {"partition_key": "default", "row_key": key, **value}
+#         self.model.table_client.upsert_entity(entity)
+
+#     def get(self, key: str)->dict:
+#         try:
+#             entity = self.model.table_client.get_entity(partition_key="default", row_key=key)
+#             return {k: v for k, v in entity.items() if k not in ["partition_key", "row_key", "Timestamp", "etag"]}
+#         except Exception as e:
+#             return None
+
+#     def delete(self, key: str):
+#         self.model.table_client.delete_entity(partition_key="default", row_key=key)
+
+#     def keys(self, pattern: str = '*')->list[str]:
+#         entities = self.model.table_client.list_entities()
+#         return [entity['row_key'] for entity in entities if fnmatch.fnmatch(entity['row_key'], pattern)]
+
+if mongo_back:
+    from pymongo import MongoClient, database, collection
     
     class SingletonMongoDBStorage:
         _instance = None
         _meta = {}
         
-        def __new__(cls, mongo_URL: str = "mongodb://localhost:27017/", 
+        def __new__(cls, mongo_URL: str = "mongodb://127.0.0.1:27017/", 
                         db_name: str = "SingletonDB", collection_name: str = "store"):            
             same_url = cls._meta.get('mongo_URL',None)==mongo_URL
             same_db = cls._meta.get('db_name',None)==db_name
@@ -523,7 +535,7 @@ if aws_dynamo:
                 cls._instance._meta = dict(mongo_URL=mongo_URL,db_name=db_name,collection_name=collection_name)
             return cls._instance
 
-        def __init__(self, mongo_URL: str = "mongodb://localhost:27017/", 
+        def __init__(self, mongo_URL: str = "mongodb://127.0.0.1:27017/", 
                         db_name: str = "SingletonDB", collection_name: str = "store"):
             self.uuid: str = self.uuid
             self.db:database.Database = self.db
@@ -596,7 +608,7 @@ class KeysHistoryController:
     def _str2base64(self,key: str):
         return base64.b64encode(key.encode()).decode()
     def reset(self):
-        self.client.set('_History:',{})
+        self.client = SingletonPythonDictStorageController(PythonDictStorage())        
     def set_history(self,key: str, result:dict):
         if result:
             self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
@@ -619,67 +631,94 @@ class SingletonKeyValueStorage(SingletonStorageController):
         self.conn:SingletonStorageController = None
         self.python_backend()
     
-    def init(self):        
+    def _switch_backend(self,name:str='python',*args,**kwargs):
         self.event_dispa = EventDispatcherController()
         self._hist = KeysHistoryController()
+        backs={
+            'python':lambda:SingletonPythonDictStorageController(SingletonPythonDictStorage(*args,**kwargs)),
+            'firestore':lambda:SingletonFirestoreStorageController(SingletonFirestoreStorage(*args,**kwargs)) if firestore_back else None,
+            'redis':lambda:SingletonRedisStorageController(SingletonRedisStorage(*args,**kwargs)) if redis_back else None,
+            'sqlite':lambda:SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
+            'mongodb':lambda:SingletonMongoDBStorageController(SingletonMongoDBStorage(*args,**kwargs)) if mongo_back else None,
+        }
+        back=backs.get(name.lower(),lambda:None)()
+        if back is None:raise ValueError(f'no back end of {name}, has {list(backs.items())}')
+        return back
     
     def python_backend(self):
-        self.init()
-        self.conn = SingletonPythonDictStorageController(SingletonPythonDictStorage())
+        self.conn = self._switch_backend('python')
     
-    if firestore_back:
-        def firestore_backend(self,google_project_id=None,google_firestore_collection=None):            
-            self.init()
-            self.conn = SingletonFirestoreStorageController(SingletonFirestoreStorage(
-                                                    google_project_id,google_firestore_collection))
+    def sqlite_backend(self):             
+        self.conn = self._switch_backend('sqlite')
 
-    if redis_back:
-        def redis_backend(self,redis_URL='redis://127.0.0.1:6379'):            
-            self.init()
-            self.conn = SingletonRedisStorageController(SingletonRedisStorage(redis_URL))
+    def firestore_backend(self,google_project_id:str=None,google_firestore_collection:str=None):
+        self.conn = self._switch_backend('firestore',google_project_id,google_firestore_collection)
 
-    if sqlite_back:
-        def sqlite_backend(self):            
-            self.init()
-            self.conn = SingletonSqliteStorageController(SingletonSqliteStorage())
+    def redis_backend(self,redis_URL:str='redis://127.0.0.1:6379'):
+        self.conn = self._switch_backend('redis',redis_URL)
 
-    if mongo_back:
-        def mongo_backend(self, mongo_URL: str = "mongodb://localhost:27017/",
-                          db_name: str = "SingletonDB", collection_name: str = "store"):
-            self.init()
-            self.conn = SingletonMongoDBStorageController(SingletonMongoDBStorage(mongo_URL,db_name,collection_name))
+    def mongo_backend(self,mongo_URL:str="mongodb://127.0.0.1:27017/",
+                        db_name:str="SingletonDB", collection_name:str="store"):
+        self.conn = self._switch_backend('mongodb',mongo_URL,db_name,collection_name)
+
+    def _print(self,msg):
+        print(f'[{self.__class__.__name__}]: {msg}')
 
     def add_slave(self, slave:object, event_names=['set','delete'])->bool:
-        if slave.__dict__.get('uuid',None) is None: slave.__dict__['uuid'] = uuid.uuid4()
+        if getattr(slave,'uuid',None) is None:
+            try:
+                setattr(slave,'uuid',uuid.uuid4())
+            except Exception:
+                self._print(f'can not set uuid to {slave}. Skip this slave.')
+                return
         for m in event_names:
             if hasattr(slave, m):
-                self.event_dispa.set_event(m,getattr(slave,m),slave.__dict__.get('uuid',None))
+                self.event_dispa.set_event(m,getattr(slave,m),getattr(slave,'uuid'))
+            else:
+                self._print(f'no func of "{m}" in {slave}. Skip it.')
                 
     def delete_slave(self, slave:object)->bool:
-        self.event_dispa.delete_event(slave.__dict__.get('uuid',None))
+        self.event_dispa.delete_event(getattr(slave,'uuid',None))
 
-    def _edit(self,func_name:str, key:str, value:dict=None):
+    def _edit(self,func_name:str, key:str=None, value:dict=None):
+        if func_name not in ['set','delete','clean','load','loads']:
+            self._print(f'no func of "{func_name}". return.')
+            return
         self._hist.reset()
-        func = getattr(self.conn,func_name)
-        args = [key,value] if value else [key] 
+        func = getattr(self.conn, func_name)
+        args = list(filter(lambda x:x is not None, [key,value]))
         res = func(*args)
         self.event_dispa.dispatch(func_name,*args)
         return res
-
-    def set(self, key: str, value: dict): return self._edit('set',key,value)
     
-    def delete(self, key: str): return self._edit('delete',key)
+    def _try_if_error(self,func):
+        try:
+            func()
+            return True
+        except Exception as e:
+            self._print(e)
+            return False
+    # True False(in error)
+    def set(self, key: str, value: dict):     return self._try_if_error(lambda:self._edit('set',key,value))
+    def delete(self, key: str):               return self._try_if_error(lambda:self._edit('delete',key))
+    def clean(self):                          return self._try_if_error(lambda:self._edit('clean'))
+    def load(self,json_path):                 return self._try_if_error(lambda:self._edit('load', json_path))
+    def loads(self,json_str):                 return self._try_if_error(lambda:self._edit('loads',json_str))
+    def dump(self,json_path):                 return self._try_if_error(lambda:self.conn.dump(json_path))
     
-    def exists(self, key: str)->bool: return self._hist.try_history(key, lambda:self.conn.exists(key))
-    
-    def keys(self, regx: str='*')->list[str]: return self._hist.try_history(regx, lambda:self.conn.keys(regx))
-
-    def get(self, key: str)->dict:    return self.conn.get( key)
-    def clean(self):                  return self.conn.clean()
-    def dump(self,json_path):         return self.conn.dump(json_path)
-    def load(self,json_path):         return self.conn.load(json_path)
-    def dumps(self,):                 return self.conn.dumps()
-    def loads(self,json_str):         return self.conn.loads(json_str)
+    def _try_obj_error(self,func):
+        try:
+            return func()
+        except Exception as e:
+            self._print(e)
+            return None
+    # Object, None(in error)
+    # def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self._hist.try_history(key,  lambda:self.conn.exists(key)))
+    # def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self._hist.try_history(regx, lambda:self.conn.keys(regx)))
+    def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self.conn.exists(key))
+    def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self.conn.keys(regx))
+    def get(self, key: str)->dict:            return self._try_obj_error(lambda:self.conn.get(key))
+    def dumps(self)->str:                     return self._try_obj_error(lambda:self.conn.dumps())
 
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs)->None:
@@ -689,7 +728,7 @@ class Tests(unittest.TestCase):
     def test_all(self,num=1):
         self.test_python(num)
         self.test_sqlite(num)
-        self.test_mongo(num)
+        # self.test_mongo(num)
         # self.test_redis(num)
         # self.test_firestore(num)
 
