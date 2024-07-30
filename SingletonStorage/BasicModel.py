@@ -96,12 +96,12 @@ class BasicStore(SingletonKeyValueStorage):
         obj.set_id(id).init_controller(self)
         return obj
     
-    def add_new_obj(self, obj:Model4Basic.AbstractObj):        
+    def add_new_obj(self, obj:Model4Basic.AbstractObj, id:str=None):        
         if obj._id is None: raise ValueError(f'obj._id is {obj._id}, must be none')
-        id,d = obj.gen_new_id(),obj.model_dump_json_dict()
+        id,d = obj.gen_new_id() if id is None else id, obj.model_dump_json_dict()
         self.set(id,d)
         return self._get_as_obj(id,d)
-        
+    
     # available for regx?
     def find(self,id:str) -> Model4Basic.AbstractObj:
         raw = self.get(id)
