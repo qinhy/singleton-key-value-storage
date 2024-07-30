@@ -318,7 +318,10 @@ class LLMstore(BasicStore):
     
     def __init__(self) -> None:
         self.python_backend()
-        
+
+    def _get_class(self, id: str, modelclass=Model4LLM):
+        return super()._get_class(id, modelclass)
+    
     def add_new_author(self,name, role, rank:list=[0], metadata={}) -> Model4LLM.Author:
         return self.add_new_obj(Model4LLM.Author(name=name, role=role, rank=rank, metadata=metadata))
     
@@ -326,13 +329,11 @@ class LLMstore(BasicStore):
         return self.add_new_obj( Model4LLM.ContentGroup(rank=rank, metadata=metadata) )
     
     def _add_new_content_to_group(self,group:Model4LLM.ContentGroup,content:Model4LLM.AbstractContent,raw:str=None):
-        group.children_id.append(content.get_id())
-        self.add_new_obj(group)
+        if group._id is None:raise ValueError('the group is no exits!')
+        content = self.add_new_obj(content)
+        group.get_controller().update(children_id=group.children_id+[content.get_id()])
         if raw is not None and 'ContentGroup' not in content.get_id():
-            self.add_new_obj(content)
             self.add_new_obj(Model4LLM.CommonData(raw=raw),id=content.data_id())
-        else:
-            self.add_new_obj(content)
         content.init_controller(self)
         return group,content    
 

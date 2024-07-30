@@ -54,7 +54,7 @@ try:
             try:
                 if str(msgid).isdecimal() and int(msgid)>0:
                     for m in cr.chatroom().get_controller().get_children_content()[-int(msgid):]:
-                        cr.chatroom().get_controller().remove_child(m.id)
+                        cr.chatroom().get_controller().remove_child(m.get_id())
                     cr.store.dump(json)
                     return True,chat(None,'')
                 
@@ -72,7 +72,7 @@ try:
                     gc = cr.chatroom().get_controller()
                     c = gc.get_child_content(msgid)
                     if type(c) is Model4LLM.TextContent:
-                        return chat(c.get_controller().get_author().id,c.get_controller().get_data_raw())
+                        return chat(c.get_controller().get_author().get_id(),c.get_controller().get_data_raw())
             except Exception as e:
                 return f'{e}'
             
@@ -107,7 +107,7 @@ try:
                             elif 'ImageContent' in v.__class__.__name__:
                                 v:Model4LLM.ImageContent = v
                                 im = v.get_controller().get_image()
-                                imid = v.id.split(':')[1]
+                                imid = v.get_id().split(':')[1]
                                 b64 = v.get_controller().get_data_raw()
                                 im = v.get_controller().get_image()
                                 
@@ -117,7 +117,7 @@ try:
                                 name = cr.speakers[v.author_id].name
                                 msg = v.get_controller().get_data_raw().replace("\n","\n>\n>")
 
-                            m = f'\n\n##### {name}:\n>{msg}\n>\n>_{v.create_time} {v.id}_'
+                            m = f'\n\n##### {name}:\n>{msg}\n>\n>_{v.create_time} {v.get_id()}_'
                             if depth>0:
                                 lvl = ''.join(['>']*(depth+1))
                                 m = m.replace('>',lvl)
@@ -125,7 +125,7 @@ try:
                                 m = m.replace('#####',f'{lvl}#####')
                             res.append(m)
                         else:
-                            res.append("\n".join(get_msgs_md(cr.get_messages_in_group(v.id),depth=depth+1)))
+                            res.append("\n".join(get_msgs_md(cr.get_messages_in_group(v.get_id()),depth=depth+1)))
                     return res
                 return "\n".join(get_msgs_md(cr.get_messages_in_group()[-show_passages:]))
             except Exception as e:

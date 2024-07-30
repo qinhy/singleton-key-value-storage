@@ -82,7 +82,7 @@ def pygpt(speaker:Speaker, msg:Model4LLM.AbstractContent):
 get_speaker('VisionMaster','assistant',{'model':model.value}).entery_room(cr).add_mention_callback(pygpt)
 get_speaker('User','user').entery_room(cr)
 
-# u.speak('hi')
+# get_speaker('User','user').speak('hi')
 # gid = u.new_group()
 # u.speak_img(r"D:\Download\2975157083_4567dde5d5_z.jpg",gid)
 # u.speak('@VisionMaster hi, please tell me the details in the image.',gid)

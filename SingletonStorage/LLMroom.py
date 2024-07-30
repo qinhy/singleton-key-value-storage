@@ -8,8 +8,8 @@ from typing import List, Dict
 class Speaker:
     def __init__(self,author:Model4LLM.Author) -> None:
         self.author = author
-        self.id = self.author.id
-        self.name = self.author.name#self.id[-8:]
+        self.id = self.author.get_id()
+        self.name = self.author.name#self.get_id()[-8:]
         self.room:ChatRoom = None
         self.is_speaking = 0
         self.new_message_callbacks=[]
@@ -35,8 +35,8 @@ class Speaker:
         self.room:ChatRoom = room
         self.room.add_speaker(self)
         rooms = self.author.metadata.get('groups','')
-        if self.room.chatroom().id not in rooms:
-            rooms += self.room.chatroom().id
+        if self.room.chatroom().get_id() not in rooms:
+            rooms += self.room.chatroom().get_id()
             self.author.get_controller().update_metadata('groups',rooms)
         return self
     
@@ -81,19 +81,19 @@ class ChatRoom:
                 print(f'no group({chatroom_id}) in store, make a new one')
                 roots = [self.store.add_new_root_group()]
         else:
-            roots = [g for g in roots if g.id==chatroom_id]
+            roots = [g for g in roots if g.get_id()==chatroom_id]
             if len(roots)==0:
                 raise ValueError(f'no group({chatroom_id}) in store')        
         chatroom = roots[0]
 
-        self.chatroom_id = chatroom.id
+        self.chatroom_id = chatroom.get_id()
         self.msgs = []
         
         for a in self.store.find_all_authors():
             if self.chatroom_id in a.metadata.get('groups',''):
                 print(a)
-                self.speakers[a.id] = Speaker(a).entery_room(self)
-                self.speakers[a.name] = self.speakers[a.id]
+                self.speakers[a.get_id()] = Speaker(a).entery_room(self)
+                self.speakers[a.name] = self.speakers[a.get_id()]
         print(self.speakers)
     
     def chatroom(self):
@@ -105,7 +105,7 @@ class ChatRoom:
     def add_content_group_to_chatroom(self):
         child = self.chatroom().get_controller().add_new_child_group()
         self._on_message_change()
-        return child.id
+        return child.get_id()
     
     def get_messages_in_group(self,id=None)->List[Model4LLM.AbstractContent]:
         if id is None:
@@ -185,7 +185,8 @@ class ChatRoom:
         elif group_id is None and new_group:            
             group = self.chatroom().get_controller().add_new_child_group()
             tc = add_content(group)
-        return tc(speaker.author.id, msg)
+        
+        return tc(speaker.id, msg)
 
     def speak_stream(self,speaker_id,stream,callback,group_id:str=None,new_group=False):
         content:Model4LLM.AbstractContent = None
@@ -246,7 +247,7 @@ class ChatRoom:
                 else:
                     res.append(dict(name=name,role=role,content=todict(v)))
             else:
-                res.append(self.msgsDict(False,self.get_messages_in_group(v.id)))
+                res.append(self.msgsDict(False,self.get_messages_in_group(v.get_id())))
         return res
 
 
@@ -275,6 +276,6 @@ class ChatRoom:
                 else:
                     print(f'{intents}{self.speakers[v.author_id].name}: {v.get_controller().get_data_raw()}')
             else:
-                self.printMsgs(False,intent+4,self.get_messages_in_group(v.id))
+                self.printMsgs(False,intent+4,self.get_messages_in_group(v.get_id()))
         print(f'{intents}-------------------------------------------------------------')
         print(f'{intents}#############################################################')
