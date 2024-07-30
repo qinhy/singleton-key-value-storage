@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from Storages import SingletonKeyValueStorage
 
-def get_current_datetime_with_utc():
+def now_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
 
 class Controller4Basic:
@@ -32,12 +32,11 @@ class Controller4Basic:
 
         def _update_timestamp(self):
             assert  self.model is not None, 'controller has null model!'
-            self.model.update_time = get_current_datetime_with_utc()
+            self.model.update_time = now_utc()
             
         def store(self):
             assert self.model._id is not None
-            self._store.set(self.model._id,
-                            json.loads(self.model.model_dump_json()))
+            self._store.set(self.model._id,self.model.model_dump_json_dict())
             return self
 
         def delete(self):
@@ -53,8 +52,8 @@ class Model4Basic:
     class AbstractObj(BaseModel):
         _id: str=None
         rank: list = [0]
-        create_time: datetime = Field(default_factory=get_current_datetime_with_utc)
-        update_time: datetime = Field(default_factory=get_current_datetime_with_utc)
+        create_time: datetime = Field(default_factory=now_utc)
+        update_time: datetime = Field(default_factory=now_utc)
         status: str = ""
         metadata: dict = {}
 
