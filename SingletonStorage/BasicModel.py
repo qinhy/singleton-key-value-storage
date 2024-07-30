@@ -96,8 +96,8 @@ class BasicStore(SingletonKeyValueStorage):
         obj.set_id(id).init_controller(self)
         return obj
     
-    def add_new_obj(self, obj:Model4Basic.AbstractObj):
-        assert obj.get_id() is None
+    def add_new_obj(self, obj:Model4Basic.AbstractObj):        
+        assert obj._id is None, f'obj._id is {obj._id}'
         id,d = obj.gen_new_id(),obj.model_dump_json_dict()
         self.set(id,d)
         return self._get_as_obj(id,d)
