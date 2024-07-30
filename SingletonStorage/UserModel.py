@@ -5,44 +5,46 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
 
-from .Storages import SingletonKeyValueStorage
+from BasicModel import BasicStore,Controller4Basic,Model4Basic
 
-def get_current_datetime_with_utc():
-    return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
+import base64
+import sys
+import uuid,hashlib
+
+import numpy as np
+
+def text2hash2base64Str(text:str,salt:bytes = b'',ite:int = 10**6):
+    return base64.b64encode(hashlib.pbkdf2_hmac('sha256', text.encode(), salt, ite, dklen=16)).decode()
+
+def text2hash(text:str,salt:bytes = b'',ite:int = 10**6):
+    return hashlib.pbkdf2_hmac('sha256', text.encode(), salt, ite, dklen=16)
+
+def text2hash2uuid(text:str,salt:bytes = b'',ite:int = 10**6):
+    return str(uuid.UUID(bytes=text2hash(text,salt,ite)))
+
+def remove_hyphen(uuid:str):
+    return uuid.replace('-', '')
+
+def restore_hyphen(uuid:str):
+    if len(uuid) != 32:
+        raise ValueError("Invalid UUID format")
+    return f'{uuid[:8]}-{uuid[8:12]}-{uuid[12:16]}-{uuid[16:20]}-{uuid[20:]}'
+
+def list2base64Str(l:list):
+    if l is None:
+        l = []
+    t = np.asarray(l)
+    return base64.b64encode(t).decode()
+
+def base64Str2list(bs:str):
+    r = base64.decodebytes(bs.encode())
+    return np.frombuffer(r).tolist()
+
 
 class Controller4User:
-    class AbstractObjController:
-        def __init__(self, store, model):
-            self.model:Model4User.AbstractObj = model
-            self._store:UsersStore = store
-
-        def update(self, **kwargs):
-            assert  self.model is not None, 'controller has null model!'
-            for key, value in kwargs.items():
-                if hasattr(self.model, key):
-                    setattr(self.model, key, value)
-            self._update_timestamp()
-            self.store()
-
-        def _update_timestamp(self):
-            assert  self.model is not None, 'controller has null model!'
-            self.model.update_time = get_current_datetime_with_utc()
-            
-        def store(self):
-            self._store._store_obj(self.model)
-            return self
-
-        def delete(self):
-            # self._store.delete_obj(self.model)    
-            self._store.delete(self.model.id)
-            self.model._controller = None
-
-        def update_metadata(self, key, value):
-            updated_metadata = {**self.model.metadata, key: value}
-            self.update(metadata = updated_metadata)
-            return self
-    
-    class UserController:
+    class AbstractObjController(Controller4Basic.AbstractObjController):
+        pass
+    class UserController(AbstractObjController):
         def __init__(self, store, model):
             self.model:Model4User.User = model
             self._store:UsersStore = store
@@ -50,8 +52,11 @@ class Controller4User:
         def mail2user(self,message):
             pass
 
-        def set_password(self,):
-            pass
+        def set_password(self,password):
+            self.update(hashed_password=text2hash2base64Str(password))
+
+        def check_password(self,password):
+            return self.model.hashed_password==text2hash2base64Str(password)
 
         def set_name(self,):
             pass
@@ -77,14 +82,14 @@ class Controller4User:
         def delete_appusage(self,):
             pass
         
-    class AppController:
+    class AppController(AbstractObjController):
         def __init__(self, store, model):
             self.model:Model4User.App = model
             self._store:UsersStore = store
 
         def delete(self):
             pass
-    class LicenseController:
+    class LicenseController(AbstractObjController):
         def __init__(self, store, model):
             self.model:Model4User.License = model
             self._store:UsersStore = store
@@ -92,7 +97,7 @@ class Controller4User:
         def delete(self):
             pass
 
-    class AppUsageController:
+    class AppUsageController(AbstractObjController):
         def __init__(self, store, model):
             self.model:Model4User.AppUsage = model
             self._store:UsersStore = store
@@ -101,35 +106,23 @@ class Controller4User:
             pass
 
 class Model4User:
-    class AbstractObj(BaseModel):
-        id:str
-        rank: list = [0]
-        create_time: datetime = Field(default_factory=get_current_datetime_with_utc)
-        update_time: datetime = Field(default_factory=get_current_datetime_with_utc)
-        status:str = ""
-        metadata: dict = {}
-
-
-        model_config = ConfigDict(arbitrary_types_allowed=True)    
-        _controller: Controller4User.AbstractObjController = None
-        def get_controller(self)->Controller4User.AbstractObjController: return self._controller
-        def init_controller(self,store):self._controller = Controller4User.AbstractObjController(store,self)
-
+    class AbstractObj(Model4Basic.AbstractObj):
+        pass
     class User(AbstractObj):
-        id:str = Field(default_factory=lambda :f"User:{uuid4()}")
         name:str
         full_name: str
         role:str
-        hashed_password:str
+        hashed_password:str # text2hash2base64Str(password),
         email:str
         disabled: bool=False
+        
+        def gen_new_id(self): return f"{self.class_name()}:{text2hash2uuid(self.email)}"
         
         _controller: Controller4User.UserController = None
         def get_controller(self)->Controller4User.UserController: return self._controller
         def init_controller(self,store):self._controller = Controller4User.UserController(store,self)
 
     class App(AbstractObj):
-        id:str = Field(default_factory=lambda :f"App:{uuid4()}")
         parent_App_id:str
         running_cost:int = 0
         major_name:str = None
@@ -140,7 +133,6 @@ class Model4User:
         def init_controller(self,store):self._controller = Controller4User.AppController(store,self)
 
     class License(AbstractObj):
-        id:str = Field(default_factory=lambda :f"License:{uuid4()}")
         user_id:str
         access_token:str = None
         bought_at:datetime = None
@@ -153,7 +145,6 @@ class Model4User:
         def init_controller(self,store):self._controller = Controller4User.LicenseController(store,self)
 
     class AppUsage(AbstractObj):
-        id:str = Field(default_factory=lambda :f"AppUsage:{uuid4()}")
         user_id:str
         App_id:str
         license_id:str
@@ -165,53 +156,29 @@ class Model4User:
         def get_controller(self)->Controller4User.AppUsageController: return self._controller
         def init_controller(self,store):self._controller = Controller4User.AppUsageController(store,self)
 
-class UsersStore(SingletonKeyValueStorage):
+class UsersStore(BasicStore):
 
     def __init__(self) -> None:
         super().__init__()
-        self.python_backend()
-            
-    def get_class(self, id:str):
-        class_type = id.split(':')[0]
-        res = {c.__name__:c for c in [i for k,i in Model4User.__dict__.items() if '_' not in k]}.get(class_type, None)
-        if res is None:
-            raise ValueError(f'No such class of {class_type}')
-        return res
-       
-    def _store_obj(self, obj:Model4User.AbstractObj):
-        self.set(obj.id,json.loads(obj.model_dump_json()))
-        return obj
     
-    def _init_controller(self,obj:Model4User.AbstractObj):
-        obj.init_controller(self,obj)
-        return obj
+    def _get_class(self, id: str, modelclass=Model4User):
+        return super()._get_class(id, modelclass)
 
-    def add_new_user(self, name:str,role:str,password:str,email:str, rank:list=[0], metadata={}) -> Model4User.User:
-        return self._init_controller(
-            self._store_obj(Model4User.User(name=name, role=role,password=password,
-                                            email=email,rank=rank, metadata=metadata))
-        )
+    def add_new_user(self, name:str,role:str,password:str,full_name:str,email:str, rank:list=[0], metadata={}) -> Model4User.User:
+        tmp = Model4User.User(name=name, role=role,full_name=full_name,hashed_password=text2hash2base64Str(password),
+                                            email=email,rank=rank, metadata=metadata)
+        if self.exists(tmp.gen_new_id()) : raise ValueError('user already exists!')
+        return self.add_new_obj(tmp)
+    
     def add_new_app(self, major_name:str,minor_name:str,running_cost:int=0,parent_App_id:str=None) -> Model4User.App:
-        return self._init_controller(
-            self._store_obj(Model4User.App(major_name=major_name,minor_name=minor_name,
+        return self.add_new_obj(Model4User.App(major_name=major_name,minor_name=minor_name,
                                            running_cost=running_cost,parent_App_id=parent_App_id))
-        )
-    def add_new_license(self) -> Model4User.License:
-        return self._init_controller(
-            self._store_obj(Model4User.License())
-        )
-    def add_new_appUsage(self) -> Model4User.AppUsage:
-        return self._init_controller(
-            self._store_obj(Model4User.AppUsage())
-        )
-    
-    # available for regx?
-    def find(self,id:str) -> Model4User.AbstractObj:
-        return self._init_controller(self.get_class(id)(**self.get(id)))
-    
-    def find_all(self,id:str=f'User:*')->list[Model4User.AbstractObj]:
-        return [self.find(key) for key in self.keys(id)]
-    
+        
     def find_all_users(self)->list[Model4User.User]:
         return self.find_all('User:*')
     
+
+def test():
+    us = UsersStore()
+    us.add_new_user('John','admin','123','John anna','123@123.com')
+    return us
