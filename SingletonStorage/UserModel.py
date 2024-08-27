@@ -116,6 +116,9 @@ class Model4User:
         email:str
         disabled: bool=False
         
+        @staticmethod
+        def static_gen_new_id(email): return f"User:{text2hash2uuid(email)}"
+
         def gen_new_id(self): return f"{self.class_name()}:{text2hash2uuid(self.email)}"
         
         _controller: Controller4User.UserController = None
@@ -164,8 +167,8 @@ class UsersStore(BasicStore):
     def _get_class(self, id: str, modelclass=Model4User):
         return super()._get_class(id, modelclass)
 
-    def add_new_user(self, name:str,role:str,password:str,full_name:str,email:str, rank:list=[0], metadata={}) -> Model4User.User:
-        tmp = Model4User.User(name=name, role=role,full_name=full_name,hashed_password=text2hash2base64Str(password),
+    def add_new_user(self, name:str,role:str,hashed_password:str,full_name:str,email:str, rank:list=[0], metadata={}) -> Model4User.User:
+        tmp = Model4User.User(name=name, role=role,full_name=full_name,hashed_password=hashed_password,
                                             email=email,rank=rank, metadata=metadata)
         if self.exists(tmp.gen_new_id()) : raise ValueError('user already exists!')
         return self.add_new_obj(tmp)
@@ -176,6 +179,10 @@ class UsersStore(BasicStore):
         
     def find_all_users(self)->list[Model4User.User]:
         return self.find_all('User:*')
+    
+    def find_user_by_email(self,email):
+        user_uuid =  Model4User.User.static_gen_new_id(email)
+        return self.find(user_uuid)
     
 
 def test():

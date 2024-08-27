@@ -15,7 +15,7 @@ import jwt
 from starlette.middleware.sessions import SessionMiddleware
 
 from pydantic import BaseModel
-from UserModel import UsersStore, Model4User
+from UserModel import UsersStore, Model4User, text2hash2base64Str
 
 ######################################### connect to local key-value store
 store = UsersStore()
@@ -40,45 +40,6 @@ api.add_middleware(
     allow_headers=["*"],
 )
 api.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=SESSION_DURATION)
-# class RESTapi:   
-#     class Item(BaseModel):
-#         key: str
-#         value: dict = None
-        
-#     @api.post("/store/set/")
-#     async def set_item(item: Item):
-#         return store.set(item.key, item.value)
-
-#     @api.get("/store/get/{key}")
-#     async def get_item(key: str):
-#         result = store.get(key)
-#         if result is None:
-#             raise HTTPException(status_code=404, detail="Item not found")
-#         return result
-
-#     @api.delete("/store/delete/{key}")
-#     async def delete_item(key: str):
-#         success = store.delete(key)
-#         if not success:
-#             raise HTTPException(status_code=404, detail="Item not found to delete")
-#         return {"deleted": key}
-
-#     @api.get("/store/exists/{key}")
-#     async def exists_item(key: str):
-#         return {"exists": store.exists(key)}
-
-#     @api.get("/store/keys/{pattern}")
-#     async def get_keys(pattern: str = '*'):
-#         return store.keys(pattern)
-
-#     @api.post("/store/loads/")
-#     async def load_items(item_json: str):
-#         store.loads(item_json)
-#         return {"loaded": True}
-
-#     @api.get("/store/dumps/")
-#     async def dump_items():
-#         return store.dumps()
 
 #######################################################################################
 
@@ -98,31 +59,11 @@ class EditUserRequest(BaseModel):
     password: str
 
 class UserService:
-    @staticmethod
-    def hash_password(password: str) -> str:
-        salt = bcrypt.gensalt()
-        hashed = bcrypt.hashpw(password.encode(), salt)
-        return hashed.decode()
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
-
-    @staticmethod
-    def get_user_by_name(username: str):
-        pass
-        # with sqlite3.connect(DATABASE) as conn:
-        #     user = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-            # if user:
-            #     return User.from_list(user)
-    
-    def get_user_by_uuid(id: str):
-        pass
-        # with sqlite3.connect(DATABASE) as conn:
-        #     user = conn.execute("SELECT * FROM users WHERE user_uuid=?", (id,)).fetchone()
-            # if user:
-            #     return User.from_list(user)
-            
+        return text2hash2base64Str(plain_password) == hashed_password
+                    
     @staticmethod
     def format_email(email: str) -> str:
         EMAIL_REGEX = r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)"
@@ -132,7 +73,8 @@ class UserService:
 
     @staticmethod
     def insert_user(username, full_name, email, hashed_password, user_uuid, disabled=False):
-        pass
+        if store.exists(user_uuid):raise ValueError('The user is exists!')
+        store.add_new_user(username,'L1', hashed_password, full_name, email)
         # with sqlite3.connect(DATABASE) as conn:
         #     conn.execute("INSERT INTO users (username, full_name, email, hashed_password, user_uuid, disabled) VALUES (?, ?, ?, ?, ?, ?)", (username, full_name, email, hashed_password, user_uuid, disabled))
 
@@ -177,13 +119,14 @@ class AuthService:
         try:
             payload:dict = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             useruuid: str = payload.get("useruuid",None)
+            print(payload)
             if useruuid is None:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
         except JWTError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
 
-        user = UserService.get_user_by_uuid(useruuid)
+        user = store.find(useruuid)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         return user
@@ -198,7 +141,7 @@ class AuthService:
             token_data = AuthService.TokenData(useruuid=useruuid)
         except JWTError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
-        user = UserService.get_user_by_uuid(token_data.useruuid)
+        user = store.find(token_data.useruuid)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         return user
@@ -221,27 +164,29 @@ class OAuthRoutes:
     @staticmethod
     @api.get(BASE_URL+"/register", response_class=HTMLResponse)
     async def get_register_page():
-        return FileResponse(os.path.join(os.path.split(__file__)[0], 'data', 'templates', "register.html"))
+        return FileResponse(os.path.join(os.path.split(__file__)[0], 'templates', "register.html"))
 
     @staticmethod
     @api.post(BASE_URL+"/register")
     async def register_user(request: RegisterRequest):
+        from UserModel import Model4User
         formatted_email = UserService.format_email(request.email)
-        hashed_password = UserService.hash_password(request.password)
-        # user_uuid = remove_hyphen(hash2uuid(f'{formatted_email}{hashed_password}'))#str(uuid.uuid4())
-        # if request.invite_code != INVITE_CODE:
-        #     raise HTTPException(status_code=400, detail="invite code not valid")
+        hashed_password = text2hash2base64Str(request.password)
+        user_uuid = Model4User.User.static_gen_new_id(request.email)
+        
+        if request.invite_code != INVITE_CODE:
+            raise HTTPException(status_code=400, detail="invite code not valid")
 
-        # try:
-        #     res = []
-        #     UserService.insert_user(request.username, request.full_name, formatted_email, hashed_password, user_uuid)
-        #     res.append(UserService.unix_add_user(user_uuid))
-        #     res.append(UserService.filebrowser_add_user(request.username,request.password,user_uuid))
-        #     print(res)
-        #     return {"status": "success", "message": "User registered successfully"}            
-        #     # return RedirectResponse(BASE_URL+'/')
-        # except sqlite3.IntegrityError:
-        #     raise HTTPException(status_code=400, detail="Username already exists")
+        try:
+            # res = []
+            UserService.insert_user(request.username, request.full_name, formatted_email, hashed_password, user_uuid)
+            # res.append(UserService.unix_add_user(user_uuid))
+            # res.append(UserService.filebrowser_add_user(request.username,request.password,user_uuid))
+            # print(res)
+            return {"status": "success", "message": "User registered successfully"}            
+            # return RedirectResponse(BASE_URL+'/')
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"{e}")
 
     @staticmethod
     @api.post(BASE_URL + "/edit")
@@ -253,7 +198,7 @@ class OAuthRoutes:
             raise HTTPException(status_code=400, detail="Incorrect password")
         try:
             # Update user info
-            hashed_password = UserService.hash_password(request.new_password)
+            hashed_password = text2hash2base64Str(request.new_password)
             UserService.update_user_info(request.full_name, current_user.email, hashed_password, current_user.disabled)
             return {"status": "success", "message": "User info updated successfully"}
         except Exception as e:
@@ -276,22 +221,23 @@ class OAuthRoutes:
     @staticmethod
     @api.get(BASE_URL+"/login", response_class=HTMLResponse)
     async def get_login_page():
-        return FileResponse(os.path.join(os.path.split(__file__)[0], 'data', 'templates', "login.html"))
+        return FileResponse(os.path.join(os.path.split(__file__)[0], 'templates', "login.html"))
     
     @staticmethod
     @api.get(BASE_URL+"/edit", response_class=HTMLResponse)
     async def get_edit_page():
-        return FileResponse(os.path.join(os.path.split(__file__)[0], 'data', 'templates', "edit.html"))
+        return FileResponse(os.path.join(os.path.split(__file__)[0], 'templates', "edit.html"))
 
     @staticmethod
     @api.post(BASE_URL+"/token")
     def get_token(form_data: OAuth2PasswordRequestForm = Depends(), request: Request=None):
-        user:Model4User.User = UserService.get_user_by_name(form_data.username)
+        user:Model4User.User = store.find_user_by_email(email=form_data.username)
         if not user or not UserService.verify_password(form_data.password, user.hashed_password):
             raise HTTPException(status_code=400, detail="Incorrect username or password")
         access_token = AuthService.create_access_token(
-            data={"useruuid": user.id}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            data={"useruuid": user.get_id()}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         )
+        print(access_token)
         # request.session["uuid"] = user.id
         request.session["user_access_token"] = access_token        
         return {"user_access_token": access_token, "token_type": "bearer"}#, "uuid": user.id}
@@ -312,12 +258,12 @@ class OAuthRoutes:
     @api.get(BASE_URL+"/", response_class=HTMLResponse)
     async def read_home(current_user: Model4User.User = Depends(AuthService.get_current_user)):
         this_dir, this_filename = os.path.split(__file__)
-        return FileResponse(os.path.join(this_dir, 'data', 'templates', 'home.html'))
+        return FileResponse(os.path.join(this_dir, 'templates', 'home.html'))
     
     @api.get(BASE_URL+"/icon/{icon_name}", response_class=HTMLResponse)
     async def read_home(request: Request,icon_name:str, current_user: Model4User.User = Depends(AuthService.get_current_user)):
         this_dir, this_filename = os.path.split(__file__)
-        return FileResponse(os.path.join(this_dir, 'data', 'icon', icon_name))
+        return FileResponse(os.path.join(this_dir, 'icon', icon_name))
     
     @staticmethod
     @api.get(BASE_URL+"/logout")
