@@ -5,7 +5,6 @@ import os
 import re
 import secrets
 from zoneinfo import ZoneInfo
-import bcrypt
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
