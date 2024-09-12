@@ -18,7 +18,7 @@ except Exception as e:
 
 cr = ChatRoom(sss)
 
-def get_speaker(name,role,metadata={}):
+def get_speaker(name,role='assistant',metadata={}):
     if name in cr.speakers:
         return cr.speakers[name]
     return Speaker(cr.store.add_new_author(name=name, role=role, metadata=metadata))
@@ -27,7 +27,7 @@ get_speaker('RoomDataSaver','assistant').entery_room(cr).add_new_message_callbac
 
 configs = Configs()
 OPENAI_API_KEY=configs.new_config('openai api key',os.environ['OPENAI_API_KEY'])
-model=configs.new_config('model','gpt-4o')
+model=configs.new_config('model','gpt-4o-mini')
 num_passages=configs.new_config('num passages','1')
 stream=configs.new_config('stream','no')
 sysp=configs.new_config('sysp','You are an expert in code explanation, familiar with Electron, and Python.')
@@ -70,11 +70,55 @@ def openai_msg():
     return messages
 
 ########################################################################
+
+def summary_of_str_chunks(chunks:list[str]):
+    res:str = f"Total number of chunks: {len(chunks)}\n"
+    
+    for idx, chunk in enumerate(chunks):
+        # Split the chunk by lines to count lines
+        lines = chunk.splitlines()
+        num_lines = len(lines)
+        first_line = lines[0] if lines else ""
+        last_line = lines[-1] if lines else ""
+
+        # Print the summary for each chunk
+        res += f"Chunk {idx + 1}:\n"
+        res += f"  Number of lines: {num_lines}\n"
+        res += f"  First line: {first_line[:50]}{'...' if len(first_line) > 50 else ''}\n"
+        res += f"  Last line: {last_line[:50]}{'...' if len(last_line) > 50 else ''}\n"
+        res += "\n"
+    return res
+    
 splitter_lines=configs.new_config('splitter lines','100')
 splitter_overlap=configs.new_config('splitter overlap','0.3')
 TextSplitterQueue = []
 def TextSplitter_callback(speaker:Speaker, msg:Model4LLM.AbstractContent):
-    pass
+    def split_text_with_overlap(text:str, chunk_lines, overlap_lines):        
+        lines = text.splitlines()
+        lines = [l for l in lines if len(l.strip())>0]
+        chunks = []
+        # Generate chunks with overlap
+        for i in range(0, len(lines), chunk_lines - overlap_lines):
+            # Get the chunk with overlap
+            chunk = lines[i:i + chunk_lines]
+            # Join the lines to form a text block
+            chunks.append('\n'.join(chunk))
+            # Break if we've reached the end of the lines
+            if i + chunk_lines >= len(lines):
+                break
+        return chunks
+
+    
+    msgc = msg.get_controller()
+    try:
+        txt = msgc.get_data_raw().replace(f'@{speaker.name}','')
+        chunk_lines = int(splitter_lines.value)
+        overlap_lines = int(float(splitter_overlap.value) * chunk_lines)
+        txts = split_text_with_overlap(txt,chunk_lines,overlap_lines)
+        for t in txts:TextSplitterQueue.append(t)
+        speaker.speak(summary_of_str_chunks(chunks=txts))
+    except Exception as e:
+        speaker.speak(f'{e}')
 
 CodeExplainer_limit_words=configs.new_config('CodeExplainer limit words','1000')
 def CodeExplainer_callback(speaker:Speaker, msg:Model4LLM.AbstractContent):    
@@ -116,13 +160,22 @@ code path : {code_path}
 {pre_explanation}
 ```''')
 reminder_results=[]
-def QueueReminder_callback(speaker:Speaker, msg:Model4LLM.AbstractContent):    
+def QueueReminder_callback(speaker:Speaker, msg:Model4LLM.AbstractContent):
+    global reminder_results
     def extract_explanation_block(text):
-        matches = re.findall(r"```explanation\s*(\{.*?\})\s*```", text, re.DOTALL)
+        matches = re.findall(r"```explanation\s*(.*)\s*```", text, re.DOTALL)
         return matches if matches else []
     msgc = msg.get_controller()
     try:
-        pass
+        for i in extract_explanation_block(msgc.get_data_raw()):
+            reminder_results.append(i)            
+        speaker.speak(summary_of_str_chunks(chunks=reminder_results))
+        
+        if len(reminder_results)>0 and len(TextSplitterQueue) == 0:
+            sp:Speaker = get_speaker('QueueReminder')
+            sp.author.get_controller().update_metadata(
+                'explanations',reminder_results)
+            reminder_results = []
     except Exception as e:
         speaker.speak(f'{e}')
 
@@ -142,21 +195,20 @@ def QueueReminder_loop():
         except Exception as e:
             cr.speakers['QueueReminder'].speak(f'{e}')
             reminder_loop.value = ''
-threading.Thread(target=QueueReminder_loop).start()
 
 get_speaker('CodeExplainer','assistant',metadata={'type':'llm','model':model.value}
             ).entery_room(cr).add_mention_callback(CodeExplainer_callback)
-            
+
 get_speaker('QueueReminder','assistant',metadata={'type':'function'}
             ).entery_room(cr).add_mention_callback(QueueReminder_callback)
-            
+
 get_speaker('TextSplitter','assistant',metadata={'type':'function'}
             ).entery_room(cr).add_mention_callback(TextSplitter_callback)
-            
+
 get_speaker('User','user').entery_room(cr)
 
-
-try:    
-    build_gui(cr,configs.tolist(),f'{ROOM_NAME}.json').launch()
-except Exception as e:
-    print(e)
+# try:    
+#     threading.Thread(target=QueueReminder_loop).start()
+#     build_gui(cr,configs.tolist(),f'{ROOM_NAME}.json').launch()
+# except Exception as e:
+#     print(e)
