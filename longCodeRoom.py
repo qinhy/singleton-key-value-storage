@@ -207,8 +207,8 @@ get_speaker('TextSplitter','assistant',metadata={'type':'function'}
 
 get_speaker('User','user').entery_room(cr)
 
-# try:    
-#     threading.Thread(target=QueueReminder_loop).start()
-#     build_gui(cr,configs.tolist(),f'{ROOM_NAME}.json').launch()
-# except Exception as e:
-#     print(e)
+try:    
+    threading.Thread(target=QueueReminder_loop).start()
+    build_gui(cr,configs.tolist(),f'{ROOM_NAME}.json').launch()
+except Exception as e:
+    print(e)
