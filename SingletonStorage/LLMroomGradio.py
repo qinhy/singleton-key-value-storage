@@ -6,9 +6,9 @@ import threading
 from typing import List
 class Configs:
     class Config:
-        def __init__(self, name, value) -> None:
-            self.name = name
-            self.value = value
+        def __init__(self, name:str, value:str) -> None:
+            self.name:str = name
+            self.value:str = value
             self.lock = threading.Lock()
 
         def update(self, value):
@@ -28,7 +28,7 @@ class Configs:
         with self.configs_lock:
             return list(self._configs.values())
     
-    def new_config(self, name, value):
+    def new_config(self, name:str, value:str):
         with self.configs_lock:
             if name in self._configs:
                 raise Exception("Config with this name already exists.")
