@@ -1,5 +1,6 @@
-
+# from https://github.com/qinhy/singleton-key-value-storage.git
 import base64
+import os
 import re
 import sqlite3
 import threading
@@ -25,6 +26,7 @@ firestore_back = try_if_error(lambda:__import__('google.cloud.firestore')) is No
 redis_back = try_if_error(lambda:__import__('redis')) is None
 sqlite_back = True
 aws_dynamo = try_if_error(lambda:__import__('boto3')) is None
+aws_s3 = try_if_error(lambda:__import__('boto3')) is None
 mongo_back = try_if_error(lambda:__import__('pymongo')) is None
 
 class SingletonStorageController:
@@ -459,6 +461,100 @@ if aws_dynamo:
 
             return matched_keys
 
+if aws_s3:
+    import boto3
+    from mypy_boto3_s3 import S3Client
+    from botocore.exceptions import ClientError
+    class SingletonS3Storage:
+        _instance = None
+        _meta = {}
+        
+        def __new__(cls,bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = '/SingletonS3Storage'):
+            meta = {                
+                'bucket_name':bucket_name,
+                'aws_access_key_id':aws_access_key_id,
+                'aws_secret_access_key':aws_secret_access_key,
+                'region_name':region_name,
+            }
+            def init():                
+                cls._instance = super(SingletonS3Storage, cls).__new__(cls)
+                cls._instance.uuid = uuid.uuid4()
+                cls._instance.s3 = boto3.client('s3',
+                    aws_access_key_id=aws_access_key_id,
+                    aws_secret_access_key=aws_secret_access_key,
+                    region_name=region_name
+                )
+                cls._instance.bucket_name = bucket_name
+                cls._instance._meta = meta
+            if cls._instance is None:
+                init()
+            elif cls._meta!=meta:                
+                print(f'warnning: instance changed to new one')
+                init()
+
+            return cls._instance
+
+        def __init__(self,bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = '/SingletonS3Storage'):
+            self.uuid = self.uuid
+            self.s3:S3Client = self.s3
+            self.bucket_name = self.bucket_name
+            self.s3_storage_prefix_path = '/SingletonS3Storage'
+    class SingletonS3StorageController(SingletonStorageController):
+        def __init__(self, model:SingletonS3Storage):
+            self.model:SingletonS3Storage = model
+            self.bucket_name = self.model.bucket_name
+
+        def _s3_path(self,key:str):
+            return f'{self.model.s3_storage_prefix_path}/{key}.json'
+            
+        def _de_s3_path(self,path:str):
+            return path.replace(f'{self.model.s3_storage_prefix_path}/',''
+                         ).replace(f'.json','')
+        
+        def exists(self, key: str)->bool:
+            try:
+                self.model.s3.head_object(Bucket=self.bucket_name,
+                                          Key=self._s3_path(key))
+                return True
+            except self.model.s3.exceptions.NoSuchKey:
+                return False
+            
+        def set(self, key: str, value: dict):
+            try:
+                json_data = json.dumps(value)
+                self.model.s3.put_object(Bucket=self.bucket_name,
+                                         Key=self._s3_path(key), Body=json_data)
+            except Exception as e:
+                print(e)
+        
+        def get(self, key: str)->dict:
+            try:
+                obj = self.model.s3.get_object(Bucket=self.bucket_name, Key=self._s3_path(key))
+                return json.loads(obj['Body'].read().decode('utf-8'))
+            except self.model.s3.exceptions.NoSuchKey:
+                return None
+                
+        def delete(self, key):
+            try:
+                self.model.s3.delete_object(Bucket=self.bucket_name, Key=self._s3_path(key))
+            except self.model.s3.exceptions.NoSuchKey:
+                print('NoSuchKey')
+            
+        def keys(self, pattern='*')->list[str]:
+            keys = []
+            paginator = self.model.s3.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=self.bucket_name,
+                                           Prefix=self.model.s3_storage_prefix_path):
+                for obj in page.get('Contents', []):
+                    keys.append(self._de_s3_path(obj['Key']))
+                    
+            return fnmatch.filter(keys, pattern)
+            
+
 if mongo_back:
     from pymongo import MongoClient, database, collection
     
@@ -589,11 +685,19 @@ class SingletonKeyValueStorage(SingletonStorageController):
             'redis':lambda:SingletonRedisStorageController(SingletonRedisStorage(*args,**kwargs)) if redis_back else None,
             'sqlite':lambda:SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
             'mongodb':lambda:SingletonMongoDBStorageController(SingletonMongoDBStorage(*args,**kwargs)) if mongo_back else None,
+            's3':lambda:SingletonS3StorageController(SingletonS3Storage(*args,**kwargs)) if aws_s3 else None,
         }
         back=backs.get(name.lower(),lambda:None)()
         if back is None:raise ValueError(f'no back end of {name}, has {list(backs.items())}')
         return back
     
+    def s3_backend(self,bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = '/SingletonS3Storage'):
+        self.conn = self._switch_backend('s3',bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = s3_storage_prefix_path)
+
     def python_backend(self):
         self.conn = self._switch_backend('python')
     
@@ -699,6 +803,15 @@ class Tests(unittest.TestCase):
 
     def test_mongo(self,num=1):
         self.store.mongo_backend()
+        for i in range(num):self.test_all_cases()
+
+    def test_s3(self,num=1):
+        self.store.s3_backend(
+                    bucket_name = os.environ['AWS_S3_BUCKET_NAME'],
+                    aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+                    aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+                    region_name=os.environ['AWS_DEFAULT_REGION']
+                )
         for i in range(num):self.test_all_cases()
 
     def test_all_cases(self):
