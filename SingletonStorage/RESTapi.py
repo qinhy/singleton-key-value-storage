@@ -1,3 +1,4 @@
+# from https://github.com/qinhy/singleton-key-value-storage.git
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from Storages import SingletonKeyValueStorage
