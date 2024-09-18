@@ -76,7 +76,8 @@ class Model4Basic:
 
 class BasicStore(SingletonKeyValueStorage):
     
-    def __init__(self) -> None:
+    def __init__(self, version_controll=False) -> None:
+        super().__init__(version_controll)
         self.python_backend()
 
     def _get_class(self, id: str, modelclass=Model4Basic):
