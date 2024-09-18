@@ -773,7 +773,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def delete_slave(self, slave:object)->bool:
         self.event_dispa.delete_event(getattr(slave,'uuid',None))
 
-    def _edit(self,func_name:str, key:str=None, value:dict=None):
+    def _edit_local(self,func_name:str, key:str=None, value:dict=None):
         if func_name not in ['set','delete','clean','load','loads']:
             self._print(f'no func of "{func_name}". return.')
             return
@@ -781,6 +781,11 @@ class SingletonKeyValueStorage(SingletonStorageController):
         func = getattr(self.conn, func_name)
         args = list(filter(lambda x:x is not None, [key,value]))
         res = func(*args)
+        return res
+    
+    def _edit(self,func_name:str, key:str=None, value:dict=None):
+        args = list(filter(lambda x:x is not None, [key,value]))
+        res = self._edit_local(func_name,key,value)
         self.event_dispa.dispatch(func_name,*args)
         return res
     
@@ -814,7 +819,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
             return False
     
     def revert_one_operation(self):
-        self._verc.revert_one_operation(lambda revert:self._edit(*revert))
+        self._verc.revert_one_operation(lambda revert:self._edit_local(*revert))
 
     def get_current_version(self):
         vs = self._verc.get_versions()
@@ -823,7 +828,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
         return vs[-1]
 
     def revert_operations_untill(self,opuuid:str):
-        self._verc.revert_operations_untill(opuuid,lambda revert:self._edit(*revert))
+        self._verc.revert_operations_untill(opuuid,lambda revert:self._edit_local(*revert))
 
     # True False(in error)
     def set(self, key: str, value: dict):     return self._try_edit_error(('set',key,value))
