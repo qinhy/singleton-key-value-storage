@@ -527,25 +527,16 @@ if aws_s3:
                 return False
             
         def set(self, key: str, value: dict):
-            try:
-                json_data = json.dumps(value)
-                self.model.s3.put_object(Bucket=self.bucket_name,
-                                         Key=self._s3_path(key), Body=json_data)
-            except Exception as e:
-                print(e)
+            json_data = json.dumps(value)
+            self.model.s3.put_object(Bucket=self.bucket_name,
+                                        Key=self._s3_path(key), Body=json_data)
         
         def get(self, key: str)->dict:
-            try:
-                obj = self.model.s3.get_object(Bucket=self.bucket_name, Key=self._s3_path(key))
-                return json.loads(obj['Body'].read().decode('utf-8'))
-            except self.model.s3.exceptions.NoSuchKey:
-                return None
+            obj = self.model.s3.get_object(Bucket=self.bucket_name, Key=self._s3_path(key))
+            return json.loads(obj['Body'].read().decode('utf-8'))
                 
         def delete(self, key):
-            try:
-                self.model.s3.delete_object(Bucket=self.bucket_name, Key=self._s3_path(key))
-            except self.model.s3.exceptions.NoSuchKey:
-                print('NoSuchKey')
+            self.model.s3.delete_object(Bucket=self.bucket_name, Key=self._s3_path(key))
             
         def keys(self, pattern='*')->list[str]:
             keys = []
@@ -711,7 +702,8 @@ class LocalVersionController:
 
 class SingletonKeyValueStorage(SingletonStorageController):
 
-    def __init__(self)->None:
+    def __init__(self,version_controll=False)->None:
+        self.version_controll = version_controll
         self.conn:SingletonStorageController = None
         self.python_backend()
     
@@ -790,26 +782,26 @@ class SingletonKeyValueStorage(SingletonStorageController):
         return res
     
     def _try_edit_error(self,args):
+        if self.version_controll:
+            # do local version controll
+            func = args[0]
+            if func == 'set':
+                func,key,value =args
+                revert = None
+                if self.exists(key):
+                    revert = (func,key,self.get(key))
+                else:
+                    revert = ('delete',key)
+                self._verc.add_operation(args,revert)
+                
+            elif func == 'delete':
+                func,key = args
+                revert = ('set',key,self.get(key))
+                self._verc.add_operation(args,revert)
 
-        # do local version controll
-        func = args[0]
-        if func == 'set':
-            func,key,value =args
-            revert = None
-            if self.exists(key):
-                revert = (func,key,self.get(key))
-            else:
-                revert = ('delete',key)
-            self._verc.add_operation(args,revert)
-            
-        elif func == 'delete':
-            func,key = args
-            revert = ('set',key,self.get(key))
-            self._verc.add_operation(args,revert)
-
-        elif func in ['clean','load','loads']:
-            revert = ('loads',self.dumps())
-            self._verc.add_operation(args,revert)
+            elif func in ['clean','load','loads']:
+                revert = ('loads',self.dumps())
+                self._verc.add_operation(args,revert)
 
         try:
             self._edit(*args)
@@ -888,8 +880,7 @@ class Tests(unittest.TestCase):
                     bucket_name = os.environ['AWS_S3_BUCKET_NAME'],
                     aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
                     aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
-                    region_name=os.environ['AWS_DEFAULT_REGION']
-                )
+                    region_name=os.environ['AWS_DEFAULT_REGION'])
         for i in range(num):self.test_all_cases()
 
     def test_all_cases(self):
@@ -952,6 +943,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(self.store.dumps()),json.loads(store2.dumps()), "Should return the correct keys and values.")
 
     def test_version(self):
+        self.store.version_controll = True
         self.store.clean()
         self.store.set('alpha', {'info': 'first'})
         data = self.store.dumps()
