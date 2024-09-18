@@ -527,25 +527,16 @@ if aws_s3:
                 return False
             
         def set(self, key: str, value: dict):
-            try:
-                json_data = json.dumps(value)
-                self.model.s3.put_object(Bucket=self.bucket_name,
-                                         Key=self._s3_path(key), Body=json_data)
-            except Exception as e:
-                print(e)
+            json_data = json.dumps(value)
+            self.model.s3.put_object(Bucket=self.bucket_name,
+                                        Key=self._s3_path(key), Body=json_data)
         
         def get(self, key: str)->dict:
-            try:
-                obj = self.model.s3.get_object(Bucket=self.bucket_name, Key=self._s3_path(key))
-                return json.loads(obj['Body'].read().decode('utf-8'))
-            except self.model.s3.exceptions.NoSuchKey:
-                return None
+            obj = self.model.s3.get_object(Bucket=self.bucket_name, Key=self._s3_path(key))
+            return json.loads(obj['Body'].read().decode('utf-8'))
                 
         def delete(self, key):
-            try:
-                self.model.s3.delete_object(Bucket=self.bucket_name, Key=self._s3_path(key))
-            except self.model.s3.exceptions.NoSuchKey:
-                print('NoSuchKey')
+            self.model.s3.delete_object(Bucket=self.bucket_name, Key=self._s3_path(key))
             
         def keys(self, pattern='*')->list[str]:
             keys = []
@@ -688,14 +679,14 @@ class LocalVersionController:
         self.client.set(f'_Operations',ops)
     
     def revert_one_operation(self,revert_callback:lambda revert:None):
-        ops = self.client.get(f'_Operations')
-        opuuid = ops['ops'][-1]
+        ops:list = self.client.get(f'_Operations')['ops']
+        opuuid = ops[-1]
         op = self.client.get(f'_Operation:{opuuid}')
         revert = op['revert']        
         # do revert
         revert_callback(revert)
-        ops['ops'].pop()
-        self.client.set(f'_Operations',ops)
+        ops.pop()
+        self.client.set(f'_Operations',{'ops':ops})
     
     def get_versions(self):
         return self.client.get(f'_Operations')['ops']
@@ -711,7 +702,8 @@ class LocalVersionController:
 
 class SingletonKeyValueStorage(SingletonStorageController):
 
-    def __init__(self)->None:
+    def __init__(self,version_controll=False)->None:
+        self.version_controll = version_controll
         self.conn:SingletonStorageController = None
         self.python_backend()
     
@@ -773,7 +765,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def delete_slave(self, slave:object)->bool:
         self.event_dispa.delete_event(getattr(slave,'uuid',None))
 
-    def _edit(self,func_name:str, key:str=None, value:dict=None):
+    def _edit_local(self,func_name:str, key:str=None, value:dict=None):
         if func_name not in ['set','delete','clean','load','loads']:
             self._print(f'no func of "{func_name}". return.')
             return
@@ -781,30 +773,35 @@ class SingletonKeyValueStorage(SingletonStorageController):
         func = getattr(self.conn, func_name)
         args = list(filter(lambda x:x is not None, [key,value]))
         res = func(*args)
+        return res
+    
+    def _edit(self,func_name:str, key:str=None, value:dict=None):
+        args = list(filter(lambda x:x is not None, [key,value]))
+        res = self._edit_local(func_name,key,value)
         self.event_dispa.dispatch(func_name,*args)
         return res
     
     def _try_edit_error(self,args):
+        if self.version_controll:
+            # do local version controll
+            func = args[0]
+            if func == 'set':
+                func,key,value =args
+                revert = None
+                if self.exists(key):
+                    revert = (func,key,self.get(key))
+                else:
+                    revert = ('delete',key)
+                self._verc.add_operation(args,revert)
+                
+            elif func == 'delete':
+                func,key = args
+                revert = ('set',key,self.get(key))
+                self._verc.add_operation(args,revert)
 
-        # do local version controll
-        func = args[0]
-        if func == 'set':
-            func,key,value =args
-            revert = None
-            if self.exists(key):
-                revert = (func,key,self.get(key))
-            else:
-                revert = ('delete',key)
-            self._verc.add_operation(args,revert)
-            
-        elif func == 'delete':
-            func,key = args
-            revert = ('set',key,self.get(key))
-            self._verc.add_operation(args,revert)
-
-        elif func in ['clean','load','loads']:
-            revert = ('loads',self.dumps())
-            self._verc.add_operation(args,revert)
+            elif func in ['clean','load','loads']:
+                revert = ('loads',self.dumps())
+                self._verc.add_operation(args,revert)
 
         try:
             self._edit(*args)
@@ -814,7 +811,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
             return False
     
     def revert_one_operation(self):
-        self._verc.revert_one_operation(lambda revert:self._edit(*revert))
+        self._verc.revert_one_operation(lambda revert:self._edit_local(*revert))
 
     def get_current_version(self):
         vs = self._verc.get_versions()
@@ -823,7 +820,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
         return vs[-1]
 
     def revert_operations_untill(self,opuuid:str):
-        self._verc.revert_operations_untill(opuuid,lambda revert:self._edit(*revert))
+        self._verc.revert_operations_untill(opuuid,lambda revert:self._edit_local(*revert))
 
     # True False(in error)
     def set(self, key: str, value: dict):     return self._try_edit_error(('set',key,value))
@@ -883,8 +880,7 @@ class Tests(unittest.TestCase):
                     bucket_name = os.environ['AWS_S3_BUCKET_NAME'],
                     aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
                     aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
-                    region_name=os.environ['AWS_DEFAULT_REGION']
-                )
+                    region_name=os.environ['AWS_DEFAULT_REGION'])
         for i in range(num):self.test_all_cases()
 
     def test_all_cases(self):
@@ -947,6 +943,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(self.store.dumps()),json.loads(store2.dumps()), "Should return the correct keys and values.")
 
     def test_version(self):
+        self.store.version_controll = True
         self.store.clean()
         self.store.set('alpha', {'info': 'first'})
         data = self.store.dumps()
