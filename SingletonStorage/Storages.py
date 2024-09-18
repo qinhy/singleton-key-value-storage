@@ -688,14 +688,14 @@ class LocalVersionController:
         self.client.set(f'_Operations',ops)
     
     def revert_one_operation(self,revert_callback:lambda revert:None):
-        ops = self.client.get(f'_Operations')
-        opuuid = ops['ops'][-1]
+        ops:list = self.client.get(f'_Operations')['ops']
+        opuuid = ops[-1]
         op = self.client.get(f'_Operation:{opuuid}')
         revert = op['revert']        
         # do revert
         revert_callback(revert)
-        ops['ops'].pop()
-        self.client.set(f'_Operations',ops)
+        ops.pop()
+        self.client.set(f'_Operations',{'ops':ops})
     
     def get_versions(self):
         return self.client.get(f'_Operations')['ops']
