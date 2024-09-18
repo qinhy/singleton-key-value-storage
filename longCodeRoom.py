@@ -207,8 +207,41 @@ get_speaker('TextSplitter','assistant',metadata={'type':'function'}
 
 get_speaker('User','user').entery_room(cr)
 
-try:    
+# try:    
+#     threading.Thread(target=QueueReminder_loop).start()
+#     build_gui(cr,configs.tolist(),f'{ROOM_NAME}.json').launch()
+# except Exception as e:
+#     print(e)
+
+def get_speaker_mgs(name='CodeExplainer'):
+    sp:Speaker = get_speaker(name)
+    es = [i for i in cr.get_messages_in_group() if i.author_id==sp.id]
+    return [i.get_controller().get_data_raw() for i in es]
+
+def auto_files(fs=[]):
     threading.Thread(target=QueueReminder_loop).start()
-    build_gui(cr,configs.tolist(),f'{ROOM_NAME}.json').launch()
-except Exception as e:
-    print(e)
+    for p in fs:
+        cr.clean()
+        with open(p,'r') as f:
+            code = f.read()
+        get_speaker('User','user').speak(f'''@TextSplitter {code} ''')
+        
+        while True:
+            print('waiting')
+            time.sleep(10)
+            print([s.author.name for s in cr.speakers.values() if s.is_speaking>0],'is speaking')
+            if len([s.author.name for s in cr.speakers.values() if s.is_speaking>0])>0:continue
+            if len(TextSplitterQueue) == 0:
+                print('write',p+'.exp.txt')
+                with open(p+'.exp.txt','w') as f:
+                    f.write('\n'.join(get_speaker_mgs(name='CodeExplainer')))
+                break
+auto_files()
+                
+
+
+
+
+
+
+

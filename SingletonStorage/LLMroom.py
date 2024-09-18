@@ -124,6 +124,11 @@ class ChatRoom:
                     yield e
             else:
                 yield element
+
+    def clean(self):
+        for m in self.traverse_nested_messages():
+            mid = m.get_id()
+        self.chatroom().get_controller().update(children_id=[])
     
     ##################################################################
 

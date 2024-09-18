@@ -314,9 +314,10 @@ class Model4LLM:
         def get_controller(self)->Controller4LLM.ImageContentController: return self._controller
         def init_controller(self,store):self._controller = Controller4LLM.ImageContentController(store,self)
 
-class LLMstore(BasicStore):
+class LLMstore(BasicStore):    
     
-    def __init__(self) -> None:
+    def __init__(self, version_controll=False) -> None:
+        super().__init__(version_controll)
         self.python_backend()
 
     def _get_class(self, id: str, modelclass=Model4LLM):
