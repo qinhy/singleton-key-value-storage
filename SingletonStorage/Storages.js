@@ -423,9 +423,149 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
     }
 }
 
-class SingletonKeyValueStorage extends SingletonStorageController {
-    constructor() {
+class SingletonFastAPIStorageController extends SingletonStorageController {
+    constructor(apiBaseUrl = '') {
         super();
+        this.apiBaseUrl = apiBaseUrl; // Base URL for the FastAPI endpoints
+    }
+
+    async set(key, value) {
+        // @api.post("/store/set/")
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/store/set/${key}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ key, value }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to set key: ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error(`[${this.constructor.name}]: Error setting key ${key} - ${error.message}`);
+        }
+    }
+
+    async get(key) {
+        // @api.get("/store/get/{key}")
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/store/get/${encodeURIComponent(key)}`);
+            if (!response.ok) {
+                throw new Error(`Failed to get key: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return data;
+        } catch (error) {
+            console.log(`[${this.constructor.name}]: Error getting key ${key} - ${error.message}`);
+            return null;
+        }
+    }
+
+    async delete(key) {
+        // @api.delete("/store/delete/{key}")
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/store/delete/${encodeURIComponent(key)}`, {
+                method: 'DELETE',
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to delete key: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return data.delete;
+
+        } catch (error) {
+            console.error(`[${this.constructor.name}]: Error deleting key ${key} - ${error.message}`);
+        }
+    }
+
+    async clean() {
+        // @api.delete("/store/clean")
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/store/clean`, {
+                method: 'DELETE',
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to clean`);
+            }
+            const data = await response.json();
+            return data.clean;
+
+        } catch (error) {
+            console.error(`[${this.constructor.name}]: Error clean - ${error.message}`);
+        }
+    }
+
+    async exists(key) {
+        // @api.get("/store/exists/{key}")
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/store/exists/${encodeURIComponent(key)}`);
+            if (!response.ok) {
+                throw new Error(`Failed to check if key exists: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return data.exists; // Assuming the response contains { "exists": true/false }
+        } catch (error) {
+            console.error(`[${this.constructor.name}]: Error checking existence of key ${key} - ${error.message}`);
+        }
+    }
+
+    async keys(pattern = '*') {
+        // @api.get("/store/keys/{pattern}")
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/store/keys/${encodeURIComponent(pattern)}`);
+            if (!response.ok) {
+                throw new Error(`Failed to get keys: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return data; // Assuming the response contains { "keys": [...] }
+        } catch (error) {
+            console.log(`[${this.constructor.name}]: Error getting keys with pattern ${pattern} - ${error.message}`);
+            return [];
+        }
+    }
+
+    async dumps() {
+        // @api.post("/store/loads/")
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/store/dumps/`);
+            if (!response.ok) {
+                throw new Error(`Failed to dump data: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return data.dumps; // Assuming the response contains { "dumps": "..." }
+        } catch (error) {
+            console.error(`[${this.constructor.name}]: Error dumping data - ${error.message}`);
+        }
+    }
+
+    async loads(jsonString = '{}') {
+        // @api.get("/store/dumps/")
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/store/loads/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ data: jsonString }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to load data: ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error(`[${this.constructor.name}]: Error loading data - ${error.message}`);
+        }
+    }
+}
+
+class SingletonKeyValueStorage extends SingletonStorageController {
+    constructor(version_controll = false) {
+        super();
+        this.version_controll = version_controll;
         this.conn = null;
         this.js_backend();
     }
@@ -435,7 +575,8 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         this._hist = new KeysHistoryController();
         this._verc = new LocalVersionController();
         const backs = {
-            'js': () => new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage())
+            'js': () => new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()),
+            'fastapi': () => new SingletonFastAPIStorageController()
         };
         const back = backs[name.toLowerCase()] || (() => null);
         const backend_instance = back();
@@ -444,9 +585,12 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         }
         return backend_instance;
     }
-    
+
     js_backend() {
         this.conn = this._switch_backend('js');
+    }
+    fastapi_backend() {
+        this.conn = this._switch_backend('fastapi');
     }
 
     _print(msg) {
@@ -454,6 +598,7 @@ class SingletonKeyValueStorage extends SingletonStorageController {
     }
 
     add_slave(slave, event_names = ['set', 'delete']) {
+        console.log(`add a slave with events of ${event_names}`);
         if (!slave.uuid) {
             try {
                 slave.uuid = this.conn._randuuid();
@@ -490,23 +635,25 @@ class SingletonKeyValueStorage extends SingletonStorageController {
     }
 
     _try_edit_error(args) {
-        const func = args[0];
-        if (func === 'set') {
-            const [_, key, value] = args;
-            let revert = null;
-            if (this.exists(key)) {
-                revert = [func, key, this.get(key)];
-            } else {
-                revert = ['delete', key];
+        if (this.version_controll) {
+            const func = args[0];
+            if (func === 'set') {
+                const [_, key, value] = args;
+                let revert = null;
+                if (this.exists(key)) {
+                    revert = [func, key, this.get(key)];
+                } else {
+                    revert = ['delete', key];
+                }
+                this._verc.add_operation(args, revert);
+            } else if (func === 'delete') {
+                const [_, key] = args;
+                const revert = ['set', key, this.get(key)];
+                this._verc.add_operation(args, revert);
+            } else if (['clean', 'load', 'loads'].includes(func)) {
+                const revert = ['loads', this.dumps()];
+                this._verc.add_operation(args, revert);
             }
-            this._verc.add_operation(args, revert);
-        } else if (func === 'delete') {
-            const [_, key] = args;
-            const revert = ['set', key, this.get(key)];
-            this._verc.add_operation(args, revert);
-        } else if (['clean', 'load', 'loads'].includes(func)) {
-            const revert = ['loads', this.dumps()];
-            this._verc.add_operation(args, revert);
         }
 
         try {
@@ -650,6 +797,7 @@ class Tests {
     }
 
     test_version() {
+        this.store.version_controll = true;
         this.store.clean();
         this.store.set('alpha', { info: 'first' });
         const data = this.store.dumps();
