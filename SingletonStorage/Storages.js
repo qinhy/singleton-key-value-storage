@@ -1,5 +1,16 @@
+// A utility function to handle errors in JavaScript
+function tryIfError(func) {
+    try {
+        func();
+    } catch (e) {
+        console.error(e);
+        return e;
+    }
+}
 class SingletonStorageController {
-    
+    constructor(model) {
+        this.model = model;  // Assuming model is an object
+    }    
     exists(key) { console.log(`[${this.constructor.name}]: not implemented`); }
     set(key, value) { console.log(`[${this.constructor.name}]: not implemented`); }
     get(key) { console.log(`[${this.constructor.name}]: not implemented`); }
@@ -64,7 +75,7 @@ class SingletonJavascriptDictStorageController extends SingletonStorageControlle
     }
 
     keys(pattern = '*') {
-        const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+        const regex = new RegExp('^'+pattern.replace(/\*/g, '.*'));
         return Object.keys(this.model.get()).filter(key => key.match(regex));
     }
 }
@@ -151,6 +162,52 @@ class KeysHistoryController {
         return res;
     }
 }
+
+class LocalVersionController {
+    constructor(client = null) {
+        if (client === null) {
+            client = new SingletonJavascriptDictStorageController(new JavascriptDictStorage());
+        }
+        this.client = client;
+        this.client.set('_Operations', { ops: [] });
+    }
+
+    add_operation(operation, revert = null) {
+        const opuuid = this.client._randuuid();
+        this.client.set(`_Operation:${opuuid}`, { forward: operation, revert: revert });
+        const ops = this.client.get('_Operations');
+        ops.ops.push(opuuid);
+        this.client.set('_Operations', ops);
+    }
+
+    revert_one_operation(revertCallback) {
+        const ops = this.client.get('_Operations').ops;
+        const opuuid = ops[ops.length - 1];
+        const op = this.client.get(`_Operation:${opuuid}`);
+        const revert = op.revert;
+        // Perform revert
+        revertCallback(revert);
+        ops.pop();
+        this.client.set('_Operations', { ops: ops });
+    }
+
+    get_versions() {
+        return this.client.get('_Operations').ops;
+    }
+
+    revert_operations_untill(opuuid, revertCallback) {
+        const ops = [...this.client.get('_Operations').ops];
+        if (ops.includes(opuuid)) {
+            for (let i = ops.length - 1; i >= 0; i--) {
+                if (ops[i] === opuuid) break;
+                this.revert_one_operation(revertCallback);
+            }
+        } else {
+            throw new Error(`No such version of ${opuuid}`);
+        }
+    }
+}
+
 
 class SingletonVueStorage {
     static _instance = null;
@@ -375,169 +432,247 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
 }
 
 class SingletonKeyValueStorage extends SingletonStorageController {
-
     constructor() {
         super();
         this.conn = null;
         this.js_backend();
     }
 
-    init() {
+    _switch_backend(name = 'js', ...args) {
         this.event_dispa = new EventDispatcherController();
         this._hist = new KeysHistoryController();
+        this._verc = new LocalVersionController();
+        const backs = {
+            'js': () => new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage())
+        };
+        const back = backs[name.toLowerCase()] || (() => null);
+        const backend_instance = back();
+        if (backend_instance === null) {
+            throw new Error(`No backend of ${name}, available backends: ${Object.keys(backs)}`);
+        }
+        return backend_instance;
+    }
+    
+    js_backend() {
+        this.conn = this._switch_backend('js');
     }
 
-    js_backend() { this.init(); this.conn = new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()); return this; }
-    vue_backend() { this.init(); this.conn = new SingletonVueStorageController(new SingletonVueStorage()); return this; }
-    indexedDB_backend() { this.init(); this.conn = new SingletonIndexedDBStorageController(new SingletonIndexedDBStorage()); return this; }
-    
+    _print(msg) {
+        console.log(`[${this.constructor.name}]: ${msg}`);
+    }
+
     add_slave(slave, event_names = ['set', 'delete']) {
-        if (!slave.uuid) slave.uuid = this.randuuid();
-        event_names.forEach(m => {
-            if (slave[m]) {
-                this.event_dispa.set_event(m, slave[m], slave.uuid);
+        if (!slave.uuid) {
+            try {
+                slave.uuid = this.conn._randuuid();
+            } catch (e) {
+                this._print(`Cannot set uuid to ${slave}. Skipping this slave.`);
+                return false;
             }
-        });
+        }
+        for (const event_name of event_names) {
+            if (typeof slave[event_name] === 'function') {
+                this.event_dispa.set_event(event_name, slave[event_name].bind(slave), slave.uuid);
+            } else {
+                this._print(`No function "${event_name}" in ${slave}. Skipping it.`);
+            }
+        }
+        return true;
     }
 
     delete_slave(slave) {
         this.event_dispa.delete_event(slave.uuid);
     }
 
-    _edit(func_name, key, value = null) {
+    _edit(func_name, key = null, value = null) {
+        if (!['set', 'delete', 'clean', 'load', 'loads'].includes(func_name)) {
+            this._print(`No function "${func_name}". Returning.`);
+            return;
+        }
         this._hist.reset();
-        const func = this.conn[func_name];
-        const args = value ? [key, value] : [key];
-        const res = func.apply(this.conn, args);
+        const func = this.conn[func_name].bind(this.conn);
+        const args = [key, value].filter(x => x !== null);
+        const res = func(...args);
         this.event_dispa.dispatch(func_name, ...args);
         return res;
     }
-    set(key, value) { return this._edit('set', key, value); }
-    delete(key) { return this._edit('delete', key); }
 
-    exists(key) { return this._hist.try_history(key, () => this.conn.exists(key)); }
-    keys(regx = '*') { return this._hist.try_history(regx, () => this.conn.keys(regx)); }
+    _try_edit_error(args) {
+        const func = args[0];
+        if (func === 'set') {
+            const [_, key, value] = args;
+            let revert = null;
+            if (this.exists(key)) {
+                revert = [func, key, this.get(key)];
+            } else {
+                revert = ['delete', key];
+            }
+            this._verc.add_operation(args, revert);
+        } else if (func === 'delete') {
+            const [_, key] = args;
+            const revert = ['set', key, this.get(key)];
+            this._verc.add_operation(args, revert);
+        } else if (['clean', 'load', 'loads'].includes(func)) {
+            const revert = ['loads', this.dumps()];
+            this._verc.add_operation(args, revert);
+        }
 
-    get(key) { return this.conn.get(key); }
-    clean() { return this.conn.clean(); }
-    dumps() { return this.conn.dumps(); }
-    loads(json_str) { return this.conn.loads(json_str); }
-    randuuid() { return this.conn._randuuid(); }
+        try {
+            this._edit(...args);
+            return true;
+        } catch (e) {
+            this._print(e);
+            return false;
+        }
+    }
+
+    revert_one_operation() {
+        this._verc.revert_one_operation(revert => this._edit(...revert));
+    }
+
+    get_current_version() {
+        const vs = this._verc.get_versions();
+        return vs.length === 0 ? null : vs[vs.length - 1];
+    }
+
+    revert_operations_untill(opuuid) {
+        this._verc.revert_operations_untill(opuuid, revert => this._edit(...revert));
+    }
+
+    // True or False (in case of error)
+    set(key, value) { return this._try_edit_error(['set', key, value]); }
+    delete(key) { return this._try_edit_error(['delete', key]); }
+    clean() { return this._try_edit_error(['clean']); }
+    load(json_path) { return this._try_edit_error(['load', json_path]); }
+    loads(json_str) { return this._try_edit_error(['loads', json_str]); }
+
+    _try_obj_error(func) {
+        try {
+            return func();
+        } catch (e) {
+            this._print(e);
+            return null;
+        }
+    }
+
+    // Object or None (in case of error)
+    exists(key) { return this._try_obj_error(() => this.conn.exists(key)); }
+    keys(regx = '*') { return this._try_obj_error(() => this.conn.keys(regx)); }
+    get(key) { return this._try_obj_error(() => this.conn.get(key)); }
+    dumps() { return this._try_obj_error(() => this.conn.dumps()); }
+    dump(json_path) { return this._try_obj_error(() => this.conn.dump(json_path)); }
 }
 
+
 // Tests for SingletonKeyValueStorage 
-[new SingletonKeyValueStorage().js_backend(), new SingletonKeyValueStorage().vue_backend(), new SingletonKeyValueStorage().indexedDB_backend()]
-    .forEach(storage => {
-        console.log(`Testing ${storage.conn.constructor.name}...`);
+class Tests {
+    constructor() {
+        this.store = new SingletonKeyValueStorage();
+    }
 
-        // Test 1: Set and Get
-        storage.set('key1', { data: 'value1' });
-        const value1 = storage.get('key1');
-        if (value1.constructor.name == 'Promise') {
-            value1.then(d =>
-                console.assert(JSON.stringify(d) === JSON.stringify({ data: 'value1' }), 'Test 1 Failed: Set or Get does not work correctly')
-            );
-        }
-        else {
-            console.assert(JSON.stringify(value1) === JSON.stringify({ data: 'value1' }), 'Test 1 Failed: Set or Get does not work correctly');
-        }
+    test_all(num = 1) {
+        this.test_js(num);
+    }
 
-        // Test 2: Exists
-        const exists1 = storage.exists('key1');
-        const exists2 = storage.exists('key2');
+    test_js(num = 1) {
+        this.store.js_backend();
+        for (let i = 0; i < num; i++) this.test_all_cases();
+    }
 
-        if (exists1.constructor.name == 'Promise') {
-            exists1.then(d =>
-                console.assert(d === true, 'Test 2 Failed: Exists does not return true for existing key')
-            );
-        }
-        else {
-            console.assert(exists1 === true, 'Test 2 Failed: Exists does not return true for existing key');
-        }
+    test_all_cases() {
+        this.test_set_and_get();
+        this.test_exists();
+        this.test_delete();
+        this.test_keys();
+        this.test_get_nonexistent();
+        this.test_dump_and_load();
+        this.test_version();
+        this.test_slaves();
+    }
 
-        if (exists2.constructor.name == 'Promise') {
-            exists2.then(d =>
-                console.assert(d === false, 'Test 2 Failed: Exists does not return false for non-existing key')
-            );
-        }
-        else {
-            console.assert(exists2 === false, 'Test 2 Failed: Exists does not return false for non-existing key');
-        }
+    test_set_and_get() {
+        this.store.set('test1', { data: 123 });
+        console.assert(JSON.stringify(this.store.get('test1')) === JSON.stringify({ data: 123 }),
+            "The retrieved value should match the set value.");
+    }
 
-        // Test 3: Delete
-        storage.delete('key1');
-        const valueAfterDelete = storage.get('key1');
+    test_exists() {
+        this.store.set('test2', { data: 456 });
+        console.assert(this.store.exists('test2') === true, "Key should exist after being set.");
+    }
 
-        if (valueAfterDelete && valueAfterDelete.constructor.name == 'Promise') {
-            valueAfterDelete.then(d =>
-                console.assert(d === null, 'Test 3 Failed: Delete does not remove the key properly')
-            );
-        }
-        else {
-            console.assert(valueAfterDelete === null, 'Test 3 Failed: Delete does not remove the key properly');
-        }
+    test_delete() {
+        this.store.set('test3', { data: 789 });
+        this.store.delete('test3');
+        console.assert(this.store.exists('test3') === false, "Key should not exist after being deleted.");
+    }
 
-        // Test 4: Keys
-        storage.set('test1', { data: '123' });
-        storage.set('test2', { data: '456' });
-        storage.set('something', { data: '789' });
-        const keys = storage.keys('test*');
+    test_keys() {
+        this.store.set('alpha', { info: 'first' });
+        this.store.set('abeta', { info: 'second' });
+        this.store.set('gamma', { info: 'third' });
+        const expected_keys = ['alpha', 'abeta'];
+        console.assert(
+            JSON.stringify(this.store.keys('a*').sort()) === JSON.stringify(expected_keys.sort()),
+            "Should return the correct keys matching the pattern."
+        );
+    }
 
-        if (keys && keys.constructor.name == 'Promise') {
-            keys.then(d =>
-                console.assert(d.includes('test1') && d.includes('test2') && d.length === 2, 'Test 4 Failed: Keys does not filter correctly')
-            );
-        }
-        else {
-            console.assert(keys.includes('test1') && keys.includes('test2') && keys.length === 2, 'Test 4 Failed: Keys does not filter correctly');
-        }
+    test_get_nonexistent() {
+        console.assert(this.store.get('nonexistent') === null, "Getting a non-existent key should return null.");
+    }
 
-        // Test 5: Clean
-        storage.clean();
-        const keysAfterClean = storage.keys('*');
-        if (keysAfterClean && keysAfterClean.constructor.name == 'Promise') {
-            keysAfterClean.then(d =>
-                console.assert(d.length === 0, 'Test 5 Failed: Clean does not clear all keys')
-            );
-        }
-        else {
-            console.assert(keysAfterClean.length === 0, 'Test 5 Failed: Clean does not clear all keys');
-        }
+    test_dump_and_load() {
+        const raw = {
+            "test1": { "data": 123 },
+            "test2": { "data": 456 },
+            "alpha": { "info": "first" },
+            "abeta": { "info": "second" },
+            "gamma": { "info": "third" }
+        };
 
-        // Test 6: dumps and loads
-        if (keysAfterClean.constructor.name != 'Promise') {
-            // Adding some test data
-            storage.set('key1', 'value1');
-            storage.set('key2', 'value2');
-            storage.set('key3', 'value3');
-            // Dumping the data
-            const jsonString = storage.dumps();
-            storage.clean();
-            storage.loads(jsonString)
-            console.assert(storage.dumps() === jsonString, 'Test 6 Failed: dumps data != loads data');
-        }
-        else {
-            // Adding some test data
-            storage.set('key1', 'value1').then(d => {
-                storage.set('key2', 'value2').then(d => {
-                    storage.set('key3', 'value3').then(d => {
-                        // console.log('Initial data set.');                  
-                        // Dumping the data
-                        storage.dumps().then(jsonString => {
-                            // console.log('Data dumped:', jsonString);
-                            storage.clean().then(d => {
-                                storage.loads(jsonString).then(d => {
-                                    storage.dumps().then(verifiedJsonString => {
-                                        console.assert(verifiedJsonString === jsonString, 'Test 6 Failed: dumps data != loads data');
-                                        storage.clean();
-                                    });
-                                });
-                            });
-                        });
-                    });
-                });
-            });
-        }
+        this.store.clean();
+        console.assert(this.store.dumps() === '{}', "Should return the correct keys and values.");
 
-        console.log("All tests completed.");
-    });
+        this.store.clean();
+        this.store.loads(JSON.stringify(raw));
+        console.assert(JSON.stringify(JSON.parse(this.store.dumps())) === JSON.stringify(raw),
+            "Should return the correct keys and values.");
+    }
+
+    test_slaves() {
+        if (this.store.conn.constructor.name === 'SingletonPythonDictStorageController') return;
+
+        const store2 = new SingletonKeyValueStorage();
+        this.store.add_slave(store2);
+
+        this.store.set('alpha', { info: 'first' });
+        this.store.set('abeta', { info: 'second' });
+        this.store.set('gamma', { info: 'third' });
+        this.store.delete('abeta');
+
+        console.assert(
+            JSON.stringify(JSON.parse(this.store.dumps())) === JSON.stringify(JSON.parse(store2.dumps())),
+            "Should return the correct keys and values."
+        );
+    }
+
+    test_version() {
+        this.store.clean();
+        this.store.set('alpha', { info: 'first' });
+        const data = this.store.dumps();
+        const version = this.store.get_current_version();
+
+        this.store.set('abeta', { info: 'second' });
+        this.store.set('gamma', { info: 'third' });
+        this.store.revert_operations_untill(version);
+
+        console.assert(
+            JSON.stringify(JSON.parse(this.store.dumps())) === JSON.stringify(JSON.parse(data)),
+            "Should return the same keys and values."
+        );
+    }
+}
+
+// Running tests
+new Tests().test_all();

@@ -1,19 +1,9 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 import base64
-import hashlib
-import os
-import re
-import sqlite3
-import threading
-import queue
-import time
 import uuid
 import fnmatch
 import json
 import unittest
-import urllib
-import urllib.parse
-from urllib.parse import urlparse
 
 def try_if_error(func):
     try:
