@@ -1,8 +1,5 @@
 // A utility function to handle errors in JavaScript
 class SingletonStorageController {
-    constructor(model) {
-        this.model = model;  // Assuming model is an object
-    }    
     exists(key) { console.log(`[${this.constructor.name}]: not implemented`); }
     set(key, value) { console.log(`[${this.constructor.name}]: not implemented`); }
     get(key) { console.log(`[${this.constructor.name}]: not implemented`); }
