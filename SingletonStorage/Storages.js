@@ -1,12 +1,4 @@
 // A utility function to handle errors in JavaScript
-function tryIfError(func) {
-    try {
-        func();
-    } catch (e) {
-        console.error(e);
-        return e;
-    }
-}
 class SingletonStorageController {
     constructor(model) {
         this.model = model;  // Assuming model is an object
