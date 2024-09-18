@@ -112,6 +112,12 @@ class EventDispatcherController {
         });
     }
 
+    async async_dispatch(event_name, ...args) {
+        return await Promise.all(
+            this.client.keys(`${EventDispatcherController.ROOT_KEY}:${event_name}:*`).map(
+                async(event_full_uuid) => this.client.get(event_full_uuid)(...args))
+            );
+    }
     clean() {
         return this.client.clean();
     }
@@ -621,7 +627,7 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         this.event_dispa.delete_event(slave.uuid);
     }
 
-    _edit(func_name, key = null, value = null) {
+    _edit_local(func_name, key = null, value = null) {
         if (!['set', 'delete', 'clean', 'load', 'loads'].includes(func_name)) {
             this._print(`No function "${func_name}". Returning.`);
             return;
@@ -629,8 +635,18 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         this._hist.reset();
         const func = this.conn[func_name].bind(this.conn);
         const args = [key, value].filter(x => x !== null);
-        const res = func(...args);
-        this.event_dispa.dispatch(func_name, ...args);
+        return func(...args);
+    }
+
+    _edit(func_name, key = null, value = null) {
+        const args = [key, value].filter(x => x !== null);
+        const res = this._edit_local(func_name,key,value);
+        // this.event_dispa.dispatch(func_name, ...args)
+
+        const version = this.get_current_version();
+        this.event_dispa.async_dispatch(func_name, ...args).catch(e=>{
+            this.revert_operations_untill(version);
+        });
         return res;
     }
 
