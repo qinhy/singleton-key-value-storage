@@ -69,7 +69,6 @@ class SingletonJavascriptDictStorageController extends SingletonStorageControlle
     }
 }
 
-
 class EventDispatcherController {
     static ROOT_KEY = 'Event';
 
@@ -714,7 +713,6 @@ class SingletonKeyValueStorage extends SingletonStorageController {
     dumps() { return this._try_obj_error(() => this.conn.dumps()); }
     dump(json_path) { return this._try_obj_error(() => this.conn.dump(json_path)); }
 }
-
 
 // Tests for SingletonKeyValueStorage 
 class Tests {

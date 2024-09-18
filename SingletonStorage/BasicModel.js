@@ -1,7 +1,15 @@
 // from https://github.com/qinhy/singleton-key-value-storage.git
 // Function to get current time in UTC
 function now_utc() {
-    return new Date().toISOString();  // Returns UTC time in ISO string format
+    // Get the current time in milliseconds since the Unix epoch
+    const now = new Date();    
+    // Get the current time with higher precision (including microseconds)
+    const milliseconds = now.getMilliseconds(); // Milliseconds part (0-999)
+    const microseconds = Math.floor((performance.now() % 1) * 1000); // Simulate microseconds
+    // Format the date to an ISO string
+    let isoString = now.toISOString(); // e.g., "2024-09-18T16:49:21.552Z"
+    // Replace the milliseconds part with microsecond precision
+    return isoString.replace(/\.\d{3}Z/, `.${String(milliseconds).padStart(3, '0')}${String(microseconds).padStart(3, '0')}Z`);        
 }
 class Model4Basic {
     static AbstractObj = class {
