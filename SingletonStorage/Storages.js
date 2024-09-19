@@ -1,3 +1,4 @@
+// from https://github.com/qinhy/singleton-key-value-storage.git
 // A utility function to handle errors in JavaScript
 class SingletonStorageController {
     exists(key) { console.log(`[${this.constructor.name}]: not implemented`); }
@@ -637,10 +638,10 @@ class SingletonKeyValueStorage extends SingletonStorageController {
     _edit(func_name, key = null, value = null) {
         const args = [key, value].filter(x => x !== null);
         const res = this._edit_local(func_name,key,value);
-        // this.event_dispa.dispatch(func_name, ...args)
+        // this.dispatch(func_name, ...args)
 
         const version = this.get_current_version();
-        this.event_dispa.async_dispatch(func_name, ...args).catch(e=>{
+        this.async_dispatch(func_name, ...args).catch(e=>{
             this.revert_operations_untill(version);
         });
         return res;
@@ -712,6 +713,17 @@ class SingletonKeyValueStorage extends SingletonStorageController {
     get(key) { return this._try_obj_error(() => this.conn.get(key)); }
     dumps() { return this._try_obj_error(() => this.conn.dumps()); }
     dump(json_path) { return this._try_obj_error(() => this.conn.dump(json_path)); }
+
+    
+    ////////////////// EventDispatcherController
+    events() { return this.event_dispa.events();}
+    _find_event(uuid) { return this.event_dispa._find_event(uuid);}
+    get_event(uuid) { return this.event_dispa.get_event(uuid);}
+    delete_event(uuid) { return this.event_dispa.delete_event(uuid);}
+    set_event(event_name, callback, id = null) { return this.event_dispa.set_event(event_name, callback, id);}
+    dispatch(event_name, ...args) { return this.event_dispa.dispatch(event_name, ...args);}
+    async async_dispatch(event_name, ...args) { return await this.event_dispa.async_dispatch(event_name, ...args);}
+    clean_events() { return this.event_dispa.clean_events();}
 }
 
 // Tests for SingletonKeyValueStorage 
