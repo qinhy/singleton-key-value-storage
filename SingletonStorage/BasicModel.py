@@ -78,7 +78,6 @@ class Model4Basic:
         def get_controller(self)->Controller4Basic.AbstractObjController: return self._controller
         def init_controller(self,store):self._controller = Controller4Basic.AbstractObjController(store,self)
 
-
 class BasicStore(SingletonKeyValueStorage):
     
     def __init__(self, version_controll=False) -> None:
@@ -115,7 +114,6 @@ class BasicStore(SingletonKeyValueStorage):
     
     def find_all(self,id:str=f'AbstractObj:*')->list[Model4Basic.AbstractObj]:
         return [self.find(k) for k in self.keys(id)]
-
 
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs)->None:
