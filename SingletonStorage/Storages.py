@@ -24,11 +24,11 @@ def try_if_error(func):
 
 # self checking
 firestore_back = try_if_error(lambda:__import__('google.cloud.firestore')) is None
-redis_back = try_if_error(lambda:__import__('redis')) is None
-sqlite_back = True
-aws_dynamo = try_if_error(lambda:__import__('boto3')) is None
-aws_s3 = try_if_error(lambda:__import__('boto3')) is None
-mongo_back = try_if_error(lambda:__import__('pymongo')) is None
+redis_back     = try_if_error(lambda:__import__('redis')) is None
+sqlite_back    = True
+aws_dynamo     = try_if_error(lambda:__import__('boto3')) is None
+aws_s3         = try_if_error(lambda:__import__('boto3')) is None
+mongo_back     = try_if_error(lambda:__import__('pymongo')) is None
 
 class SingletonStorageController:
     def __init__(self, model):
@@ -62,6 +62,7 @@ class PythonDictStorage:
     def __init__(self):
         self.uuid = uuid.uuid4()
         self.store = {}
+
 class SingletonPythonDictStorage:
     _instance = None
     _meta = {}
@@ -93,7 +94,6 @@ class SingletonPythonDictStorageController(SingletonStorageController):
 
     def keys(self, pattern: str='*')->list[str]:
         return fnmatch.filter(self.model.store.keys(), pattern)
-
 
 if firestore_back:
     from google.cloud import firestore
@@ -548,7 +548,6 @@ if aws_s3:
                     
             return fnmatch.filter(keys, pattern)
             
-
 if mongo_back:
     from pymongo import MongoClient, database, collection
     
