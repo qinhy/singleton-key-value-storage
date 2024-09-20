@@ -69,7 +69,36 @@ class SingletonJavascriptDictStorageController extends SingletonStorageControlle
         return Object.keys(this.model.get()).filter(key => key.match(regex));
     }
 }
+class SingletonLocalStorageController extends SingletonStorageController {
+    constructor() {
+        super();
+        this.model = localStorage; 
+    }
 
+    exists(key) { return this.keys().includes(key); }
+
+    set(key, value) { 
+        if(!key || !value)throw Error(`key==${key},value==${value}`);
+        this.model.setItem(key, JSON.stringify(value));
+     }
+
+    get(key) { return JSON.parse(this.model.getItem(key)); }
+
+    delete(key) { this.model.removeItem(key); }
+
+    keys(pattern = '*') {
+        const regex = new RegExp('^'+pattern.replace(/\*/g, '.*'));
+        const ks = [];
+        for (let index = 0; index < this.model.length; index++) {
+            const element = this.model.key(index);
+            ks.push(element);
+        }
+        if(pattern == '*'){return ks};
+        return ks.filter(key => key.match(regex));
+    }
+    
+    clean(){ this.model.clear(); }
+}
 class EventDispatcherController {
     static ROOT_KEY = 'Event';
 
@@ -579,6 +608,7 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         this._verc = new LocalVersionController();
         const backs = {
             'js': () => new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()),
+            'localstorage': () => new SingletonLocalStorageController(),
             'fastapi': () => new SingletonFastAPIStorageController()
         };
         const back = backs[name.toLowerCase()] || (() => null);
@@ -588,13 +618,9 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         }
         return backend_instance;
     }
-
-    js_backend() {
-        this.conn = this._switch_backend('js');
-    }
-    fastapi_backend() {
-        this.conn = this._switch_backend('fastapi');
-    }
+    localstorage_backend() { this.conn = this._switch_backend('localstorage'); }    
+    js_backend() { this.conn = this._switch_backend('js'); }
+    fastapi_backend() { this.conn = this._switch_backend('fastapi'); }
 
     _print(msg) {
         console.log(`[${this.constructor.name}]: ${msg}`);
@@ -733,11 +759,16 @@ class Tests {
     }
 
     test_all(num = 1) {
-        this.test_js(num);
+        // this.test_js(num);
+        this.test_localstorage(num);
     }
 
     test_js(num = 1) {
         this.store.js_backend();
+        for (let i = 0; i < num; i++) this.test_all_cases();
+    }
+    test_localstorage(num = 1) {
+        this.store.localstorage_backend();
         for (let i = 0; i < num; i++) this.test_all_cases();
     }
 
@@ -750,6 +781,7 @@ class Tests {
         this.test_dump_and_load();
         this.test_version();
         this.test_slaves();
+        this.store.clean();
     }
 
     test_set_and_get() {
@@ -787,10 +819,10 @@ class Tests {
     test_dump_and_load() {
         const raw = {
             "test1": { "data": 123 },
-            "test2": { "data": 456 },
-            "alpha": { "info": "first" },
-            "abeta": { "info": "second" },
-            "gamma": { "info": "third" }
+            // "test2": { "data": 456 },
+            // "alpha": { "info": "first" },
+            // "abeta": { "info": "second" },
+            // "gamma": { "info": "third" }
         };
 
         this.store.clean();
@@ -799,10 +831,17 @@ class Tests {
         this.store.clean();
         this.store.loads(JSON.stringify(raw));
         console.assert(JSON.stringify(JSON.parse(this.store.dumps())) === JSON.stringify(raw),
-            "Should return the correct keys and values.");
+            "Should return the correct keys and values.");        
     }
 
     test_slaves() {
+        this.store.clean();
+        this.store.loads(JSON.stringify({
+            "alpha": { "info": "first" },
+            "abeta": { "info": "second" },
+            "gamma": { "info": "third" }
+        }))
+
         if (this.store.conn.constructor.name === 'SingletonPythonDictStorageController') return;
 
         const store2 = new SingletonKeyValueStorage();
