@@ -612,13 +612,13 @@ class EventDispatcherController:
             client = SingletonPythonDictStorageController(PythonDictStorage())
         self.client:SingletonStorageController = client
     
-    def events(self):
-        return list(zip(self.client.keys('*'),[self.client.get(k) for k in self.client.keys('*')]))
-
     def _find_event(self, uuid: str):
         es = self.client.keys(f'*:{uuid}')
         return [None] if len(es)==0 else es
     
+    def events(self):
+        return list(zip(self.client.keys('*'),[self.client.get(k) for k in self.client.keys('*')]))
+
     def get_event(self, uuid: str):
         return [self.client.get(k) for k in self._find_event(uuid)]
     
@@ -630,7 +630,7 @@ class EventDispatcherController:
         self.client.set(f'{EventDispatcherController.ROOT_KEY}:{event_name}:{id}', callback)
         return id
     
-    def dispatch(self, event_name, *args, **kwargs):
+    def dispatch_event(self, event_name, *args, **kwargs):
         for event_full_uuid in self.client.keys(f'{EventDispatcherController.ROOT_KEY}:{event_name}:*'):
             self.client.get(event_full_uuid)(*args, **kwargs)
 
@@ -707,7 +707,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
         self.python_backend()
     
     def _switch_backend(self,name:str='python',*args,**kwargs):
-        self.event_dispa = EventDispatcherController()
+        self._event_dispa = EventDispatcherController()
         self._hist = KeysHistoryController()
         self._verc = LocalVersionController()
         backs={
@@ -757,12 +757,12 @@ class SingletonKeyValueStorage(SingletonStorageController):
                 return
         for m in event_names:
             if hasattr(slave, m):
-                self.event_dispa.set_event(m,getattr(slave,m),getattr(slave,'uuid'))
+                self.set_event(m,getattr(slave,m),getattr(slave,'uuid'))
             else:
                 self._print(f'no func of "{m}" in {slave}. Skip it.')
                 
     def delete_slave(self, slave:object)->bool:
-        self.event_dispa.delete_event(getattr(slave,'uuid',None))
+        self.delete_event(getattr(slave,'uuid',None))
 
     def _edit_local(self,func_name:str, key:str=None, value:dict=None):
         if func_name not in ['set','delete','clean','load','loads']:
@@ -770,14 +770,14 @@ class SingletonKeyValueStorage(SingletonStorageController):
             return
         self._hist.reset()
         func = getattr(self.conn, func_name)
-        args = list(filter(lambda x:x is not None, [key,value]))
+        args = [i for i in [key,value] if i is not None]
         res = func(*args)
         return res
     
     def _edit(self,func_name:str, key:str=None, value:dict=None):
-        args = list(filter(lambda x:x is not None, [key,value]))
+        args = [i for i in [key,value] if i is not None]
         res = self._edit_local(func_name,key,value)
-        self.event_dispa.dispatch(func_name,*args)
+        self.dispatch_event(func_name,*args)
         return res
     
     def _try_edit_error(self,args):
@@ -842,6 +842,15 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def dumps(self)->str:                     return self._try_obj_error(lambda:self.conn.dumps())
     def dump(self,json_path)->str:            return self._try_obj_error(lambda:self.conn.dump(json_path))
 
+    # events 
+    def events(self): return self._event_dispa.events()
+    def get_event(self, uuid: str): return self._event_dispa.get_event(uuid)
+    def delete_event(self, uuid: str): return self._event_dispa.delete_event(uuid)
+    def set_event(self, event_name: str, callback, id:str=None): return self._event_dispa.set_event(event_name, callback, id)
+    def dispatch_event(self, event_name, *args, **kwargs): return self._event_dispa.dispatch_event(event_name, *args, **kwargs)
+    def clean_events(self): return self._event_dispa.clean()
+
+
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs)->None:
         super().__init__(*args,**kwargs)
@@ -891,6 +900,7 @@ class Tests(unittest.TestCase):
         self.test_dump_and_load()
         self.test_version()
         self.test_slaves()
+        self.store.clean()
 
     def test_set_and_get(self):
         self.store.set('test1', {'data': 123})
@@ -942,8 +952,8 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(self.store.dumps()),json.loads(store2.dumps()), "Should return the correct keys and values.")
 
     def test_version(self):
-        self.store.version_controll = True
         self.store.clean()
+        self.store.version_controll = True
         self.store.set('alpha', {'info': 'first'})
         data = self.store.dumps()
         version = self.store.get_current_version()
