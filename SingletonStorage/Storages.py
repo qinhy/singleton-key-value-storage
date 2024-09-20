@@ -668,30 +668,28 @@ class LocalVersionController:
         if client is None:
             client = SingletonPythonDictStorageController(PythonDictStorage())
         self.client:SingletonStorageController = client
-        self.client.set(f'_Operations',{'ops':[]})
+        self._set_versions([])
     
+    def get_versions(self)->list: return self.client.get(f'_Operations')['ops']
+    def _set_versions(self,ops:list): return self.client.set(f'_Operations',{'ops':ops})
+
     def add_operation(self,operation:tuple,revert:tuple=None):
         opuuid = str(uuid.uuid4())
         self.client.set(f'_Operation:{opuuid}',{'forward':operation,'revert':revert})
-        ops = self.client.get(f'_Operations')
-        ops['ops'].append(opuuid)
-        self.client.set(f'_Operations',ops)
+        ops = self.get_versions()
+        ops.append(opuuid)
+        self._set_versions(ops)
     
     def revert_one_operation(self,revert_callback:lambda revert:None):
-        ops:list = self.client.get(f'_Operations')['ops']
-        opuuid = ops[-1]
-        op = self.client.get(f'_Operation:{opuuid}')
-        revert = op['revert']        
+        ops = self.get_versions()
+        if len(ops)==0:return
+        op = self.client.get(f'_Operation:{ops[-1]}')
         # do revert
-        revert_callback(revert)
-        ops.pop()
-        self.client.set(f'_Operations',{'ops':ops})
-    
-    def get_versions(self):
-        return self.client.get(f'_Operations')['ops']
+        revert_callback(op['revert'])
+        self._set_versions(ops[:-1])   
 
     def revert_operations_untill(self,opuuid:str,revert_callback:lambda revert:None):
-        ops = [i for i in self.client.get(f'_Operations')['ops']]
+        ops = [i for i in self.get_versions()]
         if opuuid in ops:
             for i in ops[::-1]:
                 if i==opuuid:break
@@ -711,6 +709,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
         self._hist = KeysHistoryController()
         self._verc = LocalVersionController()
         backs={
+            'temp_python':lambda:SingletonPythonDictStorageController(PythonDictStorage(*args,**kwargs)),
             'python':lambda:SingletonPythonDictStorageController(SingletonPythonDictStorage(*args,**kwargs)),
             'firestore':lambda:SingletonFirestoreStorageController(SingletonFirestoreStorage(*args,**kwargs)) if firestore_back else None,
             'redis':lambda:SingletonRedisStorageController(SingletonRedisStorage(*args,**kwargs)) if redis_back else None,
@@ -729,6 +728,12 @@ class SingletonKeyValueStorage(SingletonStorageController):
                     aws_access_key_id,aws_secret_access_key,region_name,
                     s3_storage_prefix_path = s3_storage_prefix_path)
 
+    def temp_python_backend(self):
+        self.conn = self._switch_backend('temp_python')
+
+    def python_backend(self):
+        self.conn = self._switch_backend('python')
+    
     def python_backend(self):
         self.conn = self._switch_backend('python')
     
@@ -828,19 +833,18 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def load(self,json_path):                 return self._try_edit_error(('load', json_path))
     def loads(self,json_str):                 return self._try_edit_error(('loads',json_str))
     
-    def _try_obj_error(self,func):
+    def _try_load_error(self,func):
         try:
             return func()
         except Exception as e:
             self._print(e)
             return None
-    # Object, None(in error)
-    
-    def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self.conn.exists(key))
-    def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self.conn.keys(regx))
-    def get(self, key: str)->dict:            return self._try_obj_error(lambda:self.conn.get(key))
-    def dumps(self)->str:                     return self._try_obj_error(lambda:self.conn.dumps())
-    def dump(self,json_path)->str:            return self._try_obj_error(lambda:self.conn.dump(json_path))
+    # Object, None(in error)    
+    def exists(self, key: str)->bool:         return self._try_load_error(lambda:self.conn.exists(key))
+    def keys(self, regx: str='*')->list[str]: return self._try_load_error(lambda:self.conn.keys(regx))
+    def get(self, key: str)->dict:            return self._try_load_error(lambda:self.conn.get(key))
+    def dumps(self)->str:                     return self._try_load_error(lambda:self.conn.dumps())
+    def dump(self,json_path)->str:            return self._try_load_error(lambda:self.conn.dump(json_path))
 
     # events 
     def events(self): return self._event_dispa.events()
