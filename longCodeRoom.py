@@ -135,7 +135,7 @@ def CodeExplainer_callback(speaker:Speaker, msg:Model4LLM.AbstractContent):
         response = openai_request(url="https://api.openai.com/v1/chat/completions",data=json.dumps(data,ensure_ascii=False))
         speaker.speak(str(response['error']) if 'error' in response else response['choices'][0]['message']['content'])
 
-
+# ideas : 1.purpose 2.reference materials 3.previous outputs ==> current outputs 
 reminderp=configs.new_config('reminderp','''
 @CodeExplainer
 I have an app built with Electron and Python.
