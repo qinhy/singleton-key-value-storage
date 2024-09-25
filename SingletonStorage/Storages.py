@@ -1,6 +1,7 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 import base64
 import hashlib
+import math
 import os
 import re
 import sqlite3
@@ -664,39 +665,83 @@ class KeysHistoryController:
         return res
 
 class LocalVersionController:
+    
+    TABLENAME = '_Operation'
+    LISTNAME = '_Operations'
+    KEY = 'ops'
+    FORWARD = 'forward'    
+    REVERT = 'revert'
+
     def __init__(self,client=None):
         if client is None:
             client = SingletonPythonDictStorageController(PythonDictStorage())
         self.client:SingletonStorageController = client
         self._set_versions([])
+        self._current_version = None
     
-    def get_versions(self)->list: return self.client.get(f'_Operations')['ops']
-    def _set_versions(self,ops:list): return self.client.set(f'_Operations',{'ops':ops})
+    def get_versions(self)->list: 
+        return self.client.get(LocalVersionController.TABLENAME
+                               )[LocalVersionController.KEY]
+    
+    def _set_versions(self,ops:list): 
+        return self.client.set(LocalVersionController.TABLENAME,
+                               {LocalVersionController.KEY:ops})
+    
+    def find_version(self,version_uuid:str):         
+        versions = [i for i in self.get_versions()]
+        current_version_idx = versions.index(self._current_version
+                                             ) if self._current_version in versions else None
+        target_version_idx = versions.index(version_uuid
+                                            ) if version_uuid in versions else None
+        op = self.client.get(f'{LocalVersionController.TABLENAME}:{versions[target_version_idx]}'
+                             ) if target_version_idx else None
+        return versions,current_version_idx,target_version_idx,op
 
     def add_operation(self,operation:tuple,revert:tuple=None):
         opuuid = str(uuid.uuid4())
-        self.client.set(f'_Operation:{opuuid}',{'forward':operation,'revert':revert})
+        self.client.set(f'{LocalVersionController.TABLENAME}:{opuuid}',{
+            LocalVersionController.FORWARD:operation,LocalVersionController.REVERT:revert})
+        
         ops = self.get_versions()
+        if self._current_version is not None:
+            opidx = ops.index(self._current_version)
+            ops = ops[:opidx+1]
+
         ops.append(opuuid)
         self._set_versions(ops)
+        self._current_version = opuuid
+
+    def forward_one_operation(self,forward_callback:lambda forward:None):
+        versions,current_version_idx,_,_ = self.find_version(self._current_version)
+        if current_version_idx is None or len(versions)<=(current_version_idx+1):return
+        op = self.client.get(f'{LocalVersionController.TABLENAME}:{versions[current_version_idx+1]}')
+        # do forward
+        forward_callback(op[LocalVersionController.FORWARD])
+        self._current_version = versions[current_version_idx+1]
     
-    def revert_one_operation(self,revert_callback:lambda revert:None):
-        ops = self.get_versions()
-        if len(ops)==0:return
-        op = self.client.get(f'_Operation:{ops[-1]}')
+    def revert_one_operation(self,revert_callback:lambda revert:None):        
+        versions,current_version_idx,_,op = self.find_version(self._current_version)
+        if current_version_idx is None or (current_version_idx-1)<0:return
         # do revert
-        revert_callback(op['revert'])
-        self._set_versions(ops[:-1])   
+        revert_callback(op[LocalVersionController.REVERT])
+        self._current_version = versions[current_version_idx-1]
 
-    def revert_operations_untill(self,opuuid:str,revert_callback:lambda revert:None):
-        ops = [i for i in self.get_versions()]
-        if opuuid in ops:
-            for i in ops[::-1]:
-                if i==opuuid:break
-                self.revert_one_operation(revert_callback)
-        else:
-            raise ValueError(f'no such version of {opuuid}')
+    def to_version(self,version_uuid:str,version_callback:lambda ops:None):
+        _,current_version_idx,target_version_idx,_ = self.find_version(version_uuid)
+        if target_version_idx is None:raise ValueError(f'no such version of {version_uuid}')
 
+        delta_idx = target_version_idx - current_version_idx
+        
+        while abs(delta_idx) != 0:
+            sign = math.copysign(1, delta_idx)
+            if sign>0:
+                # print('forward_one_operation')
+                self.forward_one_operation(version_callback)
+            else:
+                # print('revert_one_operation')
+                self.revert_one_operation(version_callback)
+            delta_idx = delta_idx - sign
+            
 class SingletonKeyValueStorage(SingletonStorageController):
 
     def __init__(self,version_controll=False)->None:
@@ -823,8 +868,8 @@ class SingletonKeyValueStorage(SingletonStorageController):
             return None
         return vs[-1]
 
-    def revert_operations_untill(self,opuuid:str):
-        self._verc.revert_operations_untill(opuuid,lambda revert:self._edit_local(*revert))
+    def local_to_version(self,opuuid:str):
+        self._verc.to_version(opuuid,lambda revert:self._edit_local(*revert))
 
     # True False(in error)
     def set(self, key: str, value: dict):     return self._try_edit_error(('set',key,value))
@@ -959,11 +1004,17 @@ class Tests(unittest.TestCase):
         self.store.clean()
         self.store.version_controll = True
         self.store.set('alpha', {'info': 'first'})
-        data = self.store.dumps()
-        version = self.store.get_current_version()
+        data1 = self.store.dumps()
+        v1 = self.store.get_current_version()
 
         self.store.set('abeta', {'info': 'second'})
-        self.store.set('gamma', {'info': 'third'})
-        self.store.revert_operations_untill(version)
+        v2 = self.store.get_current_version()
+        data2 = self.store.dumps()
 
-        self.assertEqual(json.loads(self.store.dumps()),json.loads(data), "Should return the same keys and values.")
+        self.store.set('gamma', {'info': 'third'})
+        self.store.local_to_version(v1)
+
+        self.assertEqual(json.loads(self.store.dumps()),json.loads(data1), "Should return the same keys and values.")
+
+        self.store.local_to_version(v2)
+        self.assertEqual(json.loads(self.store.dumps()),json.loads(data2), "Should return the same keys and values.")
