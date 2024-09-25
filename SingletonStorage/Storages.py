@@ -731,9 +731,9 @@ class LocalVersionController:
         if target_version_idx is None:raise ValueError(f'no such version of {version_uuid}')
 
         delta_idx = target_version_idx - current_version_idx
+        sign = math.copysign(1, delta_idx)
         
         while abs(delta_idx) != 0:
-            sign = math.copysign(1, delta_idx)
             if sign>0:
                 # print('forward_one_operation')
                 self.forward_one_operation(version_callback)
@@ -741,7 +741,7 @@ class LocalVersionController:
                 # print('revert_one_operation')
                 self.revert_one_operation(version_callback)
             delta_idx = delta_idx - sign
-            
+
 class SingletonKeyValueStorage(SingletonStorageController):
 
     def __init__(self,version_controll=False)->None:
