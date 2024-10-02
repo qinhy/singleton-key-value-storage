@@ -16,6 +16,8 @@ class Controller4Basic:
         def __init__(self, store, model):
             self.model:Model4Basic.AbstractObj = model
             self._store:BasicStore = store
+        
+        def storage(self):return self._store
 
         def update(self, **kwargs):
             assert  self.model is not None, 'controller has null model!'
@@ -31,11 +33,11 @@ class Controller4Basic:
             
         def store(self):
             assert self.model._id is not None
-            self._store.set(self.model._id,self.model.model_dump_json_dict())
+            self.storage().set(self.model._id,self.model.model_dump_json_dict())
             return self
 
         def delete(self):
-            self._store.delete(self.model.get_id())
+            self.storage().delete(self.model.get_id())
             self.model._controller = None
 
         def update_metadata(self, key, value):
@@ -73,7 +75,6 @@ class Model4Basic:
         def get_controller(self)->Controller4Basic.AbstractObjController: return self._controller
         def init_controller(self,store):self._controller = Controller4Basic.AbstractObjController(store,self)
 
-
 class BasicStore(SingletonKeyValueStorage):
     
     def __init__(self, version_controll=False) -> None:
@@ -110,7 +111,6 @@ class BasicStore(SingletonKeyValueStorage):
     
     def find_all(self,id:str=f'AbstractObj:*')->list[Model4Basic.AbstractObj]:
         return [self.find(k) for k in self.keys(id)]
-
 
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs)->None:
