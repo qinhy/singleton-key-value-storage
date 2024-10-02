@@ -15,14 +15,10 @@ class Controller4LLM:
         pass
 
     class CommonDataController(AbstractObjController):
-        def __init__(self, store, model):
-            self.model: Model4LLM.CommonData = model
-            self._store:LLMstore = store
+        pass
 
     class AuthorController(AbstractObjController):
-        def __init__(self, store ,model):
-            self.model: Model4LLM.Author = model
-            self._store:LLMstore = store
+        pass
 
     class AbstractContentController(AbstractObjController):
         def __init__(self, store, model):
@@ -145,10 +141,7 @@ class Controller4LLM:
             return results
 
     class TextContentController(AbstractContentController):
-        def __init__(self, store, model):
-            self.model:Model4LLM.TextContent = model
-            self._store:LLMstore = store
-
+        pass
 
     class EmbeddingContentController(AbstractContentController):
         def __init__(self, store, model):
@@ -178,9 +171,7 @@ class Controller4LLM:
             return self
 
     class FileLinkContentController(AbstractContentController):
-        def __init__(self, store, model):
-            self.model: Model4LLM.FileLinkContent = model
-            self._store:LLMstore = store
+        pass
 
     class BinaryFileContentController(AbstractContentController):
         def __init__(self, store, model):
@@ -282,7 +273,6 @@ class Model4LLM:
     class TextContent(AbstractContent):
         _controller: Controller4LLM.TextContentController = None
         def get_controller(self):return self._controller
-
 
     class EmbeddingContent(AbstractContent):
         target_id: str
