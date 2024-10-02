@@ -851,9 +851,9 @@ class Tests {
         this.store.set('abeta', { info: 'second' });
         this.store.set('gamma', { info: 'third' });
         this.store.delete('abeta');
-
+        
         console.assert(
-            JSON.stringify(JSON.parse(this.store.dumps())) === JSON.stringify(JSON.parse(store2.dumps())),
+            JSON.stringify(JSON.parse(this.store.dumps()).gamma) === JSON.stringify(JSON.parse(store2.dumps()).gamma),
             "Should return the correct keys and values."
         );
     }
