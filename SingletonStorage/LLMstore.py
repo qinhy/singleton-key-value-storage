@@ -36,7 +36,7 @@ class Controller4LLM:
             self._store:LLMstore = store
 
         def delete(self):
-            self.get_data()._controller.delete()        
+            self.get_data().get_controller().delete()        
             # self._store.delete_obj(self.model)        
             self._store.delete(self.model.get_id())
             self.model._controller = None
@@ -57,12 +57,12 @@ class Controller4LLM:
             return self.get_data().raw    
 
         def update_data_raw(self, msg: str):
-            self.get_data()._controller.update(raw = msg)
+            self.get_data().get_controller().update(raw = msg)
             return self
 
         def append_data_raw(self, msg: str):
             data = self.get_data()
-            data._controller.update(raw = data.raw + msg)
+            data.get_controller().update(raw = data.raw + msg)
             return self
         
     class AbstractGroupController(AbstractObjController):
@@ -83,7 +83,7 @@ class Controller4LLM:
 
         def delete_recursive_from_keyValue_storage(self):
             for c, d in self.yield_children_content_recursive():
-                c._controller.delete()
+                c.get_controller().delete()
             self.delete()
 
         def get_children_content(self):
@@ -134,11 +134,11 @@ class Controller4LLM:
         def remove_child(self, child_id:str):
             remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
             for content in self.get_children_content():
-                if content._controller.model.get_id() == child_id:
+                if content.get_controller().model.get_id() == child_id:
                     if child_id.startswith('ContentGroup'):
                         group:Controller4LLM.ContentGroupController = content._controller
                         group.delete_recursive_from_keyValue_storage()
-                    content._controller.delete()
+                    content.get_controller().delete()
                     break
             self.update(children_id = remaining_ids)
             return self
