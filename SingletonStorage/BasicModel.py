@@ -20,15 +20,16 @@ class Controller4Basic:
         def storage(self):return self._store
 
         def update(self, **kwargs):
-            assert  self.model is not None, 'controller has null model!'
+            assert self.model is not None, 'controller has null model!'
             for key, value in kwargs.items():
                 if hasattr(self.model, key):
                     setattr(self.model, key, value)
             self._update_timestamp()
             self.store()
+            return self
 
         def _update_timestamp(self):
-            assert  self.model is not None, 'controller has null model!'
+            assert self.model is not None, 'controller has null model!'
             self.model.update_time = now_utc()
             
         def store(self):
@@ -97,7 +98,6 @@ class BasicStore(SingletonKeyValueStorage):
         obj:Model4Basic.AbstractObj = self._get_class(id)(**data_dict)
         obj.set_id(id).init_controller(self)
         return obj
-    
     
     def _add_new_obj(self, obj:Model4Basic.AbstractObj, id:str=None):
         id,d = obj.gen_new_id() if id is None else id, obj.model_dump_json_dict()
