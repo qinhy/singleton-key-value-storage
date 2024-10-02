@@ -155,7 +155,7 @@ class Controller4LLM:
         def __init__(self, store, model):
             self.model: Model4LLM.EmbeddingContent = model
             self._store:LLMstore = store
-
+            
         def get_data_raw(self):
             return list(map(float,super().get_data_raw()[1:-1].split(',')))
         
@@ -248,67 +248,67 @@ class Model4LLM:
         rLOD0: str = ''
         rLOD1: str = ''
         rLOD2: str = ''
+        _controller_class:type = Controller4LLM.CommonDataController
         _controller: Controller4LLM.CommonDataController = None
-        
-        def get_controller(self)->Controller4LLM.CommonDataController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.CommonDataController(store,self)
+        def get_controller(self):return self._controller
+
     class Author(AbstractObj):
         name: str = ''
         role: str = ''
+        _controller_class:type = Controller4LLM.AuthorController
         _controller: Controller4LLM.AuthorController = None
-        
-        def get_controller(self)->Controller4LLM.AuthorController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.AuthorController(store,self)
+        def get_controller(self):return self._controller
+
     class AbstractContent(AbstractObj):
         author_id: str=''
         group_id: str=''
+        _controller_class:type = Controller4LLM.AbstractContentController
         _controller: Controller4LLM.AbstractContentController = None
-        
-        def get_controller(self)->Controller4LLM.AbstractContentController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.AbstractContentController(store,self)
+        def get_controller(self):return self._controller
+
 
         def data_id(self):return f"CommonData:{self.get_id()}"
     class AbstractGroup(AbstractObj):
         author_id: str=''
         parent_id: str = ''
         children_id: List[str] = []
+        _controller_class:type = Controller4LLM.AbstractGroupController
         _controller: Controller4LLM.AbstractGroupController = None
-        
-        def get_controller(self)->Controller4LLM.AbstractGroupController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.AbstractGroupController(store,self)
+        def get_controller(self):return self._controller
+
     class ContentGroup(AbstractGroup):
+        _controller_class:type = Controller4LLM.ContentGroupController
         _controller: Controller4LLM.ContentGroupController = None
-        
-        def get_controller(self)->Controller4LLM.ContentGroupController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.ContentGroupController(store,self)
+        def get_controller(self):return self._controller
+
     class TextContent(AbstractContent):
+        _controller_class:type = Controller4LLM.TextContentController
         _controller: Controller4LLM.TextContentController = None
-        
-        def get_controller(self)->Controller4LLM.TextContentController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.TextContentController(store,self)
+        def get_controller(self):return self._controller
+
 
     class EmbeddingContent(AbstractContent):
-        _controller: Controller4LLM.EmbeddingContentController = None
-        
-        def get_controller(self)->Controller4LLM.EmbeddingContentController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.EmbeddingContentController(store,self)
         target_id: str
+        _controller_class:type = Controller4LLM.EmbeddingContentController
+        _controller: Controller4LLM.EmbeddingContentController = None
+        def get_controller(self):return self._controller
+        
     class FileLinkContent(AbstractContent):
+        _controller_class:type = Controller4LLM.FileLinkContentController
         _controller: Controller4LLM.FileLinkContentController = None
-        
-        def get_controller(self)->Controller4LLM.FileLinkContentController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.FileLinkContentController(store,self)
+        def get_controller(self):return self._controller
+
     class BinaryFileContent(AbstractContent):
+        _controller_class:type = Controller4LLM.BinaryFileContentController
         _controller: Controller4LLM.BinaryFileContentController = None
-        
-        def get_controller(self)->Controller4LLM.BinaryFileContentController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.BinaryFileContentController(store,self)
+        def get_controller(self):return self._controller
+
             
     class ImageContent(BinaryFileContent):
+        _controller_class:type = Controller4LLM.ImageContentController
         _controller: Controller4LLM.ImageContentController = None
-        
-        def get_controller(self)->Controller4LLM.ImageContentController: return self._controller
-        def init_controller(self,store):self._controller = Controller4LLM.ImageContentController(store,self)
+        def get_controller(self):return self._controller
+
 
 class LLMstore(BasicStore):    
     

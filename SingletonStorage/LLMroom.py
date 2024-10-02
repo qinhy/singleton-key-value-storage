@@ -268,15 +268,14 @@ class ChatRoom:
         for i,v in enumerate(msgs):
             print(f'{intents}-------------------------------------------------------------')
             if 'ContentGroup' not in v.__class__.__name__:
-                v:Model4LLM.AbstractContent = v
                 if 'EmbeddingContent' in v.__class__.__name__:
-                    v:Model4LLM.EmbeddingContent = v
-                    econtroller = v.get_controller()
+                    ec:Model4LLM.EmbeddingContent = v
+                    econtroller = ec.get_controller()
                     t = econtroller.get_target().get_controller().get_data_raw()[:10]
                     print(f'{intents}{self.speakers[econtroller.get_target().author_id].name}: "{t}"=>{econtroller.get_data_raw()[:5]}...')
                 elif 'ImageContent' in v.__class__.__name__:
-                    v:Model4LLM.ImageContent = v
-                    im = v.get_controller().get_image()
+                    ic:Model4LLM.ImageContent = v
+                    im = ic.get_controller().get_image()
                     print(f'{intents}{self.speakers[v.author_id].name}: Image{im.size} of {im.info}')
                 else:
                     print(f'{intents}{self.speakers[v.author_id].name}: {v.get_controller().get_data_raw()}')
