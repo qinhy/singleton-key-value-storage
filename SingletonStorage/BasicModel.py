@@ -21,6 +21,8 @@ class Controller4Basic:
         def __init__(self, store, model):
             self.model:Model4Basic.AbstractObj = model
             self._store:BasicStore = store
+        
+        def storage(self):return self._store
 
         def update(self, **kwargs):
             assert  self.model is not None, 'controller has null model!'
@@ -36,11 +38,11 @@ class Controller4Basic:
             
         def store(self):
             assert self.model._id is not None
-            self._store.set(self.model._id,self.model.model_dump_json_dict())
+            self.storage().set(self.model._id,self.model.model_dump_json_dict())
             return self
 
         def delete(self):
-            self._store.delete(self.model.get_id())
+            self.storage().delete(self.model.get_id())
             self.model._controller = None
 
         def update_metadata(self, key, value):
