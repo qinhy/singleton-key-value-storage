@@ -5,8 +5,10 @@ import unittest
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
-
-from .Storages import SingletonKeyValueStorage
+try:
+    from .Storages import SingletonKeyValueStorage
+except Exception as e:
+    from Storages import SingletonKeyValueStorage
 
 def now_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
@@ -73,13 +75,10 @@ class Controller4Basic:
                     continue
                 child: Model4Basic.AbstractObj = self.storage().find(child_id)
                 if hasattr(child, 'parent_id') and hasattr(child, 'children_id'):
-                    # If the child is a group, retrieve its children recursively.
                     group:Controller4Basic.AbstractGroupController = child.get_controller()
                     children_list.append(group.get_children_recursive())
                 else:
-                    # If the child has no children, just append the child itself.
-                    children_list.append(child)
-            
+                    children_list.append(child)            
             return children_list
 
         def get_children(self):
@@ -91,6 +90,18 @@ class Controller4Basic:
         
         def add_child(self, child_id: str):
             return self.update(children_id= self.model.children_id + [child_id])
+
+        def delete_child(self, child_id:str):
+            if child_id not in self.model.children_id:return self
+            remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
+            child_con = self.storage().find(child_id).get_controller()
+            if hasattr(child_con, 'delete_recursive'):
+                child_con:Controller4Basic.AbstractGroupController = child_con
+                child_con.delete_recursive()
+            else:
+                child_con.delete()
+            self.update(children_id = remaining_ids)
+            return self
 
 class Model4Basic:
     class AbstractObj(BaseModel):
@@ -256,3 +267,10 @@ class Tests(unittest.TestCase):
         self.assertEqual(children[1][0].model_dump_json_dict(),
                          obj2.model_dump_json_dict(),
                          "The retrieved second child value should match the child value.")
+        
+        group.get_controller().delete_child(group2_id)
+        self.assertEqual(group.get_controller().get_children()[0].model_dump_json_dict(),
+                         obj.model_dump_json_dict(),
+                         "The retrieved value should match the child value.")
+
+Tests().test_all()
