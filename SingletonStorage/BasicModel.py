@@ -31,6 +31,7 @@ class Controller4Basic:
                     setattr(self.model, key, value)
             self._update_timestamp()
             self.store()
+            return self
 
         def _update_timestamp(self):
             assert self.model is not None, 'controller has null model!'
