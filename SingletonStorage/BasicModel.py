@@ -71,10 +71,10 @@ class Model4Basic:
             return self._id
         
         model_config = ConfigDict(arbitrary_types_allowed=True)    
+        _controller_class:type = Controller4Basic.AbstractObjController
         _controller: Controller4Basic.AbstractObjController = None
-        def get_controller(self)->Controller4Basic.AbstractObjController: return self._controller
-        def init_controller(self,store):self._controller = Controller4Basic.AbstractObjController(store,self)
-
+        def get_controller(self): return self._controller
+        def init_controller(self,store):self._controller = self._controller_class(store,self)
 class BasicStore(SingletonKeyValueStorage):
     
     def __init__(self, version_controll=False) -> None:
