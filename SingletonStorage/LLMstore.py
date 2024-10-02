@@ -2,15 +2,9 @@
 import base64
 from datetime import datetime
 import io
-import json
-import os
 from PIL import Image
-from typing import Any, List
-from uuid import uuid4
+from typing import List
 from zoneinfo import ZoneInfo
-from pydantic import BaseModel, ConfigDict, Field
-
-from .Storages import SingletonKeyValueStorage
 from .BasicModel import BasicStore, Controller4Basic, Model4Basic
 
 def get_current_datetime_with_utc():
@@ -37,20 +31,20 @@ class Controller4LLM:
 
         def delete(self):
             self.get_data().get_controller().delete()        
-            # self._store.delete_obj(self.model)        
-            self._store.delete(self.model.get_id())
+            # self.storage().delete_obj(self.model)        
+            self.storage().delete(self.model.get_id())
             self.model._controller = None
 
         def get_author(self):
-            author:Model4LLM.Author = self._store.find(self.model.author_id)
+            author:Model4LLM.Author = self.storage().find(self.model.author_id)
             return author
 
         def get_group(self):
-            res:Model4LLM.ContentGroup = self._store.find(self.model.group_id)
+            res:Model4LLM.ContentGroup = self.storage().find(self.model.group_id)
             return res
         
         def get_data(self):
-            res:Model4LLM.CommonData = self._store.find(self.model.data_id())
+            res:Model4LLM.CommonData = self.storage().find(self.model.data_id())
             return res
 
         def get_data_raw(self):
@@ -72,9 +66,9 @@ class Controller4LLM:
 
         def yield_children_content_recursive(self, depth: int = 0):
             for child_id in self.model.children_id:
-                if not self._store.exists(child_id):
+                if not self.storage().exists(child_id):
                     continue
-                content:Model4LLM.AbstractObj = self._store.find(child_id)
+                content:Model4LLM.AbstractObj = self.storage().find(child_id)
                 yield content, depth
                 if child_id.startswith('ContentGroup'):
                     group:Controller4LLM.AbstractGroupController = content._controller
@@ -91,11 +85,11 @@ class Controller4LLM:
             assert  self.model is not None, 'controller has null model!'
             results:List[Model4LLM.AbstractObj] = []
             for child_id in self.model.children_id:
-                results.append(self._store.find(child_id))
+                results.append(self.storage().find(child_id))
             return results
 
         def get_child_content(self, child_id: str):
-            res:Model4LLM.AbstractContent = self._store.find(child_id)
+            res:Model4LLM.AbstractContent = self.storage().find(child_id)
             return res
 
         def prints(self):
@@ -110,23 +104,25 @@ class Controller4LLM:
         def __init__(self, store, model):
             self.model:Model4LLM.ContentGroup = model
             self._store:LLMstore = store
+        
+        def storage(self):return self._store
 
         def add_new_child_group(self,metadata={},rank=[0]):
-            parent,child = self._store.add_new_group_to_group(group=self.model,metadata=metadata,rank=rank)
+            parent,child = self.storage().add_new_group_to_group(group=self.model,metadata=metadata,rank=rank)
             return child
 
         def add_new_text_content(self, author_id:str, text:str):
-            parent,child = self._store.add_new_text_to_group(group=self.model,author_id=author_id,
+            parent,child = self.storage().add_new_text_to_group(group=self.model,author_id=author_id,
                                                     text=text)                             
             return child
         
         def add_new_embeding_content(self, author_id:str, content_id:str, vec:list[float]):
-            parent,child = self._store.add_new_embedding_to_group(group=self.model,author_id=author_id,
+            parent,child = self.storage().add_new_embedding_to_group(group=self.model,author_id=author_id,
                                                         content_id=content_id, vec=vec)                                   
             return child
         
         def add_new_image_content(self,author_id:str, filepath:str):
-            parent,child = self._store.add_new_image_to_group(group=self.model,author_id=author_id,
+            parent,child = self.storage().add_new_image_to_group(group=self.model,author_id=author_id,
                                                     filepath=filepath)                              
             return child
             
@@ -175,7 +171,7 @@ class Controller4LLM:
         def get_target(self):
             assert  self.model is not None, 'controller has null model!'
             target_id = self.model.target_id
-            res:Model4LLM.AbstractContent = self._store.find(target_id)
+            res:Model4LLM.AbstractContent = self.storage().find(target_id)
             return res
         
         def update_data_raw(self, embedding: list[float]):
