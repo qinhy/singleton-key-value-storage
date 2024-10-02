@@ -132,9 +132,10 @@ class Controller4LLM:
             for content in self.get_children_content():
                 if content.get_controller().model.get_id() == child_id:
                     if child_id.startswith('ContentGroup'):
-                        group:Controller4LLM.ContentGroupController = content._controller
+                        group:Controller4LLM.ContentGroupController = content.get_controller()
                         group.delete_recursive_from_keyValue_storage()
-                    content.get_controller().delete()
+                    else:
+                        content.get_controller().delete()
                     break
             self.update(children_id = remaining_ids)
             return self
@@ -240,72 +241,66 @@ class Controller4LLM:
             return self.get_data_rLOD(lod=2)
     
 class Model4LLM:
-    class AbstractObj(Model4Basic.AbstractObj):
-        pass
+    class AbstractObj(Model4Basic.AbstractObj):        
+        def _get_controller_class(self,modelclass=Controller4LLM):
+            class_type = self.__class__.__name__+'Controller'
+            res = {c.__name__:c for c in [i for k,i in modelclass.__dict__.items() if '_' not in k]}
+            res = res.get(class_type, None)
+            if res is None: raise ValueError(f'No such class of {class_type}')
+            return res
 
     class CommonData(AbstractObj):
         raw: str = ''
         rLOD0: str = ''
         rLOD1: str = ''
         rLOD2: str = ''
-        _controller_class:type = Controller4LLM.CommonDataController
         _controller: Controller4LLM.CommonDataController = None
         def get_controller(self):return self._controller
 
     class Author(AbstractObj):
         name: str = ''
         role: str = ''
-        _controller_class:type = Controller4LLM.AuthorController
         _controller: Controller4LLM.AuthorController = None
         def get_controller(self):return self._controller
 
     class AbstractContent(AbstractObj):
         author_id: str=''
         group_id: str=''
-        _controller_class:type = Controller4LLM.AbstractContentController
         _controller: Controller4LLM.AbstractContentController = None
         def get_controller(self):return self._controller
-
-
         def data_id(self):return f"CommonData:{self.get_id()}"
+        
     class AbstractGroup(AbstractObj):
         author_id: str=''
         parent_id: str = ''
         children_id: List[str] = []
-        _controller_class:type = Controller4LLM.AbstractGroupController
         _controller: Controller4LLM.AbstractGroupController = None
         def get_controller(self):return self._controller
 
     class ContentGroup(AbstractGroup):
-        _controller_class:type = Controller4LLM.ContentGroupController
         _controller: Controller4LLM.ContentGroupController = None
         def get_controller(self):return self._controller
 
     class TextContent(AbstractContent):
-        _controller_class:type = Controller4LLM.TextContentController
         _controller: Controller4LLM.TextContentController = None
         def get_controller(self):return self._controller
 
 
     class EmbeddingContent(AbstractContent):
         target_id: str
-        _controller_class:type = Controller4LLM.EmbeddingContentController
         _controller: Controller4LLM.EmbeddingContentController = None
         def get_controller(self):return self._controller
         
     class FileLinkContent(AbstractContent):
-        _controller_class:type = Controller4LLM.FileLinkContentController
         _controller: Controller4LLM.FileLinkContentController = None
         def get_controller(self):return self._controller
 
     class BinaryFileContent(AbstractContent):
-        _controller_class:type = Controller4LLM.BinaryFileContentController
         _controller: Controller4LLM.BinaryFileContentController = None
         def get_controller(self):return self._controller
 
             
     class ImageContent(BinaryFileContent):
-        _controller_class:type = Controller4LLM.ImageContentController
         _controller: Controller4LLM.ImageContentController = None
         def get_controller(self):return self._controller
 

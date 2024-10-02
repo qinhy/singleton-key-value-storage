@@ -53,15 +53,13 @@ try:
         def roomdelmsg(msgid,cr:ChatRoom=cr):
             try:
                 if str(msgid).isdecimal() and int(msgid)>0:
-                    for m in cr.chatroom().get_controller().get_children_content()[-int(msgid):]:
-                        cr.chatroom().get_controller().remove_child(m.get_id())
-                    cr.store.dump(json)
-                    return True,chat(None,'')
-                
-                for msgid in msgid.split('\n'):
-                    cr.chatroom().get_controller().remove_child(msgid)
+                    for i in range(int(msgid)):
+                        cr.delete_last_msg()
+                else:
+                    for msgid in str(msgid).split('\n'):
+                        cr.chatroom().get_controller().remove_child(msgid)
+                          
                 cr.store.dump(json)
-                
                 return True,chat(None,'')
             except Exception as e:
                 return f'{e}',chat(None,'')

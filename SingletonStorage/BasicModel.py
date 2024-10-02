@@ -70,8 +70,7 @@ class Model4Basic:
             assert self._id is not None, 'this obj is not setted!'
             return self._id
         
-        model_config = ConfigDict(arbitrary_types_allowed=True)    
-        _controller_class:type = Controller4Basic.AbstractObjController
+        model_config = ConfigDict(arbitrary_types_allowed=True)
         _controller: Controller4Basic.AbstractObjController = None
         def _get_controller_class(self,modelclass=Controller4Basic):
             class_type = self.__class__.__name__+'Controller'

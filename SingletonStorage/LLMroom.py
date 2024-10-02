@@ -125,6 +125,10 @@ class ChatRoom:
             else:
                 yield element
 
+    def delete_last_msg(self):
+        child_id = self.chatroom().children_id[-1]
+        self.chatroom().get_controller().remove_child(child_id)
+
     def clean(self):
         for m in self.traverse_nested_messages():
             mid = m.get_id()
@@ -266,6 +270,7 @@ class ChatRoom:
         print(f'{intents}#############################################################')
         
         for i,v in enumerate(msgs):
+            if v is None:continue
             print(f'{intents}-------------------------------------------------------------')
             if 'ContentGroup' not in v.__class__.__name__:
                 if 'EmbeddingContent' in v.__class__.__name__:
