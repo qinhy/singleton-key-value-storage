@@ -5,8 +5,10 @@ import unittest
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
-
-from .Storages import SingletonKeyValueStorage
+try:
+    from .Storages import SingletonKeyValueStorage
+except Exception as e:
+    from Storages import SingletonKeyValueStorage
 
 def now_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
@@ -46,6 +48,61 @@ class Controller4Basic:
             self.update(metadata = updated_metadata)
             return self
         
+    class AbstractGroupController(AbstractObjController):
+        def __init__(self, store, model):
+            self.model: Model4Basic.AbstractGroup = model
+            self._store: BasicStore = store
+
+        def yield_children_recursive(self, depth: int = 0):
+            for child_id in self.model.children_id:
+                if not self.storage().exists(child_id):
+                    continue
+                child: Model4Basic.AbstractObj = self.storage().find(child_id)
+                if hasattr(child, 'parent_id') and hasattr(child, 'children_id'):
+                    group:Controller4Basic.AbstractGroupController = child.get_controller()
+                    yield from group.yield_children_recursive(depth + 1)
+                yield child, depth
+
+        def delete_recursive(self):
+            for child, _ in self.yield_children_recursive():
+                child.get_controller().delete()
+            self.delete()
+
+        def get_children_recursive(self):
+            children_list = []
+            for child_id in self.model.children_id:
+                if not self.storage().exists(child_id):
+                    continue
+                child: Model4Basic.AbstractObj = self.storage().find(child_id)
+                if hasattr(child, 'parent_id') and hasattr(child, 'children_id'):
+                    group:Controller4Basic.AbstractGroupController = child.get_controller()
+                    children_list.append(group.get_children_recursive())
+                else:
+                    children_list.append(child)            
+            return children_list
+
+        def get_children(self):
+            assert self.model is not None, 'Controller has a null model!'
+            return [self.storage().find(child_id) for child_id in self.model.children_id]
+
+        def get_child(self, child_id: str):
+            return self.storage().find(child_id)
+        
+        def add_child(self, child_id: str):
+            return self.update(children_id= self.model.children_id + [child_id])
+
+        def delete_child(self, child_id:str):
+            if child_id not in self.model.children_id:return self
+            remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
+            child_con = self.storage().find(child_id).get_controller()
+            if hasattr(child_con, 'delete_recursive'):
+                child_con:Controller4Basic.AbstractGroupController = child_con
+                child_con.delete_recursive()
+            else:
+                child_con.delete()
+            self.update(children_id = remaining_ids)
+            return self
+
 class Model4Basic:
     class AbstractObj(BaseModel):
         _id: str=None
@@ -81,6 +138,13 @@ class Model4Basic:
             return res
         def get_controller(self): return self._controller
         def init_controller(self,store):self._controller = self._get_controller_class()(store,self)
+
+    class AbstractGroup(AbstractObj):
+        author_id: str=''
+        parent_id: str = ''
+        children_id: list[str] = []
+        _controller: Controller4Basic.AbstractGroupController = None
+        def get_controller(self):return self._controller
 class BasicStore(SingletonKeyValueStorage):
     
     def __init__(self, version_controll=False) -> None:
@@ -108,7 +172,10 @@ class BasicStore(SingletonKeyValueStorage):
         if obj._id is not None: raise ValueError(f'obj._id is {obj._id}, must be none')
         return self._add_new_obj(obj,id)
     
-    # available for regx?
+    def add_new_group(self, obj:Model4Basic.AbstractGroup, id:str=None)->Model4Basic.AbstractGroup:        
+        if obj._id is not None: raise ValueError(f'obj._id is {obj._id}, must be none')
+        return self._add_new_obj(obj,id)
+    
     def find(self,id:str) -> Model4Basic.AbstractObj:
         raw = self.get(id)
         if raw is None:return None
@@ -134,11 +201,11 @@ class Tests(unittest.TestCase):
         self.store.clean()
         self.test_add_and_get()
         self.test_find_all()
-        # self.test_exists()
         self.test_delete()
         self.test_get_nonexistent()
         self.test_dump_and_load()
-        # self.test_slaves()
+        self.test_group()
+        self.store.clean()
 
     def test_get_nonexistent(self):
         self.assertEqual(self.store.find('nonexistent'), None, "Getting a non-existent key should return None.")
@@ -167,3 +234,43 @@ class Tests(unittest.TestCase):
         obj = self.store.find_all()[0]
         obj.get_controller().delete()
         self.assertFalse(self.store.exists(obj.get_id()), "Key should not exist after being deleted.")
+        
+    def test_group(self):
+        self.store.clean()
+        obj = self.store.add_new_obj(Model4Basic.AbstractObj())
+        group = self.store.add_new_group(Model4Basic.AbstractGroup())
+        group.get_controller().add_child(obj.get_id())
+        self.assertEqual(group.get_controller().get_child(group.children_id[0]).model_dump_json_dict(),
+                         obj.model_dump_json_dict(),
+                         "The retrieved value should match the child value.")
+        
+        group2_id = self.store.add_new_group(Model4Basic.AbstractGroup()).get_id()
+        group.get_controller().add_child(group2_id)
+        obj2 = self.store.add_new_obj(Model4Basic.AbstractObj())
+
+        group.get_controller().get_child(group2_id).get_controller().add_child(obj2.get_id())
+        group2 = self.store.find(group2_id)
+        
+        self.assertTrue(all([x.model_dump_json_dict()==y.model_dump_json_dict() for x,y in zip(
+                                                group.get_controller().get_children(),[obj,group2])]),
+                         "check get_children.")
+        
+        children = group.get_controller().get_children_recursive()
+        
+        self.assertEqual(children[0].model_dump_json_dict(),
+                         obj.model_dump_json_dict(),
+                         "The retrieved first value should match the child value.")
+        
+        self.assertEqual(type(children[1]),list,
+                         "The retrieved second value should list.")
+        
+        self.assertEqual(children[1][0].model_dump_json_dict(),
+                         obj2.model_dump_json_dict(),
+                         "The retrieved second child value should match the child value.")
+        
+        group.get_controller().delete_child(group2_id)
+        self.assertEqual(group.get_controller().get_children()[0].model_dump_json_dict(),
+                         obj.model_dump_json_dict(),
+                         "The retrieved value should match the child value.")
+
+Tests().test_all()
