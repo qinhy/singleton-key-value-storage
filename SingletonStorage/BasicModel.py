@@ -165,7 +165,6 @@ class BasicStore(SingletonKeyValueStorage):
         if obj._id is not None: raise ValueError(f'obj._id is {obj._id}, must be none')
         return self._add_new_obj(obj,id)
     
-    # available for regx?
     def find(self,id:str) -> Model4Basic.AbstractObj:
         raw = self.get(id)
         if raw is None:return None
