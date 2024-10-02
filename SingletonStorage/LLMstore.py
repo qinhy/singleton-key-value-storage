@@ -30,10 +30,9 @@ class Controller4LLM:
             self._store:LLMstore = store
 
         def delete(self):
-            self.get_data().get_controller().delete()        
-            # self.storage().delete_obj(self.model)        
-            self.storage().delete(self.model.get_id())
-            self.model._controller = None
+            self.get_data().get_controller().delete()
+            # self.storage().delete_obj(self.model)
+            super().delete()
 
         def get_author(self):
             author:Model4LLM.Author = self.storage().find(self.model.author_id)
@@ -56,8 +55,7 @@ class Controller4LLM:
 
         def append_data_raw(self, msg: str):
             data = self.get_data()
-            data.get_controller().update(raw = data.raw + msg)
-            return self
+            return self.update_data_raw(data.raw + msg)
         
     class AbstractGroupController(AbstractObjController):
         def __init__(self, store, model):
