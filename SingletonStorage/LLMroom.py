@@ -109,12 +109,12 @@ class ChatRoom:
     
     def get_messages_in_group(self,id=None)->List[Model4LLM.AbstractContent]:
         if id is None:
-            return self.chatroom().get_controller().get_children_content()
+            return self.chatroom().get_controller().get_children()
         else:
-            return self.store.find_group(id).get_controller().get_children_content()
+            return self.store.find_group(id).get_controller().get_children()
     
     def get_messages_recursive_in_chatroom(self):
-        return self.chatroom().get_controller().get_children_content_recursive()
+        return self.chatroom().get_controller().get_children_recursive()
     
     def traverse_nested_messages(self, nested_content_list=None):
         if nested_content_list is None:nested_content_list=self.get_messages_recursive_in_chatroom()
@@ -127,7 +127,7 @@ class ChatRoom:
 
     def delete_last_msg(self):
         child_id = self.chatroom().children_id[-1]
-        self.chatroom().get_controller().remove_child(child_id)
+        self.chatroom().get_controller().delete_child(child_id)
 
     def clean(self):
         for m in self.traverse_nested_messages():

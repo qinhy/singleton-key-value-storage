@@ -57,7 +57,7 @@ try:
                         cr.delete_last_msg()
                 else:
                     for msgid in str(msgid).split('\n'):
-                        cr.chatroom().get_controller().remove_child(msgid)
+                        cr.chatroom().get_controller().delete_child(msgid)
                           
                 cr.store.dump(json)
                 return True,chat(None,'')
@@ -68,7 +68,7 @@ try:
             try:
                 for msgid in msgid.split('\n'):
                     gc = cr.chatroom().get_controller()
-                    c = gc.get_child_content(msgid)
+                    c = gc.get_child(msgid)
                     if type(c) is Model4LLM.TextContent:
                         return chat(c.get_controller().get_author().get_id(),c.get_controller().get_data_raw())
             except Exception as e:

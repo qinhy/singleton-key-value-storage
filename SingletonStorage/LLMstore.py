@@ -53,42 +53,42 @@ class Controller4LLM:
             data = self.get_data()
             return self.update_data_raw(data.raw + msg)
         
-    class AbstractGroupController(AbstractObjController):
-        def __init__(self, store, model):
-            self.model:Model4LLM.AbstractGroup = model
-            self._store:LLMstore = store
+    class AbstractGroupController(Controller4Basic.AbstractGroupController):
+        # def __init__(self, store, model):
+        #     self.model:Model4LLM.AbstractGroup = model
+        #     self._store:LLMstore = store
 
-        def yield_children_content_recursive(self, depth: int = 0):
-            for child_id in self.model.children_id:
-                if not self.storage().exists(child_id):
-                    continue
-                content:Model4LLM.AbstractObj = self.storage().find(child_id)
-                yield content, depth
-                if child_id.startswith('ContentGroup'):
-                    group:Controller4LLM.AbstractGroupController = content._controller
-                    for cc, d in group.yield_children_content_recursive(depth + 1):
-                        yield cc, d
+        # def yield_children_recursive(self, depth: int = 0):
+        #     for child_id in self.model.children_id:
+        #         if not self.storage().exists(child_id):
+        #             continue
+        #         content:Model4LLM.AbstractObj = self.storage().find(child_id)
+        #         yield content, depth
+        #         if child_id.startswith('ContentGroup'):
+        #             group:Controller4LLM.AbstractGroupController = content._controller
+        #             for cc, d in group.yield_children_recursive(depth + 1):
+        #                 yield cc, d
 
-        def delete_recursive_from_keyValue_storage(self):
-            for c, d in self.yield_children_content_recursive():
-                c.get_controller().delete()
-            self.delete()
+        # def delete_recursive(self):
+        #     for c, d in self.yield_children_recursive():
+        #         c.get_controller().delete()
+        #     self.delete()
 
-        def get_children_content(self):
-            # self.load()
-            assert  self.model is not None, 'controller has null model!'
-            results:List[Model4LLM.AbstractObj] = []
-            for child_id in self.model.children_id:
-                results.append(self.storage().find(child_id))
-            return results
+        # def get_children(self):
+        #     # self.load()
+        #     assert  self.model is not None, 'controller has null model!'
+        #     results:List[Model4LLM.AbstractObj] = []
+        #     for child_id in self.model.children_id:
+        #         results.append(self.storage().find(child_id))
+        #     return results
 
-        def get_child_content(self, child_id: str):
-            res:Model4LLM.AbstractContent = self.storage().find(child_id)
-            return res
+        # def get_child(self, child_id: str):
+        #     res:Model4LLM.AbstractContent = self.storage().find(child_id)
+        #     return res
 
         def prints(self):
             res = '########################################################\n'
-            for content, depth in self.yield_children_content_recursive():
+            for content, depth in self.yield_children_recursive():
                 res += f"{'    ' * depth}{content.get_id()}\n"
             res += '########################################################\n'
             print(res)
@@ -121,24 +121,24 @@ class Controller4LLM:
             return child
             
 
-        def remove_child(self, child_id:str):
-            remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
-            for content in self.get_children_content():
-                if content.get_controller().model.get_id() == child_id:
-                    if child_id.startswith('ContentGroup'):
-                        group:Controller4LLM.ContentGroupController = content.get_controller()
-                        group.delete_recursive_from_keyValue_storage()
-                    else:
-                        content.get_controller().delete()
-                    break
-            self.update(children_id = remaining_ids)
-            return self
+        # def delete_child(self, child_id:str):
+        #     remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
+        #     for content in self.get_children():
+        #         if content.get_controller().model.get_id() == child_id:
+        #             if child_id.startswith('ContentGroup'):
+        #                 group:Controller4LLM.ContentGroupController = content.get_controller()
+        #                 group.delete_recursive()
+        #             else:
+        #                 content.get_controller().delete()
+        #             break
+        #     self.update(children_id = remaining_ids)
+        #     return self
 
-        def get_children_content_recursive(self):
-            results:list[Model4LLM.AbstractContent] = []
-            for c, d in self.yield_children_content_recursive():
-                results.append(c)
-            return results
+        # def get_children_recursive(self):
+        #     results:list[Model4LLM.AbstractContent] = []
+        #     for c, d in self.yield_children_recursive():
+        #         results.append(c)
+        #     return results
 
     class TextContentController(AbstractContentController):
         pass
@@ -230,7 +230,7 @@ class Controller4LLM:
             return self.get_data_rLOD(lod=2)
     
 class Model4LLM:
-    class AbstractObj(Model4Basic.AbstractObj):        
+    class AbstractObj(Model4Basic.AbstractObj):
         def _get_controller_class(self,modelclass=Controller4LLM):
             class_type = self.__class__.__name__+'Controller'
             res = {c.__name__:c for c in [i for k,i in modelclass.__dict__.items() if '_' not in k]}
@@ -238,6 +238,17 @@ class Model4LLM:
             if res is None: raise ValueError(f'No such class of {class_type}')
             return res
 
+    class AbstractGroup(Model4Basic.AbstractGroup):
+        _controller: Controller4LLM.AbstractGroupController = None
+        def get_controller(self):return self._controller
+
+        def _get_controller_class(self,modelclass=Controller4LLM):
+            class_type = self.__class__.__name__+'Controller'
+            res = {c.__name__:c for c in [i for k,i in modelclass.__dict__.items() if '_' not in k]}
+            res = res.get(class_type, None)
+            if res is None: raise ValueError(f'No such class of {class_type}')
+            return res
+        
     class CommonData(AbstractObj):
         raw: str = ''
         rLOD0: str = ''
@@ -259,13 +270,6 @@ class Model4LLM:
         def get_controller(self):return self._controller
         def data_id(self):return f"CommonData:{self.get_id()}"
         
-    class AbstractGroup(AbstractObj):
-        author_id: str=''
-        parent_id: str = ''
-        children_id: List[str] = []
-        _controller: Controller4LLM.AbstractGroupController = None
-        def get_controller(self):return self._controller
-
     class ContentGroup(AbstractGroup):
         _controller: Controller4LLM.ContentGroupController = None
         def get_controller(self):return self._controller
@@ -287,7 +291,6 @@ class Model4LLM:
         _controller: Controller4LLM.BinaryFileContentController = None
         def get_controller(self):return self._controller
 
-            
     class ImageContent(BinaryFileContent):
         _controller: Controller4LLM.ImageContentController = None
         def get_controller(self):return self._controller
