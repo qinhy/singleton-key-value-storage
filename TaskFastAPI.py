@@ -1,14 +1,23 @@
 import json
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
-from TaskModel import ExmpalePowerFunction, ExmpalePrintFunction, TaskStore, Model4Task
+from fastapi import FastAPI
+from testexample import *
 # from TaskModel
 
 app = FastAPI()
 task_manager = TaskStore()
-task_manager.add_new_function(ExmpalePowerFunction())
-task_manager.add_new_function(ExmpalePrintFunction())
+task_manager.add_new_function(ExamplePrintFunction())
+task_manager.add_new_function(ExamplePowerFunction())
+task_manager.add_new_function(ExampleInfinityLoopFunction())
+task_manager.add_new_function(ExampleRaiseError())
+task_manager.add_new_function(ExampleFibonacciFunction())
+
+
+w = task_manager.add_new_worker()
+w = task_manager.add_new_worker()
+w = task_manager.add_new_worker()
+task_manager.add_new_task(ExampleFibonacciFunction(),dict(n=36))
+task_manager.add_new_task(ExampleFibonacciFunction(),dict(n=36))
+task_manager.add_new_task(ExampleFibonacciFunction(),dict(n=36))
 
 @app.get("/tasks/{name}/{kwargs}",description='you can try /tasks/ExmpalePrintFunction/{"msg":"hello"} or /tasks/ExmpalePowerFunction/{"a":3,"b":4}')
 def add_new_task(name:str,kwargs_json:str):
@@ -49,7 +58,7 @@ def function_list():
 
 @app.get("/workers/")
 def get_workers():
-    return task_manager.get_workers()
+    return task_manager.worker_list()
 
 @app.get("/workers/stop/")
 def stop_workers():
