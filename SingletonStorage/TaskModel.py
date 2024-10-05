@@ -202,12 +202,22 @@ class Model4Task:
         def get_controller(self)->Controller4Task.WorkerController: return self._controller
 
     class Function(AbstractObj):
+
+        def param_descriptions(description,**descriptions):
+            def decorator(func):
+                func:Model4Task.Function = func
+                func._parameters_description = descriptions
+                func._description = description
+                return func
+            return decorator
+
         class Parameter(BaseModel):
             type: str
             description: str            
 
         name: str = 'null'
-        description: str = None
+        description: str = 'null'
+        _description: str = 'null'
         # arguments: Dict[str, Any] = None
         _properties: Dict[str, Parameter] = {}
         parameters: Dict[str, Any] = {"type": "object",'properties':_properties}
@@ -215,9 +225,18 @@ class Model4Task:
         _parameters_description: Dict[str, str] = {}
         _string_arguments: str='\{\}'
 
+        def __init__(self, *args, **kwargs):
+            # super(self.__class__, self).__init__(*args, **kwargs)
+            super().__init__(*args, **kwargs)
+            self._extract_signature()
+
         def _extract_signature(self):
             self.name=self.__class__.__name__
             sig = inspect.signature(self.__call__)
+            try:
+                self.__call__()
+            except Exception as e:
+                pass
             # Map Python types to more generic strings
             type_map = {
                 int: "integer",float: "number",
@@ -233,6 +252,7 @@ class Model4Task:
                 if param.default is inspect._empty:
                     self.required.append(name)
             self.parameters['properties']=self._properties
+            self.description = self._description
 
         def __call__(self):
             print('this is root class , not implement')
