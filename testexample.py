@@ -64,11 +64,11 @@ def test(ts:TaskStore):
     # ts.stop_workers()
     return ts
 
-ts = TaskStore()
-# ts.redis_backend()
-ts.print_tasks()
+# ts = TaskStore()
+# # ts.redis_backend()
+# ts.print_tasks()
 
-ts = test(TaskStore())
-# ts.print_workers()
-ts.print_tasks()
-# ts.clean()
+# ts = test(TaskStore())
+# # ts.print_workers()
+# ts.print_tasks()
+# # ts.clean()

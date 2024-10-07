@@ -255,10 +255,10 @@ class Model4Task:
         def _extract_signature(self):
             self.name=self.__class__.__name__
             sig = inspect.signature(self.__call__)
-            try:
-                self.__call__()
-            except Exception as e:
-                pass
+            # try:
+            #     self.__call__()
+            # except Exception as e:
+            #     pass
             # Map Python types to more generic strings
             type_map = {
                 int: "integer",float: "number",
@@ -304,11 +304,14 @@ class TaskStore(BasicStore):
         if res is None: raise ValueError(f'No such class of {class_type}')
         return res
     
-    def _get_rand_worker(self):
+    def _get_rand_worker(self,worker_id:str=None):
         # return self._task_queue
         ws = self.worker_list()
         if len(ws)==0:return None
-        worker = random.choice(self.worker_list())
+        if worker_id is None:
+            worker = random.choice(self.worker_list())
+        else:
+            worker = self.find_worker(worker_id)
         return worker.get_controller()
     
     def loads(self, json_str):
@@ -334,7 +337,7 @@ class TaskStore(BasicStore):
         if w is None:raise ValueError('No active worker')
         return w.put_task(task.get_id())
 
-    def add_new_task(self, function_obj, kwargs={}, rank=[0], metadata={}, id:str=None) -> Model4Task.Task:
+    def add_new_task(self, function_obj, kwargs={}, rank=[0], metadata={}, id:str=None, worker_id:str=None) -> Model4Task.Task:
         if type(function_obj) is not str:
             function_name = function_obj.__class__.__name__
             if not self.exists(function_name):self.add_new_function(function_obj)
@@ -342,7 +345,7 @@ class TaskStore(BasicStore):
             function_name = function_obj
         task = self._add_new_obj(Model4Task.Task(name=function_name, 
                                                  kwargs=kwargs, rank=rank, metadata=metadata),id)
-        w = self._get_rand_worker()
+        w = self._get_rand_worker(worker_id)
         if w is None:raise ValueError('No active worker')
         return w.put_task(task.get_id())
     
