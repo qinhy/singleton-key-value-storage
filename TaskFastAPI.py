@@ -23,10 +23,10 @@ task_manager.add_new_task(ExampleFibonacciFunction(),dict(n=36))
 def add_new_task(name:str,kwargs_json:str):
     return task_manager.add_new_task(name, json.loads(kwargs_json))
 
-@app.get("/workers/new")
-def add_new_worker():
-    task_manager.add_new_worker()
-    return task_manager.task_list()
+# @app.get("/workers/new")
+# def add_new_worker():
+#     task_manager.add_new_worker()
+#     return task_manager.task_list()
 
 # @app.post("/functions/")
 # def add_new_function(function: Model4Task.Function):
