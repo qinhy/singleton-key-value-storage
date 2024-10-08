@@ -3,3 +3,4 @@ test.json
 /build
 /__pycache__
 /.vscode
+SingletonStorage/sqlite.db
