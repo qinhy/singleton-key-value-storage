@@ -214,7 +214,7 @@ if sqlite_back:
         DUMP_FILE='dump_db_file'
         LOAD_FILE='load_db_file'
                
-        def __new__(cls):
+        def __new__(cls,mode='sqlite.db'):
             if cls._instance is None:
                 cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                        
                 cls._instance.uuid = uuid.uuid4()
@@ -223,14 +223,14 @@ if sqlite_back:
                 cls._instance.query_queue = queue.Queue()
                 cls._instance.result_dict = {}
                 cls._instance.lock = threading.Lock()
-                cls._instance.worker_thread = threading.Thread(target=cls._instance._process_queries)
+                cls._instance.worker_thread = threading.Thread(target=cls._instance._process_queries,args=(mode,))
                 cls._instance.worker_thread.daemon = True
                 cls._instance.should_stop = threading.Event()  # Use an event to signal the thread to stop
                 cls._instance.worker_thread.start()
                 cls._instance._execute_query("CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)")
             return cls._instance
 
-        def __init__(self):
+        def __init__(self,mode='sqlite.db'):
             self.uuid:str = self.uuid
             self.client:sqlite3.Connection = self.client
             self.query_queue:queue.Queue = self.query_queue 
@@ -239,8 +239,8 @@ if sqlite_back:
             self.worker_thread:threading.Thread = self.worker_thread 
             self.should_stop:threading.Event = self.should_stop
             
-        def _process_queries(self):
-            self.client = sqlite3.connect(':memory:')
+        def _process_queries(self,mode=':memory:'):
+            self.client = sqlite3.connect(mode)
 
             while not self.should_stop.is_set():  # Check if the thread should stop
                 try:
@@ -345,9 +345,12 @@ if sqlite_back:
         def __init__(self, model: SingletonSqliteStorage):
             self.model:SingletonSqliteStorage = model
 
-        def _execute_query_with_res(self,query):
+        def _execute_query(self,query):
             query_id = self.model._execute_query(query)
-            result = self.model._pop_result(query_id)
+            return query_id
+
+        def _execute_query_with_res(self,query):
+            result = self.model._pop_result(self._execute_query(query))
             return result['result']
 
         def exists(self, key: str)->bool:
@@ -355,15 +358,9 @@ if sqlite_back:
             result = self._execute_query_with_res(query)
             return result[0]!='0'
 
-        def set(self, key: str, value: dict):
-            if self.exists(key):
-                query = f"UPDATE KeyValueStore SET value = json('{json.dumps(value)}') WHERE key = '{key}'"
-                result = self._execute_query_with_res(query)
-            else:
-                query = f"INSERT INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
-                result = self._execute_query_with_res(query)
-            return result
-
+        def set(self, key: str, value: dict)->str:
+            query = f"INSERT OR REPLACE INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
+            return self._execute_query(query)
 
         def get(self, key: str)->dict:
             query = f"SELECT value FROM KeyValueStore WHERE key = '{key}'"
@@ -372,9 +369,9 @@ if sqlite_back:
             if len(result)==0:return None
             return json.loads(result[0])
         
-        def delete(self, key: str):
+        def delete(self, key: str)->str:
             query = f"DELETE FROM KeyValueStore WHERE key = '{key}'"
-            return self._execute_query_with_res(query)
+            return self._execute_query(query)
 
         def keys(self, pattern: str='*')->list[str]:
             pattern = pattern.replace('*', '%').replace('?', '_')  # Translate fnmatch pattern to SQL LIKE pattern
@@ -775,9 +772,6 @@ class SingletonKeyValueStorage(SingletonStorageController):
 
     def temp_python_backend(self):
         self.conn = self._switch_backend('temp_python')
-
-    def python_backend(self):
-        self.conn = self._switch_backend('python')
     
     def python_backend(self):
         self.conn = self._switch_backend('python')
@@ -898,7 +892,6 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def set_event(self, event_name: str, callback, id:str=None): return self._event_dispa.set_event(event_name, callback, id)
     def dispatch_event(self, event_name, *args, **kwargs): return self._event_dispa.dispatch_event(event_name, *args, **kwargs)
     def clean_events(self): return self._event_dispa.clean()
-
 
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs)->None:
