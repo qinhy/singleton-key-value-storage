@@ -1,3 +1,6 @@
 SingletonStorage/__pycache__/*
 test.json
-*.bat
+/build
+/__pycache__
+/.vscode
+SingletonStorage/sqlite.db
