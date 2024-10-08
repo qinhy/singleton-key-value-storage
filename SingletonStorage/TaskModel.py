@@ -194,7 +194,8 @@ class Controller4Task:
                 self._set_task_end()
         
         def delete(self, wait=True):
-            self.revoke(wait)
+            # self.revoke(wait)
+            return super().delete()
 
 
 class Model4Task:
@@ -396,6 +397,7 @@ class TaskStore(BasicStore):
 
     def worker_list(self,timeout=10)->list[Model4Task.Worker]:
         for w in self.find_all('Worker:*'):
+            w:Model4Task.Worker = w
             if (now_utc() - w.update_time).seconds>timeout:
                 w.get_controller().delete()
         return self.find_all('Worker:*')

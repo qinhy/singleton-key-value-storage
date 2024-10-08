@@ -44,5 +44,5 @@ ts = TaskStore()
 ts.sqlite_backend()
 print(ts.worker_list())
 w = ts.worker_list()[0]
-# t = ts.add_new_task(ExamplePrintFunction(),dict(msg='hello!'))
-# ts.add_new_task(ExampleFibonacciFunction(),dict(n=36))
+t = ts.add_new_task(ExamplePrintFunction(),dict(msg='hello!'))
+ts.add_new_task(ExampleFibonacciFunction(),dict(n=36))
