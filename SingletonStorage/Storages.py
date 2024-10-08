@@ -772,9 +772,6 @@ class SingletonKeyValueStorage(SingletonStorageController):
 
     def temp_python_backend(self):
         self.conn = self._switch_backend('temp_python')
-
-    def python_backend(self):
-        self.conn = self._switch_backend('python')
     
     def python_backend(self):
         self.conn = self._switch_backend('python')
