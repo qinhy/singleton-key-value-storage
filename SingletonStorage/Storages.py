@@ -893,7 +893,6 @@ class SingletonKeyValueStorage(SingletonStorageController):
     def dispatch_event(self, event_name, *args, **kwargs): return self._event_dispa.dispatch_event(event_name, *args, **kwargs)
     def clean_events(self): return self._event_dispa.clean()
 
-
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs)->None:
         super().__init__(*args,**kwargs)
