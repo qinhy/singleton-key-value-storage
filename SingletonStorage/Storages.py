@@ -378,6 +378,8 @@ if sqlite_back:
             query = f"SELECT key FROM KeyValueStore WHERE key LIKE '{pattern}'"
             result = self._execute_query_with_res(query)
             return result
+                
+        def is_working(self): return not self.model.query_queue.empty()
 
     class SingletonSqlitePythonMixStorageController(SingletonStorageController):
         def __init__(self, model: SingletonSqliteStorage):
@@ -412,7 +414,7 @@ if sqlite_back:
         def keys(self, pattern: str='*')->list[str]:
             return self.memory.keys(pattern)
         
-        def is_working(self): return not self.disk.model.query_queue.empty()
+        def is_working(self): return self.disk.is_working()
 
 if aws_dynamo:
     import boto3
