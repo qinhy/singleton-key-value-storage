@@ -1,2 +1,5 @@
 SingletonStorage/__pycache__/*
 test.json
+/build
+/__pycache__
+/.vscode
