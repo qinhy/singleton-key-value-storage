@@ -120,16 +120,24 @@ class Controller4Task:
 
         def serve(self):
             def _serve():
-                while self._store.exists(self.model.get_id()):
-                    self._update_timestamp()
-                    self.store()
+                while not self._store.exists(self.model.get_id()+':stop'):
+                    if self.model.status==self.SLEEPING:
+                        self.fresh_model()
+                        time.sleep(1)
+                        self._update_timestamp()
+                        self.store()
+                        
                     time.sleep(1)
-                    self.fresh_model()
-                    if self.model is None:break
+
                     if self.model.status!=self.PROCESSING:
                         task = self.get_task()
                         if task is not None:
                             self.start(task)
+                            
+                self._store.delete(self.model.get_id()+':stop')
+                self.delete()
+                while hasattr(self._store.conn,'is_working') and self._store.conn.is_working():
+                    time.sleep(1)
             Thread(target=_serve).start()
                 
         def set_memo_id(self,memo_id=-1):
@@ -181,6 +189,7 @@ class Controller4Task:
             except Exception as e:
                 print(e)
                 self.worker_failure()
+
             finally:                
                 self._set_task_end()
         
@@ -358,7 +367,11 @@ class TaskStore(BasicStore):
         return self._add_new_obj(function_obj,f'Function:{function_name}')
         
     def find_task(self,id:str) -> Model4Task.Task: return self.find(id)
-
+    
+    def kill_worker(self,id:str):
+        w = self.find_worker(id)
+        if w:self.set(w.get_id()+':stop',{})
+        
     def find_worker(self,id:str) -> Model4Task.Worker: return self.find(id)
     
     def find_function(self,function_name:str) -> Model4Task.Function:

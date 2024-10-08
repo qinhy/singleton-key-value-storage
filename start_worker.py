@@ -41,7 +41,7 @@ class ExampleFibonacciFunction(Model4Task.Function):
 
 
 ts = TaskStore()
-ts.redis_backend()
+ts.sqlite_backend()
 
 ts.add_new_function(ExamplePrintFunction())
 ts.add_new_function(ExamplePowerFunction())
