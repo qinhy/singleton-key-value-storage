@@ -91,3 +91,22 @@ storage.state.load('storage_dump.json')
 
 ## Limitations
 - Error handling and data validation are minimal and should be enhanced for production use.
+
+
+## Ideas
+### object store
+
+#### atomic object store
+#### reproducible object store
+
+#### persistant file system represent
+#### temporary  file system represent
+
+### object communication
+### event listen/dispatch
+### history controll
+### version controll
+### micro service
+
+### bl store
+

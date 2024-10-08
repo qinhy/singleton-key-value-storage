@@ -1,5 +1,8 @@
-
+# from https://github.com/qinhy/singleton-key-value-storage.git
 import base64
+import hashlib
+import math
+import os
 import re
 import sqlite3
 import threading
@@ -22,10 +25,11 @@ def try_if_error(func):
 
 # self checking
 firestore_back = try_if_error(lambda:__import__('google.cloud.firestore')) is None
-redis_back = try_if_error(lambda:__import__('redis')) is None
-sqlite_back = True
-aws_dynamo = try_if_error(lambda:__import__('boto3')) is None
-mongo_back = try_if_error(lambda:__import__('pymongo')) is None
+redis_back     = try_if_error(lambda:__import__('redis')) is None
+sqlite_back    = True
+aws_dynamo     = try_if_error(lambda:__import__('boto3')) is None
+aws_s3         = try_if_error(lambda:__import__('boto3')) is None
+mongo_back     = try_if_error(lambda:__import__('pymongo')) is None
 
 class SingletonStorageController:
     def __init__(self, model):
@@ -48,7 +52,9 @@ class SingletonStorageController:
     def loads(self, json_string=r'{}'): [ self.set(k,v) for k,v in json.loads(json_string).items()]
 
     def dump(self,path):
-        with open(path, "w") as tf: tf.write(self.dumps())
+        data = self.dumps()
+        with open(path, "w") as tf: tf.write(data)
+        return data
 
     def load(self,path):
         with open(path, "r") as tf: self.loads(tf.read())
@@ -57,6 +63,7 @@ class PythonDictStorage:
     def __init__(self):
         self.uuid = uuid.uuid4()
         self.store = {}
+
 class SingletonPythonDictStorage:
     _instance = None
     _meta = {}
@@ -88,7 +95,6 @@ class SingletonPythonDictStorageController(SingletonStorageController):
 
     def keys(self, pattern: str='*')->list[str]:
         return fnmatch.filter(self.model.store.keys(), pattern)
-
 
 if firestore_back:
     from google.cloud import firestore
@@ -208,7 +214,7 @@ if sqlite_back:
         DUMP_FILE='dump_db_file'
         LOAD_FILE='load_db_file'
                
-        def __new__(cls):
+        def __new__(cls,mode='sqlite.db'):
             if cls._instance is None:
                 cls._instance = super(SingletonSqliteStorage, cls).__new__(cls)                        
                 cls._instance.uuid = uuid.uuid4()
@@ -217,14 +223,14 @@ if sqlite_back:
                 cls._instance.query_queue = queue.Queue()
                 cls._instance.result_dict = {}
                 cls._instance.lock = threading.Lock()
-                cls._instance.worker_thread = threading.Thread(target=cls._instance._process_queries)
+                cls._instance.worker_thread = threading.Thread(target=cls._instance._process_queries,args=(mode,))
                 cls._instance.worker_thread.daemon = True
                 cls._instance.should_stop = threading.Event()  # Use an event to signal the thread to stop
                 cls._instance.worker_thread.start()
                 cls._instance._execute_query("CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)")
             return cls._instance
 
-        def __init__(self):
+        def __init__(self,mode='sqlite.db'):
             self.uuid:str = self.uuid
             self.client:sqlite3.Connection = self.client
             self.query_queue:queue.Queue = self.query_queue 
@@ -233,8 +239,8 @@ if sqlite_back:
             self.worker_thread:threading.Thread = self.worker_thread 
             self.should_stop:threading.Event = self.should_stop
             
-        def _process_queries(self):
-            self.client = sqlite3.connect(':memory:')
+        def _process_queries(self,mode=':memory:'):
+            self.client = sqlite3.connect(mode)
 
             while not self.should_stop.is_set():  # Check if the thread should stop
                 try:
@@ -339,9 +345,12 @@ if sqlite_back:
         def __init__(self, model: SingletonSqliteStorage):
             self.model:SingletonSqliteStorage = model
 
-        def _execute_query_with_res(self,query):
+        def _execute_query(self,query):
             query_id = self.model._execute_query(query)
-            result = self.model._pop_result(query_id)
+            return query_id
+
+        def _execute_query_with_res(self,query):
+            result = self.model._pop_result(self._execute_query(query))
             return result['result']
 
         def exists(self, key: str)->bool:
@@ -349,15 +358,9 @@ if sqlite_back:
             result = self._execute_query_with_res(query)
             return result[0]!='0'
 
-        def set(self, key: str, value: dict):
-            if self.exists(key):
-                query = f"UPDATE KeyValueStore SET value = json('{json.dumps(value)}') WHERE key = '{key}'"
-                result = self._execute_query_with_res(query)
-            else:
-                query = f"INSERT INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
-                result = self._execute_query_with_res(query)
-            return result
-
+        def set(self, key: str, value: dict)->str:
+            query = f"INSERT OR REPLACE INTO KeyValueStore (key, value) VALUES ('{key}', json('{json.dumps(value)}'))"
+            return self._execute_query(query)
 
         def get(self, key: str)->dict:
             query = f"SELECT value FROM KeyValueStore WHERE key = '{key}'"
@@ -366,9 +369,9 @@ if sqlite_back:
             if len(result)==0:return None
             return json.loads(result[0])
         
-        def delete(self, key: str):
+        def delete(self, key: str)->str:
             query = f"DELETE FROM KeyValueStore WHERE key = '{key}'"
-            return self._execute_query_with_res(query)
+            return self._execute_query(query)
 
         def keys(self, pattern: str='*')->list[str]:
             pattern = pattern.replace('*', '%').replace('?', '_')  # Translate fnmatch pattern to SQL LIKE pattern
@@ -459,6 +462,90 @@ if aws_dynamo:
 
             return matched_keys
 
+if aws_s3:
+    import boto3
+    from mypy_boto3_s3 import S3Client
+    from botocore.exceptions import ClientError
+    class SingletonS3Storage:
+        _instance = None
+        _meta = {}
+        
+        def __new__(cls,bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = '/SingletonS3Storage'):
+            meta = {                
+                'bucket_name':bucket_name,
+                'aws_access_key_id':aws_access_key_id,
+                'aws_secret_access_key':aws_secret_access_key,
+                'region_name':region_name,
+            }
+            def init():                
+                cls._instance = super(SingletonS3Storage, cls).__new__(cls)
+                cls._instance.uuid = uuid.uuid4()
+                cls._instance.s3 = boto3.client('s3',
+                    aws_access_key_id=aws_access_key_id,
+                    aws_secret_access_key=aws_secret_access_key,
+                    region_name=region_name
+                )
+                cls._instance.bucket_name = bucket_name
+                cls._instance._meta = meta
+            if cls._instance is None:
+                init()
+            elif cls._meta!=meta:                
+                print(f'warnning: instance changed to new one')
+                init()
+
+            return cls._instance
+
+        def __init__(self,bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = '/SingletonS3Storage'):
+            self.uuid = self.uuid
+            self.s3:S3Client = self.s3
+            self.bucket_name = self.bucket_name
+            self.s3_storage_prefix_path = '/SingletonS3Storage'
+    class SingletonS3StorageController(SingletonStorageController):
+        def __init__(self, model:SingletonS3Storage):
+            self.model:SingletonS3Storage = model
+            self.bucket_name = self.model.bucket_name
+
+        def _s3_path(self,key:str):
+            return f'{self.model.s3_storage_prefix_path}/{key}.json'
+            
+        def _de_s3_path(self,path:str):
+            return path.replace(f'{self.model.s3_storage_prefix_path}/',''
+                         ).replace(f'.json','')
+        
+        def exists(self, key: str)->bool:
+            try:
+                self.model.s3.head_object(Bucket=self.bucket_name,
+                                          Key=self._s3_path(key))
+                return True
+            except self.model.s3.exceptions.NoSuchKey:
+                return False
+            
+        def set(self, key: str, value: dict):
+            json_data = json.dumps(value)
+            self.model.s3.put_object(Bucket=self.bucket_name,
+                                        Key=self._s3_path(key), Body=json_data)
+        
+        def get(self, key: str)->dict:
+            obj = self.model.s3.get_object(Bucket=self.bucket_name, Key=self._s3_path(key))
+            return json.loads(obj['Body'].read().decode('utf-8'))
+                
+        def delete(self, key):
+            self.model.s3.delete_object(Bucket=self.bucket_name, Key=self._s3_path(key))
+            
+        def keys(self, pattern='*')->list[str]:
+            keys = []
+            paginator = self.model.s3.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=self.bucket_name,
+                                           Prefix=self.model.s3_storage_prefix_path):
+                for obj in page.get('Contents', []):
+                    keys.append(self._de_s3_path(obj['Key']))
+                    
+            return fnmatch.filter(keys, pattern)
+            
 if mongo_back:
     from pymongo import MongoClient, database, collection
     
@@ -523,13 +610,13 @@ class EventDispatcherController:
             client = SingletonPythonDictStorageController(PythonDictStorage())
         self.client:SingletonStorageController = client
     
-    def events(self):
-        return list(zip(self.client.keys('*'),[self.client.get(k) for k in self.client.keys('*')]))
-
     def _find_event(self, uuid: str):
         es = self.client.keys(f'*:{uuid}')
         return [None] if len(es)==0 else es
     
+    def events(self):
+        return list(zip(self.client.keys('*'),[self.client.get(k) for k in self.client.keys('*')]))
+
     def get_event(self, uuid: str):
         return [self.client.get(k) for k in self._find_event(uuid)]
     
@@ -541,7 +628,7 @@ class EventDispatcherController:
         self.client.set(f'{EventDispatcherController.ROOT_KEY}:{event_name}:{id}', callback)
         return id
     
-    def dispatch(self, event_name, *args, **kwargs):
+    def dispatch_event(self, event_name, *args, **kwargs):
         for event_full_uuid in self.client.keys(f'{EventDispatcherController.ROOT_KEY}:{event_name}:*'):
             self.client.get(event_full_uuid)(*args, **kwargs)
 
@@ -574,25 +661,117 @@ class KeysHistoryController:
             if res : self.set_history(key,res)
         return res
 
+class LocalVersionController:
+    
+    TABLENAME = '_Operation'
+    LISTNAME = '_Operations'
+    KEY = 'ops'
+    FORWARD = 'forward'    
+    REVERT = 'revert'
+
+    def __init__(self,client=None):
+        if client is None:
+            client = SingletonPythonDictStorageController(PythonDictStorage())
+        self.client:SingletonStorageController = client
+        self._set_versions([])
+        self._current_version = None
+    
+    def get_versions(self)->list: 
+        return self.client.get(LocalVersionController.TABLENAME
+                               )[LocalVersionController.KEY]
+    
+    def _set_versions(self,ops:list): 
+        return self.client.set(LocalVersionController.TABLENAME,
+                               {LocalVersionController.KEY:ops})
+    
+    def find_version(self,version_uuid:str):         
+        versions = [i for i in self.get_versions()]
+        current_version_idx = versions.index(self._current_version
+                                             ) if self._current_version in versions else None
+        target_version_idx = versions.index(version_uuid
+                                            ) if version_uuid in versions else None
+        op = self.client.get(f'{LocalVersionController.TABLENAME}:{versions[target_version_idx]}'
+                             ) if target_version_idx else None
+        return versions,current_version_idx,target_version_idx,op
+
+    def add_operation(self,operation:tuple,revert:tuple=None):
+        opuuid = str(uuid.uuid4())
+        self.client.set(f'{LocalVersionController.TABLENAME}:{opuuid}',{
+            LocalVersionController.FORWARD:operation,LocalVersionController.REVERT:revert})
+        
+        ops = self.get_versions()
+        if self._current_version is not None:
+            opidx = ops.index(self._current_version)
+            ops = ops[:opidx+1]
+
+        ops.append(opuuid)
+        self._set_versions(ops)
+        self._current_version = opuuid
+
+    def forward_one_operation(self,forward_callback:lambda forward:None):
+        versions,current_version_idx,_,_ = self.find_version(self._current_version)
+        if current_version_idx is None or len(versions)<=(current_version_idx+1):return
+        op = self.client.get(f'{LocalVersionController.TABLENAME}:{versions[current_version_idx+1]}')
+        # do forward
+        forward_callback(op[LocalVersionController.FORWARD])
+        self._current_version = versions[current_version_idx+1]
+    
+    def revert_one_operation(self,revert_callback:lambda revert:None):        
+        versions,current_version_idx,_,op = self.find_version(self._current_version)
+        if current_version_idx is None or (current_version_idx-1)<0:return
+        # do revert
+        revert_callback(op[LocalVersionController.REVERT])
+        self._current_version = versions[current_version_idx-1]
+
+    def to_version(self,version_uuid:str,version_callback:lambda ops:None):
+        _,current_version_idx,target_version_idx,_ = self.find_version(version_uuid)
+        if target_version_idx is None:raise ValueError(f'no such version of {version_uuid}')
+
+        delta_idx = target_version_idx - current_version_idx
+        sign = math.copysign(1, delta_idx)
+        
+        while abs(delta_idx) != 0:
+            if sign>0:
+                # print('forward_one_operation')
+                self.forward_one_operation(version_callback)
+            else:
+                # print('revert_one_operation')
+                self.revert_one_operation(version_callback)
+            delta_idx = delta_idx - sign
+
 class SingletonKeyValueStorage(SingletonStorageController):
 
-    def __init__(self)->None:
+    def __init__(self,version_controll=False)->None:
+        self.version_controll = version_controll
         self.conn:SingletonStorageController = None
         self.python_backend()
     
     def _switch_backend(self,name:str='python',*args,**kwargs):
-        self.event_dispa = EventDispatcherController()
+        self._event_dispa = EventDispatcherController()
         self._hist = KeysHistoryController()
+        self._verc = LocalVersionController()
         backs={
+            'temp_python':lambda:SingletonPythonDictStorageController(PythonDictStorage(*args,**kwargs)),
             'python':lambda:SingletonPythonDictStorageController(SingletonPythonDictStorage(*args,**kwargs)),
             'firestore':lambda:SingletonFirestoreStorageController(SingletonFirestoreStorage(*args,**kwargs)) if firestore_back else None,
             'redis':lambda:SingletonRedisStorageController(SingletonRedisStorage(*args,**kwargs)) if redis_back else None,
             'sqlite':lambda:SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
             'mongodb':lambda:SingletonMongoDBStorageController(SingletonMongoDBStorage(*args,**kwargs)) if mongo_back else None,
+            's3':lambda:SingletonS3StorageController(SingletonS3Storage(*args,**kwargs)) if aws_s3 else None,
         }
         back=backs.get(name.lower(),lambda:None)()
         if back is None:raise ValueError(f'no back end of {name}, has {list(backs.items())}')
         return back
+    
+    def s3_backend(self,bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = '/SingletonS3Storage'):
+        self.conn = self._switch_backend('s3',bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = s3_storage_prefix_path)
+
+    def temp_python_backend(self):
+        self.conn = self._switch_backend('temp_python')
     
     def python_backend(self):
         self.conn = self._switch_backend('python')
@@ -622,52 +801,97 @@ class SingletonKeyValueStorage(SingletonStorageController):
                 return
         for m in event_names:
             if hasattr(slave, m):
-                self.event_dispa.set_event(m,getattr(slave,m),getattr(slave,'uuid'))
+                self.set_event(m,getattr(slave,m),getattr(slave,'uuid'))
             else:
                 self._print(f'no func of "{m}" in {slave}. Skip it.')
                 
     def delete_slave(self, slave:object)->bool:
-        self.event_dispa.delete_event(getattr(slave,'uuid',None))
+        self.delete_event(getattr(slave,'uuid',None))
 
-    def _edit(self,func_name:str, key:str=None, value:dict=None):
+    def _edit_local(self,func_name:str, key:str=None, value:dict=None):
         if func_name not in ['set','delete','clean','load','loads']:
             self._print(f'no func of "{func_name}". return.')
             return
         self._hist.reset()
         func = getattr(self.conn, func_name)
-        args = list(filter(lambda x:x is not None, [key,value]))
+        args = [i for i in [key,value] if i is not None]
         res = func(*args)
-        self.event_dispa.dispatch(func_name,*args)
         return res
     
-    def _try_if_error(self,func):
+    def _edit(self,func_name:str, key:str=None, value:dict=None):
+        args = [i for i in [key,value] if i is not None]
+        res = self._edit_local(func_name,key,value)
+        self.dispatch_event(func_name,*args)
+        return res
+    
+    def _try_edit_error(self,args):
+        if self.version_controll:
+            # do local version controll
+            func = args[0]
+            if func == 'set':
+                func,key,value =args
+                revert = None
+                if self.exists(key):
+                    revert = (func,key,self.get(key))
+                else:
+                    revert = ('delete',key)
+                self._verc.add_operation(args,revert)
+                
+            elif func == 'delete':
+                func,key = args
+                revert = ('set',key,self.get(key))
+                self._verc.add_operation(args,revert)
+
+            elif func in ['clean','load','loads']:
+                revert = ('loads',self.dumps())
+                self._verc.add_operation(args,revert)
+
         try:
-            func()
+            self._edit(*args)
             return True
         except Exception as e:
             self._print(e)
             return False
-    # True False(in error)
-    def set(self, key: str, value: dict):     return self._try_if_error(lambda:self._edit('set',key,value))
-    def delete(self, key: str):               return self._try_if_error(lambda:self._edit('delete',key))
-    def clean(self):                          return self._try_if_error(lambda:self._edit('clean'))
-    def load(self,json_path):                 return self._try_if_error(lambda:self._edit('load', json_path))
-    def loads(self,json_str):                 return self._try_if_error(lambda:self._edit('loads',json_str))
-    def dump(self,json_path):                 return self._try_if_error(lambda:self.conn.dump(json_path))
     
-    def _try_obj_error(self,func):
+    def revert_one_operation(self):
+        self._verc.revert_one_operation(lambda revert:self._edit_local(*revert))
+
+    def get_current_version(self):
+        vs = self._verc.get_versions()
+        if len(vs)==0:
+            return None
+        return vs[-1]
+
+    def local_to_version(self,opuuid:str):
+        self._verc.to_version(opuuid,lambda revert:self._edit_local(*revert))
+
+    # True False(in error)
+    def set(self, key: str, value: dict):     return self._try_edit_error(('set',key,value))
+    def delete(self, key: str):               return self._try_edit_error(('delete',key))
+    def clean(self):                          return self._try_edit_error(('clean',))
+    def load(self,json_path):                 return self._try_edit_error(('load', json_path))
+    def loads(self,json_str):                 return self._try_edit_error(('loads',json_str))
+    
+    def _try_load_error(self,func):
         try:
             return func()
         except Exception as e:
             self._print(e)
             return None
-    # Object, None(in error)
-    # def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self._hist.try_history(key,  lambda:self.conn.exists(key)))
-    # def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self._hist.try_history(regx, lambda:self.conn.keys(regx)))
-    def exists(self, key: str)->bool:         return self._try_obj_error(lambda:self.conn.exists(key))
-    def keys(self, regx: str='*')->list[str]: return self._try_obj_error(lambda:self.conn.keys(regx))
-    def get(self, key: str)->dict:            return self._try_obj_error(lambda:self.conn.get(key))
-    def dumps(self)->str:                     return self._try_obj_error(lambda:self.conn.dumps())
+    # Object, None(in error)    
+    def exists(self, key: str)->bool:         return self._try_load_error(lambda:self.conn.exists(key))
+    def keys(self, regx: str='*')->list[str]: return self._try_load_error(lambda:self.conn.keys(regx))
+    def get(self, key: str)->dict:            return self._try_load_error(lambda:self.conn.get(key))
+    def dumps(self)->str:                     return self._try_load_error(lambda:self.conn.dumps())
+    def dump(self,json_path)->str:            return self._try_load_error(lambda:self.conn.dump(json_path))
+
+    # events 
+    def events(self): return self._event_dispa.events()
+    def get_event(self, uuid: str): return self._event_dispa.get_event(uuid)
+    def delete_event(self, uuid: str): return self._event_dispa.delete_event(uuid)
+    def set_event(self, event_name: str, callback, id:str=None): return self._event_dispa.set_event(event_name, callback, id)
+    def dispatch_event(self, event_name, *args, **kwargs): return self._event_dispa.dispatch_event(event_name, *args, **kwargs)
+    def clean_events(self): return self._event_dispa.clean()
 
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs)->None:
@@ -701,6 +925,14 @@ class Tests(unittest.TestCase):
         self.store.mongo_backend()
         for i in range(num):self.test_all_cases()
 
+    def test_s3(self,num=1):
+        self.store.s3_backend(
+                    bucket_name = os.environ['AWS_S3_BUCKET_NAME'],
+                    aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+                    aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+                    region_name=os.environ['AWS_DEFAULT_REGION'])
+        for i in range(num):self.test_all_cases()
+
     def test_all_cases(self):
         self.test_set_and_get()
         self.test_exists()
@@ -708,7 +940,9 @@ class Tests(unittest.TestCase):
         self.test_keys()
         self.test_get_nonexistent()
         self.test_dump_and_load()
+        self.test_version()
         self.test_slaves()
+        self.store.clean()
 
     def test_set_and_get(self):
         self.store.set('test1', {'data': 123})
@@ -758,3 +992,22 @@ class Tests(unittest.TestCase):
         self.store.set('gamma', {'info': 'third'})
         self.store.delete('abeta')
         self.assertEqual(json.loads(self.store.dumps()),json.loads(store2.dumps()), "Should return the correct keys and values.")
+
+    def test_version(self):
+        self.store.clean()
+        self.store.version_controll = True
+        self.store.set('alpha', {'info': 'first'})
+        data1 = self.store.dumps()
+        v1 = self.store.get_current_version()
+
+        self.store.set('abeta', {'info': 'second'})
+        v2 = self.store.get_current_version()
+        data2 = self.store.dumps()
+
+        self.store.set('gamma', {'info': 'third'})
+        self.store.local_to_version(v1)
+
+        self.assertEqual(json.loads(self.store.dumps()),json.loads(data1), "Should return the same keys and values.")
+
+        self.store.local_to_version(v2)
+        self.assertEqual(json.loads(self.store.dumps()),json.loads(data2), "Should return the same keys and values.")
