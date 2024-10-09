@@ -13,8 +13,13 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-std::mt19937 generator;
-uuids::uuid_random_generator gen{generator};
+
+static std::string generateUUID()
+{
+    std::mt19937 generator{std::random_device{}()};
+    uuids::uuid_random_generator uuidGen{generator};
+    return uuids::to_string(uuidGen());
+}
 
 // TemplateStorage class definition
 template <typename StoreType>
@@ -37,14 +42,6 @@ public:
 private:
     std::string _uuid;
     StoreType _store;
-
-    // Static UUID generation method (replace with actual UUID generation logic)
-    static std::string generateUUID()
-    {
-        std::mt19937 generator{std::random_device{}()};
-        uuids::uuid_random_generator uuidGen{generator};
-        return uuids::to_string(uuidGen());
-    }
 };
 
 template <typename DataType, typename StorageType>
@@ -141,14 +138,6 @@ public:
 protected:
     std::shared_ptr<StorageType> model;
     std::string _uuid;
-
-    // UUID generation
-    static std::string generateUUID()
-    {
-        std::mt19937 generator{std::random_device{}()};
-        uuids::uuid_random_generator uuidGen{generator};
-        return uuids::to_string(uuidGen());
-    }
 
     // Register events
     void register_local_events()
@@ -279,7 +268,7 @@ public:
 
     void set_event(const std::string &event_name, const FunctionType &callback, const std::string &id = "")
     {
-        std::string event_id = id.empty() ? uuids::to_string(gen()) : id;
+        std::string event_id = id.empty() ? generateUUID() : id;
         client->set(ROOT_KEY + ":" + event_name + ":" + event_id, callback);
     }
 
