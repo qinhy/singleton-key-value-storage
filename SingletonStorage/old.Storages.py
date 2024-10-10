@@ -378,6 +378,43 @@ if sqlite_back:
             query = f"SELECT key FROM KeyValueStore WHERE key LIKE '{pattern}'"
             result = self._execute_query_with_res(query)
             return result
+                
+        def is_working(self): return not self.model.query_queue.empty()
+
+    class SingletonSqlitePythonMixStorageController(SingletonStorageController):
+        def __init__(self, model: SingletonSqliteStorage):
+            self.disk = SingletonSqliteStorageController(model)
+            self.memory = SingletonPythonDictStorageController(PythonDictStorage())
+            for k in self.disk.keys():self.memory.set(k,{})
+
+        def exists(self, key: str)->bool:
+            return self.memory.exists(key)
+
+        def set(self, key: str, value: dict):
+            self.disk.set(key,value)
+            self.memory.set(key,value)
+
+        def get(self, key: str) -> dict:
+            if not self.memory.exists(key):
+                return None
+            
+            value = self.memory.get(key)
+            if len(value)==0:
+                value = self.disk.get(key)
+                if value:
+                    self.memory.set(key,value)
+                return value
+            else:
+                return value
+
+        def delete(self, key: str):
+            self.disk.delete(key)
+            self.memory.delete(key)
+
+        def keys(self, pattern: str='*')->list[str]:
+            return self.memory.keys(pattern)
+        
+        def is_working(self): return self.disk.is_working()
 
 if aws_dynamo:
     import boto3
@@ -756,8 +793,10 @@ class SingletonKeyValueStorage(SingletonStorageController):
             'firestore':lambda:SingletonFirestoreStorageController(SingletonFirestoreStorage(*args,**kwargs)) if firestore_back else None,
             'redis':lambda:SingletonRedisStorageController(SingletonRedisStorage(*args,**kwargs)) if redis_back else None,
             'sqlite':lambda:SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
+            'sqlite_pymix':lambda:SingletonSqlitePythonMixStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None,
             'mongodb':lambda:SingletonMongoDBStorageController(SingletonMongoDBStorage(*args,**kwargs)) if mongo_back else None,
             's3':lambda:SingletonS3StorageController(SingletonS3Storage(*args,**kwargs)) if aws_s3 else None,
+            
         }
         back=backs.get(name.lower(),lambda:None)()
         if back is None:raise ValueError(f'no back end of {name}, has {list(backs.items())}')
@@ -775,6 +814,9 @@ class SingletonKeyValueStorage(SingletonStorageController):
     
     def python_backend(self):
         self.conn = self._switch_backend('python')
+    
+    def sqlite_pymix_backend(self,mode='sqlite.db'):
+        self.conn = self._switch_backend('sqlite_pymix',mode=mode)
     
     def sqlite_backend(self):             
         self.conn = self._switch_backend('sqlite')
@@ -901,6 +943,7 @@ class Tests(unittest.TestCase):
     def test_all(self,num=1):
         self.test_python(num)
         self.test_sqlite(num)
+        self.test_sqlite_pymix(num)
         # self.test_mongo(num)
         # self.test_redis(num)
         # self.test_firestore(num)
@@ -915,6 +958,10 @@ class Tests(unittest.TestCase):
 
     def test_sqlite(self,num=1):
         self.store.sqlite_backend()
+        for i in range(num):self.test_all_cases()
+
+    def test_sqlite_pymix(self,num=1):
+        self.store.sqlite_pymix_backend()
         for i in range(num):self.test_all_cases()
 
     def test_firestore(self,num=1):
