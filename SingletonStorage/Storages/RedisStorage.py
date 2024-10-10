@@ -17,9 +17,9 @@ import urllib.parse
 from urllib.parse import urlparse
 
 try:
-    from .Storage import SingletonKeyValueStorage,SingletonStorageController
+    from .Storage import SingletonKeyValueStorage,AbstractStorageController
 except Exception as e:
-    from Storage import SingletonKeyValueStorage,SingletonStorageController
+    from Storage import SingletonKeyValueStorage,AbstractStorageController
 
 
 def try_if_error(func):
@@ -60,7 +60,7 @@ if redis_back:
             self.uuid:str = self.uuid
             self.client:redis.Redis = self.client
 
-    class SingletonRedisStorageController(SingletonStorageController):
+    class SingletonRedisStorageController(AbstractStorageController):
         def __init__(self, model: SingletonRedisStorage):
             self.model:SingletonRedisStorage = model
 

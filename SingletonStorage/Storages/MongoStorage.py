@@ -17,9 +17,9 @@ import urllib.parse
 from urllib.parse import urlparse
 
 try:
-    from .Storage import SingletonKeyValueStorage,SingletonStorageController
+    from .Storage import SingletonKeyValueStorage,AbstractStorageController
 except Exception as e:
-    from Storage import SingletonKeyValueStorage,SingletonStorageController
+    from Storage import SingletonKeyValueStorage,AbstractStorageController
     
 def try_if_error(func):
     try:
@@ -62,7 +62,7 @@ if mongo_back:
             self.db:database.Database = self.db
             self.collection:collection.Collection = self.collection
 
-    class SingletonMongoDBStorageController(SingletonStorageController):
+    class SingletonMongoDBStorageController(AbstractStorageController):
         
         def __init__(self, model: SingletonMongoDBStorage):
             self.model: SingletonMongoDBStorage = model

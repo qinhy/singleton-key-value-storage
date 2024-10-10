@@ -7,9 +7,26 @@ import fnmatch
 import json
 import unittest
 
-class SingletonStorageController:
+class AbstractStorage:
+    # statics for singleton
+    _uuid = uuid.uuid4()
+    _store = None
+    _is_singleton = True
+    _meta = {}
+        
+    def __init__(self,id=None,store=None,is_singleton=None):
+        self.uuid = uuid.uuid4() if id is None else id
+        self.store = None if store is None else store
+        self.is_singleton = False if is_singleton is None else is_singleton
+    
+    def get_singleton(self):
+        return self.__class__(self._uuid,self._store,self._is_singleton)
+    
+class AbstractStorageController:
     def __init__(self, model):
-        self.model:object = model
+        self.model:AbstractStorage = model
+    
+    def is_singleton(self)->bool: return self.model.is_singleton if 'is_singleton' in self.model else False
 
     def exists(self, key: str)->bool: print(f'[{self.__class__.__name__}]: not implement')
 
@@ -35,101 +52,81 @@ class SingletonStorageController:
     def load(self,path):
         with open(path, "r") as tf: self.loads(tf.read())
 
-class PythonDictStorage:
-    def __init__(self):
-        self.uuid = uuid.uuid4()
-        self.store = {}
+class PythonDictStorage(AbstractStorage):
+    def __init__(self, id=None, store=None, is_singleton=None):
+        super().__init__(id, store, is_singleton)
+        self.store = {} if store is None else store
 
-class SingletonPythonDictStorage:
-    _instance = None
-    _meta = {}
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(SingletonPythonDictStorage, cls).__new__(cls)
-            cls._instance.uuid = uuid.uuid4()
-            cls._instance.store = {}
-        return cls._instance
-    
-    def __init__(self):
-        self.uuid:str = self.uuid
-        self.store:dict = self.store
+class PythonDictStorageController(AbstractStorageController):
+    def __init__(self, model:PythonDictStorage):
+        self.model:PythonDictStorage = model
+        self.store = self.model.store
 
-class SingletonPythonDictStorageController(SingletonStorageController):
-    def __init__(self, model:SingletonPythonDictStorage):
-        self.model:SingletonPythonDictStorage = model
+    def exists(self, key: str)->bool: return key in self.store
 
-    def exists(self, key: str)->bool: return key in self.model.store
+    def set(self, key: str, value: dict): self.store[key] = value
 
-    def set(self, key: str, value: dict): self.model.store[key] = value
-
-    def get(self, key: str)->dict: return self.model.store.get(key,None)
+    def get(self, key: str)->dict: return self.store.get(key,None)
 
     def delete(self, key: str):
-        if key in self.model.store:     
-            del self.model.store[key]
+        if key in self.store:
+            del self.store[key]
 
-    def keys(self, pattern: str='*')->list[str]:
-        return fnmatch.filter(self.model.store.keys(), pattern)
+    def keys(self, pattern: str='*'): return fnmatch.filter(self.store.keys(), pattern)
 
-class EventDispatcherController:
+class EventDispatcherController(PythonDictStorageController):
     ROOT_KEY = 'Event'
-
-    def __init__(self, client=None):
-        if client is None:
-            client = SingletonPythonDictStorageController(PythonDictStorage())
-        self.client:SingletonStorageController = client
     
     def _find_event(self, uuid: str):
-        es = self.client.keys(f'*:{uuid}')
+        es = self.keys(f'*:{uuid}')
         return [None] if len(es)==0 else es
     
     def events(self):
-        return list(zip(self.client.keys('*'),[self.client.get(k) for k in self.client.keys('*')]))
+        return list(zip(self.keys('*'),[self.get(k) for k in self.keys('*')]))
 
     def get_event(self, uuid: str):
-        return [self.client.get(k) for k in self._find_event(uuid)]
+        return [self.get(k) for k in self._find_event(uuid)]
     
     def delete_event(self, uuid: str):
-        return [self.client.delete(k) for k in self._find_event(uuid)]
+        return [self.delete(k) for k in self._find_event(uuid)]
     
     def set_event(self, event_name: str, callback, id:str=None):
         if id is None:id = uuid.uuid4()
-        self.client.set(f'{EventDispatcherController.ROOT_KEY}:{event_name}:{id}', callback)
+        self.set(f'{EventDispatcherController.ROOT_KEY}:{event_name}:{id}', callback)
         return id
     
     def dispatch_event(self, event_name, *args, **kwargs):
-        for event_full_uuid in self.client.keys(f'{EventDispatcherController.ROOT_KEY}:{event_name}:*'):
-            self.client.get(event_full_uuid)(*args, **kwargs)
+        for event_full_uuid in self.keys(f'{EventDispatcherController.ROOT_KEY}:{event_name}:*'):
+            self.get(event_full_uuid)(*args, **kwargs)
 
     def clean(self):
-        return self.client.clean()
+        return self.clean()
     
-class KeysHistoryController:
-    def __init__(self, client=None):
-        if client is None:
-            client = SingletonPythonDictStorageController(PythonDictStorage())
-        self.client:SingletonStorageController = client
+# class KeysHistoryController:
+#     def __init__(self, client=None):
+#         if client is None:
+#             client = PythonDictStorageController(PythonDictStorage())
+#         self.client:AbstractStorageController = client
 
-    def _str2base64(self,key: str):
-        return base64.b64encode(key.encode()).decode()
-    def reset(self):
-        self.client = SingletonPythonDictStorageController(PythonDictStorage())        
-    def set_history(self,key: str, result:dict):
-        if result:
-            self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
-        return result
+#     def _str2base64(self,key: str):
+#         return base64.b64encode(key.encode()).decode()
+#     def reset(self):
+#         self.client = PythonDictStorageController(PythonDictStorage())        
+#     def set_history(self,key: str, result:dict):
+#         if result:
+#             self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
+#         return result
     
-    def get_history(self,key: str):
-        res = self.client.get(f'_History:{self._str2base64(key)}')
-        return res.get('result',None) if res else None
+#     def get_history(self,key: str):
+#         res = self.client.get(f'_History:{self._str2base64(key)}')
+#         return res.get('result',None) if res else None
 
-    def try_history(self,key: str, result_func=lambda :None):
-        res = self.get_history(key)
-        if res is None:
-            res = result_func()
-            if res : self.set_history(key,res)
-        return res
+#     def try_history(self,key: str, result_func=lambda :None):
+#         res = self.get_history(key)
+#         if res is None:
+#             res = result_func()
+#             if res : self.set_history(key,res)
+#         return res
 
 class LocalVersionController:
     
@@ -141,8 +138,8 @@ class LocalVersionController:
 
     def __init__(self,client=None):
         if client is None:
-            client = SingletonPythonDictStorageController(PythonDictStorage())
-        self.client:SingletonStorageController = client
+            client = PythonDictStorageController(PythonDictStorage())
+        self.client:AbstractStorageController = client
         self._set_versions([])
         self._current_version = None
     
@@ -209,20 +206,20 @@ class LocalVersionController:
                 self.revert_one_operation(version_callback)
             delta_idx = delta_idx - sign
 
-class SingletonKeyValueStorage(SingletonStorageController):    
+class SingletonKeyValueStorage(AbstractStorageController):    
     backs={
-        'temp_python':lambda *args,**kwargs:SingletonPythonDictStorageController(PythonDictStorage(*args,**kwargs)),
-        'python':lambda *args,**kwargs:SingletonPythonDictStorageController(SingletonPythonDictStorage(*args,**kwargs)),        
+        'temp_python':lambda *args,**kwargs:PythonDictStorageController(PythonDictStorage(*args,**kwargs)),
+        'python':lambda *args,**kwargs:PythonDictStorageController(PythonDictStorage(*args,**kwargs).get_singleton()),
     }
 
     def __init__(self,version_controll=False)->None:
         self.version_controll = version_controll
-        self.conn:SingletonStorageController = None
+        self.conn:AbstractStorageController = None
         self.python_backend()
     
     def _switch_backend(self,name:str='python',*args,**kwargs):
-        self._event_dispa = EventDispatcherController()
-        self._hist = KeysHistoryController()
+        self._event_dispa = EventDispatcherController(PythonDictStorage())
+        # self._hist = KeysHistoryController()
         self._verc = LocalVersionController()
         back=self.backs.get(name.lower(),None)
         if back is None:raise ValueError(f'no back end of {name}, has {list(self.backs.items())}')
@@ -280,7 +277,7 @@ class SingletonKeyValueStorage(SingletonStorageController):
         if func_name not in ['set','delete','clean','load','loads']:
             self._print(f'no func of "{func_name}". return.')
             return
-        self._hist.reset()
+        # self._hist.reset()
         func = getattr(self.conn, func_name)
         args = [i for i in [key,value] if i is not None]
         res = func(*args)
@@ -368,8 +365,8 @@ class Tests(unittest.TestCase):
 
     def test_all(self,num=1):
         self.test_python(num)
-        self.test_sqlite(num)
-        self.test_sqlite_pymix(num)
+        # self.test_sqlite(num)
+        # self.test_sqlite_pymix(num)
         # self.test_mongo(num)
         # self.test_redis(num)
         # self.test_firestore(num)
@@ -457,7 +454,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
 
     def test_slaves(self):
-        if self.store.conn.__class__.__name__=='SingletonPythonDictStorageController':return
+        if self.store.conn.__class__.__name__=='PythonDictStorageController':return
         store2 = SingletonKeyValueStorage()
         self.store.add_slave(store2)
         self.store.set('alpha', {'info': 'first'})

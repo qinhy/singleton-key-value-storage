@@ -17,9 +17,9 @@ import urllib.parse
 from urllib.parse import urlparse
 
 try:
-    from .Storage import SingletonKeyValueStorage,SingletonStorageController
+    from .Storage import SingletonKeyValueStorage,AbstractStorageController
 except Exception as e:
-    from Storage import SingletonKeyValueStorage,SingletonStorageController
+    from Storage import SingletonKeyValueStorage,AbstractStorageController
 
 def try_if_error(func):
     try:
@@ -52,7 +52,7 @@ if aws_dynamo:
             self.client = self.client
             self.table = self.table
 
-    class SingletonDynamoDBStorageController(SingletonStorageController):
+    class SingletonDynamoDBStorageController(AbstractStorageController):
         def __init__(self, model:SingletonDynamoDBStorage):
             self.model:SingletonDynamoDBStorage = model
         
@@ -157,7 +157,7 @@ if aws_s3:
             self.s3:S3Client = self.s3
             self.bucket_name = self.bucket_name
             self.s3_storage_prefix_path = '/SingletonS3Storage'
-    class SingletonS3StorageController(SingletonStorageController):
+    class SingletonS3StorageController(AbstractStorageController):
         def __init__(self, model:SingletonS3Storage):
             self.model:SingletonS3Storage = model
             self.bucket_name = self.model.bucket_name

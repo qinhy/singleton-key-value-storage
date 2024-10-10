@@ -12,9 +12,9 @@ import urllib.parse
 from urllib.parse import urlparse
 
 try:
-    from .Storage import SingletonKeyValueStorage,SingletonStorageController,SingletonPythonDictStorageController,PythonDictStorage
+    from .Storage import SingletonKeyValueStorage,AbstractStorageController,PythonDictStorageController,PythonDictStorage
 except Exception as e:
-    from Storage import SingletonKeyValueStorage,SingletonStorageController,SingletonPythonDictStorageController,PythonDictStorage
+    from Storage import SingletonKeyValueStorage,AbstractStorageController,PythonDictStorageController,PythonDictStorage
 
 
 def try_if_error(func):
@@ -48,7 +48,7 @@ if sqlite_back:
                 cls._instance.worker_thread.daemon = True
                 cls._instance.should_stop = threading.Event()  # Use an event to signal the thread to stop
                 cls._instance.worker_thread.start()
-                cls._instance._execute_query("CREATE TABLE KeyValueStore (key TEXT PRIMARY KEY, value JSON)")
+                cls._instance._execute_query("CREATE TABLE IF NOT EXISTS KeyValueStore (key TEXT PRIMARY KEY, value JSON)")
             return cls._instance
 
         def __init__(self,mode='sqlite.db'):
@@ -64,62 +64,68 @@ if sqlite_back:
             self.client = sqlite3.connect(mode)
 
             while not self.should_stop.is_set():  # Check if the thread should stop
-                try:
-                    # Use get with timeout to allow periodic checks for should_stop
-                    query_info = self.query_queue.get(timeout=1)
-                    # print('query_info',query_info)
-                except queue.Empty:
-                    continue  # If the queue is empty, continue to check should_stop
+                query_infos = []
+                # Use get with timeout to allow periodic checks for should_stop
+                # query_info = self.query_queue.get(timeout=1)
+                while True:                        
+                    try:
+                        query_info = self.query_queue.get(timeout=1)
+                        query, query_id = query_info['query'], query_info['id']                        
+                        query_infos.append(query_info)
+                        if query[:len('SELECT')] == 'SELECT':
+                            break
+                    except queue.Empty:
+                        break
+                if len(query_infos)==0:continue
 
-                query, query_id = query_info['query'], query_info['id']
-                query,val = query
-                query:str = query
-                if SingletonSqliteStorage.DUMP_FILE == query[:len(SingletonSqliteStorage.DUMP_FILE)]:
-                    try:
-                        disk_conn = sqlite3.connect(query.split()[1])
-                        self._clone(self.client,disk_conn)
-                    except sqlite3.Error as e:
-                        self._store_result(query_id, query, f"SQLite error: {e}")
-                    finally:
-                        disk_conn.close()
-                        self.query_queue.task_done()
-                        self.client.commit()   
-                
-                elif SingletonSqliteStorage.LOAD_FILE == query[:len(SingletonSqliteStorage.LOAD_FILE)]:     
-                    try:
-                        disk_conn = sqlite3.connect(query.split()[1])
-                        self.client.close()
-                        self.client = sqlite3.connect(':memory:')
-                        self._clone(disk_conn,self.client)
-                    except sqlite3.Error as e:
-                        self._store_result(query_id, query, f"SQLite error: {e}")
-                    finally:
-                        disk_conn.close()  
-                        self.query_queue.task_done()
-                        self.client.commit()            
-                else:
-                    try:
-                        cursor = self.client.cursor()
-                        if val is None:
-                            cursor.execute(query)
-                        else:
-                            cursor.execute(query, val)
+                # print(self.result_dict)
 
-                        if cursor.description is None:
-                            self._store_result(query_id, query, True)
-                            continue
-                        columns = [description[0] for description in cursor.description]
-                        result = cursor.fetchall()
-                        if len(columns) > 1:
-                            result = [dict(zip(columns, row)) for row in result]
-                        else:
-                            result = [str(row[0]) for row in result]
-                        self._store_result(query_id, query, result)
-                    except sqlite3.Error as e:
-                        self._store_result(query_id, query, f"SQLite error: {e}")
-                    finally:
-                        self.query_queue.task_done()
-                        self.client.commit()
+                for query_info in query_infos:
+                    query, query_id = query_info['query'], query_info['id']
+                    query,val = query
+                    query:str = query
+                    if SingletonSqliteStorage.DUMP_FILE == query[:len(SingletonSqliteStorage.DUMP_FILE)]:
+                        try:
+                            disk_conn = sqlite3.connect(query.split()[1])
+                            self._clone(self.client,disk_conn)
+                        except sqlite3.Error as e:
+                            self._store_result(query_id, query, f"SQLite error: {e}")
+                        finally:
+                            disk_conn.close()
+                    
+                    elif SingletonSqliteStorage.LOAD_FILE == query[:len(SingletonSqliteStorage.LOAD_FILE)]:     
+                        try:
+                            disk_conn = sqlite3.connect(query.split()[1])
+                            self.client.close()
+                            self.client = sqlite3.connect(':memory:')
+                            self._clone(disk_conn,self.client)
+                        except sqlite3.Error as e:
+                            self._store_result(query_id, query, f"SQLite error: {e}")
+                        finally:
+                            disk_conn.close()  
+                    else:
+                        try:
+                            cursor = self.client.cursor()
+                            if val is None:
+                                cursor.execute(query)
+                            else:
+                                cursor.execute(query, val)
+
+                            if cursor.description is None:
+                                self._store_result(query_id, query, True)
+                                continue
+                            columns = [description[0] for description in cursor.description]
+                            result = cursor.fetchall()
+                            if len(columns) > 1:
+                                result = [dict(zip(columns, row)) for row in result]
+                            else:
+                                result = [str(row[0]) for row in result]
+                            self._store_result(query_id, query, result)
+                        except sqlite3.Error as e:
+                            self._store_result(query_id, query, f"SQLite error: {e}")
+
+                self.query_queue.task_done()
+                self.client.commit()
 
         def _store_result(self, query_id, query, result):
             with self.lock:
@@ -140,7 +146,7 @@ if sqlite_back:
             self.query_queue.put({'query': (query,val), 'id': query_id, 'time':time.time()})
             return query_id
 
-        def _pop_result(self, query_id, timeout=1, wait=0.01):
+        def _pop_result(self, query_id, timeout=2, wait=0.01):
             start_time = time.time()
             while True:
                 with self.lock:
@@ -162,7 +168,7 @@ if sqlite_back:
             self.should_stop.set()  # Signal the thread to stop
             self.worker_thread.join()  # Wait for the thread to finish
 
-    class SingletonSqliteStorageController(SingletonStorageController):
+    class SingletonSqliteStorageController(AbstractStorageController):
         def __init__(self, model: SingletonSqliteStorage):
             self.model:SingletonSqliteStorage = model
 
@@ -202,10 +208,10 @@ if sqlite_back:
                 
         def is_working(self): return not self.model.query_queue.empty()
 
-    class SingletonSqlitePythonMixStorageController(SingletonStorageController):
+    class SingletonSqlitePythonMixStorageController(AbstractStorageController):
         def __init__(self, model: SingletonSqliteStorage):
             self.disk = SingletonSqliteStorageController(model)
-            self.memory = SingletonPythonDictStorageController(PythonDictStorage())
+            self.memory = PythonDictStorageController(PythonDictStorage())
             for k in self.disk.keys():self.memory.set(k,{})
 
         def exists(self, key: str)->bool:

@@ -17,9 +17,9 @@ import urllib.parse
 from urllib.parse import urlparse
 
 try:
-    from .Storage import SingletonKeyValueStorage,SingletonStorageController
+    from .Storage import SingletonKeyValueStorage,AbstractStorageController
 except Exception as e:
-    from Storage import SingletonKeyValueStorage,SingletonStorageController
+    from Storage import SingletonKeyValueStorage,AbstractStorageController
 
 
 def try_if_error(func):
@@ -66,7 +66,7 @@ if firestore_back:
             self.uuid:str = self.uuid
             self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
-    class SingletonFirestoreStorageController(SingletonStorageController):
+    class SingletonFirestoreStorageController(AbstractStorageController):
         def __init__(self, model: SingletonFirestoreStorage):
             self.model:SingletonFirestoreStorage = model
 
