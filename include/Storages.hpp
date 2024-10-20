@@ -470,7 +470,6 @@ public:
     SingletonKeyValueStorage() : conn(nullptr)
     {
         cpp_backend();
-        file_backend();
     }
 
     auto uuid(){return conn->uuid();}
