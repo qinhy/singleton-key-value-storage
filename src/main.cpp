@@ -10,17 +10,6 @@ using json = nlohmann::json;
 
 auto commands = "set, get, exists, delete, keys, dumps, loads, clean, exit";
 
-    // Initialize the storage controller
-    std::shared_ptr<SingletonKeyValueStorage>
-    init_storage()
-{
-    auto controllerfs = std::make_shared<SingletonKeyValueStorage>();
-    controllerfs->file_backend();
-    SingletonKeyValueStorage controller;
-    controller.add_slave(controllerfs);
-    return controllerfs;
-}
-
 // Function to handle console commands
 void handle_command(std::shared_ptr<SingletonKeyValueStorage> controller, const std::string &command)
 {
@@ -129,7 +118,10 @@ void handle_command(std::shared_ptr<SingletonKeyValueStorage> controller, const 
 int main()
 {
     // Initialize storage
-    auto controller = init_storage();
+    auto controllerfs = std::make_shared<SingletonKeyValueStorage>();
+    controllerfs->file_backend();
+    auto controller = std::make_shared<SingletonKeyValueStorage>();
+    controller->add_slave(controllerfs);
 
     // Console loop
     std::string command;
