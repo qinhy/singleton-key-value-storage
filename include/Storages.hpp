@@ -50,48 +50,15 @@ class TemplateStorageController
 public:
     TemplateStorageController(std::shared_ptr<StorageType> model) : model(model), _uuid(generateUUID())
     {
-        // Register local member functions
         register_local_events();
     }
-
-    virtual bool exists(const std::string &key)
-    {
-        std::cout << "[" << typeid(*this).name() << "]: exists not implemented" << std::endl;
-        return false;
-    }
-
-    virtual void set(const std::string &key, const DataType &value)
-    {
-        std::cout << "[" << typeid(*this).name() << "]: set not implemented" << std::endl;
-    }
-
-    virtual DataType get(const std::string &key)
-    {
-        std::cout << "[" << typeid(*this).name() << "]: get not implemented" << std::endl;
-        return {};
-    }
-
-    virtual void deleteKey(const std::string &key)
-    {
-        std::cout << "[" << typeid(*this).name() << "]: deleteKey not implemented" << std::endl;
-    }
-
-    virtual std::vector<std::string> keys(const std::string &pattern = "*")
-    {
-        std::cout << "[" << typeid(*this).name() << "]: keys not implemented" << std::endl;
-        return {};
-    }
-
-    virtual std::string dumps()
-    {
-        std::cout << "[" << typeid(*this).name() << "]: dumps not implemented" << std::endl;
-        return "{}";
-    }
-
-    virtual void loads(const std::string &jsonString)
-    {
-        std::cout << "[" << typeid(*this).name() << "]: loads not implemented" << std::endl;
-    }
+    virtual bool exists(const std::string &key){not_implemented("exists");return false; }
+    virtual void set(const std::string &key, const DataType &value){not_implemented("set");}
+    virtual DataType get(const std::string &key){not_implemented("get");return {};}
+    virtual void deleteKey(const std::string &key){not_implemented("deleteKey");}
+    virtual std::vector<std::string> keys(const std::string &pattern = "*"){not_implemented("keys");return {};}
+    virtual std::string dumps(){not_implemented("dumps");return "{}";}
+    virtual void loads(const std::string &jsonString){not_implemented("loads");}
 
     // Save and load from file
     void dump(const std::string &path)
@@ -139,19 +106,17 @@ protected:
     std::shared_ptr<StorageType> model;
     std::string _uuid;
 
+    void not_implemented(const std::string &name){std::cout << "[" << name << "]: not implemented" << std::endl;}
     // Register events
     void register_local_events()
     {
-        local_event_map["set"] = [this](const std::string &key, const DataType &value)
-        { this->set(key, value); };
-        local_event_map["delete"] = [this](const std::string &key, const DataType &)
-        { this->deleteKey(key); };
-        local_event_map["load"] = [this](const std::string &path, const DataType &)
-        { this->load(path); };
-        local_event_map["dumps"] = [this](const std::string &, const DataType &)
-        { this->dumps(); };
-        local_event_map["exists"] = [this](const std::string &key, const DataType &)
-        { this->exists(key); };
+        local_event_map["set"] = [this](const std::string &key, const DataType &value){ this->set(key, value); };
+        local_event_map["deleteKey"] = [this](const std::string &key, const DataType &){ this->deleteKey(key); };
+        local_event_map["load"] = [this](const std::string &path, const DataType &){ this->load(path); };
+        local_event_map["loads"] = [this](const std::string &data, const DataType &){ this->loads(data); };
+        local_event_map["clean"] = [this](const std::string &, const DataType &){ this->clean(); };
+        local_event_map["dumps"] = [this](const std::string &, const DataType &){ this->dumps(); };
+        local_event_map["exists"] = [this](const std::string &key, const DataType &){ this->exists(key); };
     }
 
     std::unordered_map<std::string, std::function<void(const std::string &, const DataType &)>> local_event_map;
@@ -171,7 +136,7 @@ public:
         return model->store().find(key) != model->store().end();
     }
 
-    void set(const std::string &key, const DataType &value)
+    void set(const std::string &key, const DataType &value) override
     {
         model->store()[key] = value;
     }
@@ -181,7 +146,7 @@ public:
         model->store().erase(key);
     }
 
-    DataType get(const std::string &key)
+    DataType get(const std::string &key) override
     {
         auto it = model->store().find(key);
         return (it != model->store().end()) ? it->second : nullptr;
@@ -225,7 +190,7 @@ public:
 
     std::string dumps() override
     {
-        json jsonObject;
+        json jsonObject = json::parse("{}");
         for (const auto &key : keys("*"))
         {
             jsonObject[key] = get(key);
@@ -397,7 +362,7 @@ public:
         return get_directory() + "/" + key + ".json";
     }
 
-    void set(const std::string &key, const json &value)
+    void set(const std::string &key, const json &value) override
     {
         std::ofstream file(get_directory_id(key));
         if (file.is_open())
@@ -407,7 +372,7 @@ public:
         }
     }
 
-    json get(const std::string &key)
+    json get(const std::string &key) override
     {
         std::ifstream file(get_directory_id(key));
         json value;
@@ -493,7 +458,7 @@ public:
     }
 
     void add_slave(const std::shared_ptr<SingletonKeyValueStorage> &slave,
-                   const std::vector<std::string> &event_names = {"set", "delete"})
+                   const std::vector<std::string> &event_names = {"set", "deleteKey"})
     {
         if (slave->uuid().empty())
         {
@@ -624,7 +589,7 @@ private:
     //     }
     // }
 
-    void _edit(const std::string &func_name, const std::string &key = "", const json &value = json())
+    void _edit(const std::string &func_name, const std::string &key = "", const json &value = json::parse("{}"))
     {
         if (func_name != "set" && func_name != "deleteKey" && func_name != "clean" && func_name != "load" && func_name != "loads")
         {
@@ -642,7 +607,7 @@ private:
             }
             else
             {
-                revert = json::array({"deleteKey", key, json{}});
+                revert = json::array({"deleteKey", key, json()});
             }
             std::cout << revert << std::endl;
             _verc.add_operation(std::make_tuple(func_name, key, value), revert);
@@ -654,7 +619,7 @@ private:
         }
         else if (func_name == "clean" || func_name == "load" || func_name == "loads")
         {
-            json revert = json::array({"loads", dumps()});
+            json revert = json::array({"loads", dumps(), json()});
             _verc.add_operation(std::make_tuple(func_name, key, value), revert);
         }
 
