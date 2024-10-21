@@ -4,3 +4,4 @@ test.json
 /__pycache__
 /.vscode
 SingletonStorage/sqlite.db
+*.pyc
