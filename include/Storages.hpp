@@ -32,7 +32,7 @@ public:
     // Getters
     const std::string &uuid() const { return _uuid; }
     StoreType &store() { return _store; }
-    
+
     static std::shared_ptr<TemplateStorage> getSingletonInstance()
     {
         static std::shared_ptr<TemplateStorage> instance(new TemplateStorage());
@@ -133,7 +133,7 @@ public:
         }
     }
 
-    auto uuid(){return _uuid;}
+    auto uuid() { return _uuid; }
 
 protected:
     std::shared_ptr<StorageType> model;
@@ -208,32 +208,31 @@ protected:
     std::shared_ptr<TemplateDictStorage<DataType>> model;
 };
 
-
 using JsonDictStorage = TemplateDictStorage<json>;
 class JsonDictStorageController : public TemplateDictStorageController<json>
 {
-    public:
-        JsonDictStorageController(std::shared_ptr<JsonDictStorage> model) :
-        TemplateDictStorageController<json>(model), model(model) {}
+public:
+    JsonDictStorageController(std::shared_ptr<JsonDictStorage> model) : TemplateDictStorageController<json>(model), model(model) {}
 
-        void loads(const std::string &jsonString) override
+    void loads(const std::string &jsonString) override
+    {
+        json jsonObject = json::parse(jsonString);
+        for (auto &[key, value] : jsonObject.items())
         {
-            json jsonObject = json::parse(jsonString);
-            for (auto &[key, value] : jsonObject.items())
-            {
-                set(key, value);
-            }
+            set(key, value);
         }
+    }
 
-        std::string dumps() override
+    std::string dumps() override
+    {
+        json jsonObject;
+        for (const auto &key : keys("*"))
         {
-            json jsonObject;
-            for (const auto &key : keys("*"))
-            {
-                jsonObject[key] = get(key);
-            }
-            return jsonObject.dump();
+            jsonObject[key] = get(key);
         }
+        return jsonObject.dump();
+    }
+
 protected:
     std::shared_ptr<JsonDictStorage> model;
 };
@@ -298,99 +297,109 @@ private:
 
 const std::string EventDispatcherController::ROOT_KEY = "Event";
 
-// class LocalVersionController
-// {
-// public:
-//     explicit LocalVersionController(std::shared_ptr<SingletonStorageController> client = nullptr)
-//     {
-//         if (!client)
-//         {
-//             auto dictStorage = std::make_shared<JsonDictStorage>();
-//             client = std::make_shared<SingletonJsonDictStorageController>(*dictStorage);
-//         }
-//         this->client = client;
-//         json initial_ops = {{"ops", json::array()}};
-//         this->client->set("_Operations", initial_ops);
-//     }
+class LocalVersionController : public JsonDictStorageController
+{
+public:
+    explicit LocalVersionController(std::shared_ptr<JsonDictStorage> model) : JsonDictStorageController(model), model(model)
+    {
+        json initial_ops = {{"ops", json::array()}};
+        set("_Operations", initial_ops);
+    }
 
-//     void add_operation(const std::tuple<std::string, std::string> &operation,
-//                        const std::tuple<std::string, std::string> &revert = std::tuple<std::string, std::string>())
-//     {
-//         auto uuid_str = uuids::to_string(gen());
+    void add_operation(const std::tuple<std::string, std::string, json> &operation,
+                       const std::tuple<std::string, std::string, json> &revert = std::tuple<std::string, std::string, json>())
+    {
+        auto uuid_str = generateUUID();
+        json opData = {{"forward", operation}, {"revert", revert}};
+        set("_Operation:" + uuid_str, opData);
+        json ops = get("_Operations");
+        ops["ops"].push_back(uuid_str);
+        set("_Operations", ops);
+    }
 
-//         json opData = {
-//             {"forward", std::get<0>(operation)},
-//             {"revert", std::get<0>(revert)}};
+    void revert_one_operation(const std::function<void(
+                                  const std::string &, const std::string &, const json &)> &revert_callback)
+    {
+        auto ops = get("_Operations")["ops"].get<std::vector<std::string>>();
+        std::string opuuid = ops.back();
+        auto op = get("_Operation:" + opuuid);
+        auto revert = op["revert"];
+        std::string func_name = revert[0];
+        std::string key = revert[1];
+        json value = revert[2];
+        // std::cout << func_name << "," << key << "," << value << std::endl;
+        revert_callback(func_name, key, value);
+        ops.pop_back();
+        set("_Operations", {{"ops", ops}});
+    }
 
-//         this->client->set("_Operation:" + uuid_str, opData);
+    std::vector<std::string> get_versions()
+    {
+        json ops = get("_Operations")["ops"];
+        return ops.get<std::vector<std::string>>();
+    }
 
-//         json ops = this->client->get("_Operations");
-//         ops["ops"].push_back(uuid_str);
-//         this->client->set("_Operations", ops);
-//     }
+    void revert_operations_until(const std::string &opuuid, const std::function<void(
+                                                                const std::string &, const std::string &, const json &)> &revert_callback)
+    {
+        auto ops = get_versions();
+        auto it = std::find(ops.rbegin(), ops.rend(), opuuid);
+        if (it == ops.rend())
+        {
+            throw std::invalid_argument("No such version: " + opuuid);
+        }
 
-//     void revert_one_operation(const std::function<void(const json &)> &revert_callback)
-//     {
-//         auto ops = this->client->get("_Operations")["ops"].get<std::vector<std::string>>();
-//         std::string opuuid = ops.back();
-//         json op = this->client->get("_Operation:" + opuuid);
-//         json revert = op["revert"];
+        for (auto i = ops.rbegin(); i != it; ++i)
+        {
+            revert_one_operation(revert_callback);
+        }
+    }
 
-//         revert_callback(revert);
-
-//         ops.pop_back();
-//         this->client->set("_Operations", {{"ops", ops}});
-//     }
-
-//     std::vector<std::string> get_versions()
-//     {
-//         json ops = this->client->get("_Operations")["ops"];
-//         return ops.get<std::vector<std::string>>();
-//     }
-
-//     void revert_operations_until(const std::string &opuuid, const std::function<void(const json &)> &revert_callback)
-//     {
-//         auto ops = get_versions();
-//         auto it = std::find(ops.rbegin(), ops.rend(), opuuid);
-//         if (it == ops.rend())
-//         {
-//             throw std::invalid_argument("No such version: " + opuuid);
-//         }
-
-//         for (auto i = ops.rbegin(); i != it; ++i)
-//         {
-//             revert_one_operation(revert_callback);
-//         }
-//     }
-
-// private:
-//     std::shared_ptr<SingletonStorageController> client;
-// };
+private:
+    std::shared_ptr<JsonDictStorage> model;
+};
 
 class FileStorageController : public JsonDictStorageController
 {
 public:
-    FileStorageController(std::shared_ptr<JsonDictStorage> model) :
-     JsonDictStorageController(model), model(model) {
+    FileStorageController(std::shared_ptr<JsonDictStorage> model) : JsonDictStorageController(model), model(model)
+    {
         set_directory();
     }
 
-    void set_directory(const std::string &directory = "./store"){
+    void set_directory(const std::string &directory = "./store")
+    {
         model->store()["directory"] = directory;
     }
 
-    auto get_directory(){
+    auto get_directory()
+    {
         auto it = model->store().find("directory");
-        json directory = (it != model->store().end()) ? it->second : json();  
+        json directory = (it != model->store().end()) ? it->second : json();
         auto res = directory.get<std::string>();
-        if(res.empty())throw std::invalid_argument("No directory!");
+
+        if (res.empty())
+        {
+            throw std::invalid_argument("No directory!");
+        }
+
+        // Check if the directory exists, and create it if it doesn't
+        if (!fs::exists(res))
+        {
+            std::cout << "Directory does not exist, creating: " << res << std::endl;
+            fs::create_directories(res);
+        }
         return res;
+    }
+
+    auto get_directory_id(const std::string &key)
+    {
+        return get_directory() + "/" + key + ".json";
     }
 
     void set(const std::string &key, const json &value)
     {
-
-        std::ofstream file(get_directory() + "/" + key + ".json");
+        std::ofstream file(get_directory_id(key));
         if (file.is_open())
         {
             file << value.dump();
@@ -400,7 +409,7 @@ public:
 
     json get(const std::string &key)
     {
-        std::ifstream file(get_directory() + "/" + key + ".json");
+        std::ifstream file(get_directory_id(key));
         json value;
         if (file.is_open())
         {
@@ -412,7 +421,7 @@ public:
 
     void deleteKey(const std::string &key) override
     {
-        std::string filename = get_directory() + "/" + key + ".json";
+        std::string filename = get_directory_id(key);
         std::remove(filename.c_str());
     }
 
@@ -467,12 +476,12 @@ private:
 class SingletonKeyValueStorage
 {
 public:
-    SingletonKeyValueStorage() : conn(nullptr)
+    SingletonKeyValueStorage() : conn(nullptr), _verc(std::make_shared<JsonDictStorage>())
     {
         cpp_backend();
     }
 
-    auto uuid(){return conn->uuid();}
+    auto uuid() { return conn->uuid(); }
 
     void cpp_backend()
     {
@@ -495,7 +504,7 @@ public:
             if (slave->conn->has_event(event))
             {
                 event_dispa.set_event(event, [=](const std::string &key, const json &value)
-                                      { slave->conn->call_event(event,key,value); }, slave->uuid());
+                                      { slave->conn->call_event(event, key, value); }, slave->uuid());
             }
             else
             {
@@ -509,18 +518,25 @@ public:
         event_dispa.delete_event(slave->uuid());
     }
 
-    // void revert_one_operation() {
-    //     _verc.revert_one_operation([=](const json& revert) { _edit(revert); });
-    // }
+    void revert_one_operation()
+    {
+        _verc.revert_one_operation([=](
+                                       const std::string &func_name, const std::string &key = "", const json &value = json())
+                                   { _edit(func_name, key, value); });
+    }
 
-    // std::string get_current_version() {
-    //     auto versions = _verc.get_versions();
-    //     return versions.empty() ? "" : versions.back();
-    // }
+    std::string get_current_version()
+    {
+        auto versions = _verc.get_versions();
+        return versions.empty() ? "No verions" : versions.back();
+    }
 
-    // void revert_operations_until(const std::string& opuuid) {
-    //     _verc.revert_operations_until(opuuid, [=](const json& revert) { _edit(revert); });
-    // }
+    void revert_operations_until(const std::string &opuuid)
+    {
+        _verc.revert_operations_until(opuuid, [=](
+                                                  const std::string &func_name, const std::string &key = "", const json &value = json())
+                                      { _edit(func_name, key, value); });
+    }
 
     void set(const std::string &key, const json &value) { _edit("set", key, value); }
     void deleteKey(const std::string &key) { _edit("deleteKey", key); }
@@ -536,7 +552,7 @@ private:
     std::shared_ptr<JsonDictStorageController> conn;
     EventDispatcherController event_dispa;
     // KeysHistoryController _hist;
-    // LocalVersionController _verc;
+    LocalVersionController _verc;
 
     std::shared_ptr<JsonDictStorageController> _switch_backend(const std::string &name)
     {
@@ -570,42 +586,43 @@ private:
         }
     }
 
-    bool _try_edit_error(const std::tuple<std::string, std::string, json> &args)
-    {
-        // Unpack arguments
-        const std::string &func_name = std::get<0>(args);
-        const std::string &key = std::get<1>(args);
-        const json &value = std::get<2>(args);
+    // bool _try_edit_error(const std::tuple<std::string, std::string, json> &args)
+    // {
+    //     // Unpack arguments
+    //     const std::string &func_name = std::get<0>(args);
+    //     const std::string &key = std::get<1>(args);
+    //     const json &value = std::get<2>(args);
 
-        // Perform local version control based on the function
-        try
-        {
-            // if (func_name == "set") {
-            //     json revert;
-            //     if (exists(key)) {
-            //         revert = json::array({"set", key, get(key)});
-            //     } else {
-            //         revert = json::array({"delete", key});
-            //     }
-            //     _verc.add_operation({func_name, key, value}, revert);
-            // } else if (func_name == "delete") {
-            //     json revert = json::array({"set", key, get(key)});
-            //     _verc.add_operation({func_name, key, value}, revert);
-            // } else if (func_name == "clean" || func_name == "load" || func_name == "loads") {
-            //     json revert = json::array({"loads", dumps()});
-            //     _verc.add_operation({func_name, key, value}, revert);
-            // }
+    //     // Perform local version control based on the function
+    //     try
+    //     {
+    //         if (func_name == "set") {
+    //             json revert;
+    //             if (exists(key)) {
+    //                 revert = json::array({"set", key, get(key)});
+    //             } else {
+    //                 revert = json::array({"delete", key, json{}});
+    //             }
+    //             std::cout << revert << std::endl;
+    //             _verc.add_operation(std::make_tuple(func_name, key, value), revert);
+    //         } else if (func_name == "delete") {
+    //             json revert = json::array({"set", key, get(key)});
+    //             _verc.add_operation(std::make_tuple(func_name, key, value), revert);
+    //         } else if (func_name == "clean" || func_name == "load" || func_name == "loads") {
+    //             json revert = json::array({"loads", dumps()});
+    //             _verc.add_operation(std::make_tuple(func_name, key, value), revert);
+    //         }
 
-            // Execute the edit
-            _edit(func_name, key, value);
-            return true;
-        }
-        catch (const std::exception &e)
-        {
-            _print(e.what());
-            return false;
-        }
-    }
+    //         // Execute the edit
+    //         _edit(func_name, key, value);
+    //         return true;
+    //     }
+    //     catch (const std::exception &e)
+    //     {
+    //         _print(e.what());
+    //         return false;
+    //     }
+    // }
 
     void _edit(const std::string &func_name, const std::string &key = "", const json &value = json())
     {
@@ -616,6 +633,30 @@ private:
         }
 
         // _hist.reset();  // Reset history for tracking changes
+        if (func_name == "set")
+        {
+            json revert;
+            if (exists(key))
+            {
+                revert = json::array({"set", key, get(key)});
+            }
+            else
+            {
+                revert = json::array({"deleteKey", key, json{}});
+            }
+            std::cout << revert << std::endl;
+            _verc.add_operation(std::make_tuple(func_name, key, value), revert);
+        }
+        else if (func_name == "deleteKey")
+        {
+            json revert = json::array({"set", key, get(key)});
+            _verc.add_operation(std::make_tuple(func_name, key, value), revert);
+        }
+        else if (func_name == "clean" || func_name == "load" || func_name == "loads")
+        {
+            json revert = json::array({"loads", dumps()});
+            _verc.add_operation(std::make_tuple(func_name, key, value), revert);
+        }
 
         // Handle based on function name
         if (func_name == "set")

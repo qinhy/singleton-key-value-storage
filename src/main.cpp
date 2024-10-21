@@ -8,7 +8,7 @@
 
 using json = nlohmann::json;
 
-auto commands = "set, get, exists, delete, keys, dumps, loads, clean, exit";
+auto commands = "set, get, exists, delete, keys, dumps, loads, clean, ver, rev, exit";
 
 // Function to handle console commands
 void handle_command(std::shared_ptr<SingletonKeyValueStorage> controller, const std::string &command)
@@ -29,6 +29,10 @@ void handle_command(std::shared_ptr<SingletonKeyValueStorage> controller, const 
         catch (json::parse_error &e)
         {
             std::cout << "Invalid JSON format: " << e.what() << std::endl;
+        }
+        catch (std::invalid_argument &e)
+        {
+            std::cout << "ERROR : " << e.what() << std::endl;
         }
     }
     else if (command == "get")
@@ -105,6 +109,16 @@ void handle_command(std::shared_ptr<SingletonKeyValueStorage> controller, const 
         controller->clean();
         std::cout << "Clean all data." << std::endl;
     }
+    else if (command == "ver")
+    {
+        std::cout << controller->get_current_version() << std::endl;
+    }
+    else if (command == "rev")
+    {
+        std::cout << "currrent: " << controller->get_current_version() << std::endl;
+        controller->revert_one_operation();
+        std::cout << "to: " << controller->get_current_version() << std::endl;
+    }
     else if (command == "exit")
     {
         std::cout << "Exiting..." << std::endl;
@@ -118,10 +132,10 @@ void handle_command(std::shared_ptr<SingletonKeyValueStorage> controller, const 
 int main()
 {
     // Initialize storage
-    auto controllerfs = std::make_shared<SingletonKeyValueStorage>();
-    controllerfs->file_backend();
     auto controller = std::make_shared<SingletonKeyValueStorage>();
-    controller->add_slave(controllerfs);
+    controller->file_backend();
+    // auto controller = std::make_shared<SingletonKeyValueStorage>();
+    // controller->add_slave(controllerfs);
 
     // Console loop
     std::string command;
