@@ -5,134 +5,173 @@
 #include <map>
 #include <vector>
 #include <memory>
+#include <functional>
 
 using json = nlohmann::json;
 
-auto commands = "set, get, exists, delete, keys, dumps, loads, clean, ver, rev, exit";
+// Helper functions
+std::string prompt(const std::string &message)
+{
+    std::string input;
+    std::cout << message;
+    std::getline(std::cin, input);
+    return input;
+}
+
+void handle_json_parse_error(const json::parse_error &e)
+{
+    std::cout << "Invalid JSON format: " << e.what() << std::endl;
+}
+
+void handle_invalid_argument(const std::invalid_argument &e)
+{
+    std::cout << "ERROR: " << e.what() << std::endl;
+}
+
+// Command map
+using Shared_store_ptr = std::shared_ptr<SingletonKeyValueStorage>;
+using CommandFunction = std::function<void(Shared_store_ptr)>;
+
+std::map<std::string, CommandFunction> command_map = {
+    {"set", [](Shared_store_ptr controller)
+     {
+         std::string key = prompt("Enter key: ");
+         std::string value = prompt("Enter value (in JSON format): ");
+         try
+         {
+             json json_value = json::parse(value);
+             controller->set(key, json_value);
+             std::cout << "Set key " << key << " : " << json_value.dump() << std::endl;
+         }
+         catch (json::parse_error &e)
+         {
+             handle_json_parse_error(e);
+         }
+         catch (std::invalid_argument &e)
+         {
+             handle_invalid_argument(e);
+         }
+     }},
+
+    {"get", [](Shared_store_ptr controller)
+     {
+         std::string key = prompt("Enter key: ");
+         json value = controller->get(key);
+         if (!value.is_null())
+         {
+             std::cout << "Value for key " << key << ": " << value.dump() << std::endl;
+         }
+         else
+         {
+             std::cout << "No value found for key " << key << std::endl;
+         }
+     }},
+
+    {"exists", [](Shared_store_ptr controller)
+     {
+         std::string key = prompt("Enter key: ");
+         if (controller->exists(key))
+         {
+             std::cout << "Key " << key << " exists in storage." << std::endl;
+         }
+         else
+         {
+             std::cout << "Key " << key << " does not exist in storage." << std::endl;
+         }
+     }},
+
+    {"delete", [](Shared_store_ptr controller)
+     {
+         std::string key = prompt("Enter key: ");
+         controller->deleteKey(key);
+         std::cout << "Deleted key " << key << std::endl;
+     }},
+
+    {"keys", [](Shared_store_ptr controller)
+     {
+         std::string pattern = prompt("Enter key pattern: ");
+         std::vector<std::string> allKeys = controller->keys(pattern);
+         std::cout << "All Keys in Storage:" << std::endl;
+         for (const auto &k : allKeys)
+         {
+             std::cout << "- " << k << std::endl;
+         }
+     }},
+
+    {"dumps", [](Shared_store_ptr controller)
+     {
+         std::string dumpedData = controller->dumps();
+         std::cout << "Dumped Data: " << dumpedData << std::endl;
+     }},
+
+    {"loads", [](Shared_store_ptr controller)
+     {
+         std::string jsonData = prompt("Enter JSON data string: ");
+         try
+         {
+             controller->loads(jsonData);
+             std::cout << "Loaded JSON data into storage." << std::endl;
+         }
+         catch (json::parse_error &e)
+         {
+             handle_json_parse_error(e);
+         }
+     }},
+
+    {"clean", [](Shared_store_ptr controller)
+     {
+         controller->clean();
+         std::cout << "Cleaned all data." << std::endl;
+     }},
+
+    {"ver", [](Shared_store_ptr controller)
+     {
+         std::cout << "Current: " << controller->get_current_version() << std::endl;
+     }},
+
+    {"rev", [](Shared_store_ptr controller)
+     {
+         std::cout << "Current: " << controller->get_current_version() << std::endl;
+         controller->revert_one_operation();
+         std::cout << "Reverted to: " << controller->get_current_version() << std::endl;
+     }},
+
+    {"exit", [](Shared_store_ptr)
+     {
+         std::cout << "Exiting..." << std::endl;
+     }}};
+
+// Function to auto-generate command list
+std::string generate_command_list(const std::map<std::string, CommandFunction> &command_map)
+{
+    std::ostringstream oss;
+    for (const auto &cmd : command_map)
+    {
+        if (oss.tellp() > 0) oss << ", ";  // Add comma separator between commands
+        oss << cmd.first;
+    }
+    return oss.str();
+}
 
 // Function to handle console commands
-void handle_command(std::shared_ptr<SingletonKeyValueStorage> controller, const std::string &command)
+void handle_command(Shared_store_ptr controller, const std::string &command)
 {
-    if (command == "set")
+    auto cmd = command_map.find(command);
+    if (cmd != command_map.end())
     {
-        std::string key, value;
-        std::cout << "Enter key: ";
-        std::getline(std::cin, key);
-        std::cout << "Enter value (in JSON format): ";
-        std::getline(std::cin, value);
-        try
-        {
-            json json_value = json::parse(value);
-            controller->set(key, json_value);
-            std::cout << "Set key " << key << " with value " << json_value.dump() << std::endl;
-        }
-        catch (json::parse_error &e)
-        {
-            std::cout << "Invalid JSON format: " << e.what() << std::endl;
-        }
-        catch (std::invalid_argument &e)
-        {
-            std::cout << "ERROR : " << e.what() << std::endl;
-        }
-    }
-    else if (command == "get")
-    {
-        std::string key;
-        std::cout << "Enter key: ";
-        std::getline(std::cin, key);
-        json value = controller->get(key);
-        if (!value.is_null())
-        {
-            std::cout << "Value for key " << key << ": " << value.dump() << std::endl;
-        }
-        else
-        {
-            std::cout << "No value found for key " << key << std::endl;
-        }
-    }
-    else if (command == "exists")
-    {
-        std::string key;
-        std::cout << "Enter key: ";
-        std::getline(std::cin, key);
-        if (controller->exists(key))
-        {
-            std::cout << "Key " << key << " exists in storage." << std::endl;
-        }
-        else
-        {
-            std::cout << "Key " << key << " does not exist in storage." << std::endl;
-        }
-    }
-    else if (command == "delete")
-    {
-        std::string key;
-        std::cout << "Enter key: ";
-        std::getline(std::cin, key);
-        controller->deleteKey(key);
-        std::cout << "Deleted key " << key << std::endl;
-    }
-    else if (command == "keys")
-    {
-        std::string key;
-        std::cout << "Enter key pattern: ";
-        std::getline(std::cin, key);
-        std::vector<std::string> allKeys = controller->keys(key);
-        std::cout << "All Keys in Storage:" << std::endl;
-        for (const auto &k : allKeys)
-        {
-            std::cout << "- " << k << std::endl;
-        }
-    }
-    else if (command == "dumps")
-    {
-        std::string dumpedData = controller->dumps();
-        std::cout << "Dumped Data: " << dumpedData << std::endl;
-    }
-    else if (command == "loads")
-    {
-        std::string jsonData;
-        std::cout << "Enter JSON data string: ";
-        std::getline(std::cin, jsonData);
-        try
-        {
-            controller->loads(jsonData);
-            std::cout << "Loaded JSON data into storage." << std::endl;
-        }
-        catch (json::parse_error &e)
-        {
-            std::cout << "Invalid JSON format: " << e.what() << std::endl;
-        }
-    }
-    else if (command == "clean")
-    {
-        controller->clean();
-        std::cout << "Clean all data." << std::endl;
-    }
-    else if (command == "ver")
-    {
-        std::cout << controller->get_current_version() << std::endl;
-    }
-    else if (command == "rev")
-    {
-        std::cout << "currrent: " << controller->get_current_version() << std::endl;
-        controller->revert_one_operation();
-        std::cout << "to: " << controller->get_current_version() << std::endl;
-    }
-    else if (command == "exit")
-    {
-        std::cout << "Exiting..." << std::endl;
+        cmd->second(controller);
     }
     else
     {
-        std::cout << "Invalid command. Available commands: " << commands << std::endl;
+        std::cout << "Invalid command. Available commands: " << generate_command_list(command_map) << std::endl;
     }
 }
 
 
-int test() {
+int test()
+{
     std::cout << "######## start." << std::endl;
-    auto controllerfs = std::make_shared<SingletonKeyValueStorage>() ;
+    auto controllerfs = std::make_shared<SingletonKeyValueStorage>();
     controllerfs->file_backend();
 
     {
@@ -146,21 +185,27 @@ int test() {
     std::cout << controller.uuid() << std::endl;
 
     std::cout << "######## Set some key-value pairs" << std::endl;
-    controller.set("user1", json{{"name", "Alice"}, {"age", 30}, {"nums", {1,2,3}}});
+    controller.set("user1", json{{"name", "Alice"}, {"age", 30}, {"nums", {1, 2, 3}}});
 
     std::cout << "######## Check if a key exists" << std::endl;
     std::string key = "user1";
-    if (controller.exists(key)) {
+    if (controller.exists(key))
+    {
         std::cout << "Key " << key << " exists in storage." << std::endl;
-    } else {
+    }
+    else
+    {
         std::cout << "Key " << key << " does not exist in storage." << std::endl;
     }
 
     std::cout << "######## Retrieve and print the value for a key" << std::endl;
     json value = controller.get("user1");
-    if (!value.is_null()) {
+    if (!value.is_null())
+    {
         std::cout << "Value for key " << key << ": " << value.dump() << std::endl;
-    } else {
+    }
+    else
+    {
         std::cout << "No value found for key " << key << std::endl;
     }
 
@@ -174,7 +219,8 @@ int test() {
     std::cout << "######## Print all keys" << std::endl;
     std::vector<std::string> allKeys = controller.keys();
     std::cout << "All Keys in Storage:" << std::endl;
-    for (const auto& k : allKeys) {
+    for (const auto &k : allKeys)
+    {
         std::cout << "- " << k << std::endl;
     }
 
@@ -183,7 +229,8 @@ int test() {
     std::cout << "Deleted key 'user1'" << std::endl;
 
     std::cout << "######## Verify deletion" << std::endl;
-    if (!controller.exists("user1")) {
+    if (!controller.exists("user1"))
+    {
         std::cout << "Key 'user1' was successfully deleted." << std::endl;
     }
 
@@ -210,7 +257,7 @@ int main()
     std::string command;
     while (true)
     {
-        std::cout << "\n> Enter command (" << commands << "): ";
+        std::cout << "\n> Enter command (" << generate_command_list(command_map) << "): ";
         std::getline(std::cin, command);
 
         if (command == "exit")

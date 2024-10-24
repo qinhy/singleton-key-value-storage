@@ -15,9 +15,10 @@
 #include <uuid.h>
 
 using json = nlohmann::json;
+using String = std::string;
 namespace fs = std::filesystem;
 
-static std::string generateUUID() noexcept
+static String generateUUID() noexcept
 {
     static std::mt19937 generator{std::random_device{}()};
     static uuids::uuid_random_generator uuidGen{generator};
@@ -31,7 +32,7 @@ class TemplateStorage
 public:
     TemplateStorage() : _uuid(generateUUID()) {}
 
-    const std::string &uuid() const noexcept { return _uuid; }
+    const String &uuid() const noexcept { return _uuid; }
     StoreType &store() noexcept { return _store; }
 
     static std::shared_ptr<TemplateStorage> getSingletonInstance()
@@ -41,7 +42,7 @@ public:
     }
 
 private:
-    std::string _uuid;
+    String _uuid;
     StoreType _store;
 };
 
@@ -49,35 +50,47 @@ template <typename DataType, typename StorageType>
 class TemplateStorageController
 {
 public:
-    TemplateStorageController(std::shared_ptr<StorageType> model) 
+    TemplateStorageController(std::shared_ptr<StorageType> model)
         : model(std::move(model)), _uuid(generateUUID())
     {
         register_local_events();
     }
 
-    virtual bool exists(const std::string &key) { not_implemented("exists"); return false; }
-    virtual void set(const std::string &key, const DataType &value) { not_implemented("set"); }
-    virtual DataType get(const std::string &key) { not_implemented("get"); return {}; }
-    virtual void deleteKey(const std::string &key) { not_implemented("deleteKey"); }
-    virtual std::vector<std::string> keys(const std::string &pattern = "*") 
-    { 
-        not_implemented("keys"); 
-        return {}; 
+    virtual bool exists(const String &key)
+    {
+        not_implemented("exists");
+        return false;
     }
-    virtual std::string dumps() { not_implemented("dumps"); return "{}"; }
-    virtual void loads(const std::string &jsonString) { not_implemented("loads"); }
+    virtual void set(const String &key, const DataType &value) { not_implemented("set"); }
+    virtual DataType get(const String &key)
+    {
+        not_implemented("get");
+        return {};
+    }
+    virtual void deleteKey(const String &key) { not_implemented("deleteKey"); }
+    virtual std::vector<String> keys(const String &pattern = "*")
+    {
+        not_implemented("keys");
+        return {};
+    }
+    virtual String dumps()
+    {
+        not_implemented("dumps");
+        return "{}";
+    }
+    virtual void loads(const String &jsonString) { not_implemented("loads"); }
 
     // Save and load from file
-    void dump(const std::string &path) const
+    void dump(const String &path) const
     {
         std::ofstream file(path);
         file << dumps();
     }
 
-    void load(const std::string &path)
+    void load(const String &path)
     {
         std::ifstream file(path);
-        std::string jsonString((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        String jsonString((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         loads(jsonString);
     }
 
@@ -89,12 +102,12 @@ public:
         }
     }
 
-    bool has_event(const std::string &event_name) const noexcept
+    bool has_event(const String &event_name) const noexcept
     {
         return local_event_map.find(event_name) != local_event_map.end();
     }
 
-    void call_event(const std::string &event_name, const std::string &key = "", const DataType &value = {})
+    void call_event(const String &event_name, const String &key = "", const DataType &value = {})
     {
         auto it = local_event_map.find(event_name);
         if (it != local_event_map.end())
@@ -107,33 +120,40 @@ public:
         }
     }
 
-    const std::string& uuid() const noexcept { return _uuid; }
+    const String &uuid() const noexcept { return _uuid; }
 
 protected:
     std::shared_ptr<StorageType> model;
-    std::string _uuid;
+    String _uuid;
 
-    void not_implemented(const std::string &name) const noexcept 
-    { 
-        std::cout << "[" << name << "]: not implemented" << std::endl; 
+    void not_implemented(const String &name) const noexcept
+    {
+        std::cout << "[" << name << "]: not implemented" << std::endl;
     }
 
     void register_local_events()
     {
-        local_event_map["set"] = [this](const std::string &key, const DataType &value){ this->set(key, value); };
-        local_event_map["deleteKey"] = [this](const std::string &key, const DataType &){ this->deleteKey(key); };
-        local_event_map["load"] = [this](const std::string &path, const DataType &){ this->load(path); };
-        local_event_map["loads"] = [this](const std::string &data, const DataType &){ this->loads(data); };
-        local_event_map["clean"] = [this](const std::string &, const DataType &){ this->clean(); };
-        local_event_map["dumps"] = [this](const std::string &, const DataType &){ this->dumps(); };
-        local_event_map["exists"] = [this](const std::string &key, const DataType &){ this->exists(key); };
+        local_event_map["set"] = [this](const String &key, const DataType &value)
+        { this->set(key, value); };
+        local_event_map["deleteKey"] = [this](const String &key, const DataType &)
+        { this->deleteKey(key); };
+        local_event_map["load"] = [this](const String &path, const DataType &)
+        { this->load(path); };
+        local_event_map["loads"] = [this](const String &data, const DataType &)
+        { this->loads(data); };
+        local_event_map["clean"] = [this](const String &, const DataType &)
+        { this->clean(); };
+        local_event_map["dumps"] = [this](const String &, const DataType &)
+        { this->dumps(); };
+        local_event_map["exists"] = [this](const String &key, const DataType &)
+        { this->exists(key); };
     }
 
-    std::unordered_map<std::string, std::function<void(const std::string &, const DataType &)>> local_event_map;
+    std::unordered_map<String, std::function<void(const String &, const DataType &)>> local_event_map;
 };
 
 template <typename DataType>
-using TemplateDictStorage = TemplateStorage<std::unordered_map<std::string, DataType>>;
+using TemplateDictStorage = TemplateStorage<std::unordered_map<String, DataType>>;
 
 template <typename DataType>
 class TemplateDictStorageController : public TemplateStorageController<DataType, TemplateDictStorage<DataType>>
@@ -142,25 +162,25 @@ public:
     explicit TemplateDictStorageController(std::shared_ptr<TemplateDictStorage<DataType>> model)
         : TemplateStorageController<DataType, TemplateDictStorage<DataType>>(model), model(std::move(model)) {}
 
-    bool exists(const std::string &key) override
+    bool exists(const String &key) override
     {
         const auto &store = model->store();
         return store.find(key) != store.end();
     }
 
-    void set(const std::string &key, const DataType &value) override
+    void set(const String &key, const DataType &value) override
     {
         auto &store = model->store();
         store[key] = std::move(value); // Use std::move to avoid unnecessary copies
     }
 
-    void deleteKey(const std::string &key) override
+    void deleteKey(const String &key) override
     {
         auto &store = model->store();
         store.erase(key);
     }
 
-    DataType get(const std::string &key) override
+    DataType get(const String &key) override
     {
         const auto &store = model->store();
         auto it = store.find(key);
@@ -171,10 +191,10 @@ public:
         return nullptr;
     }
 
-    std::vector<std::string> keys(const std::string &pattern = "*") override
+    std::vector<String> keys(const String &pattern = "*") override
     {
         const auto &store = model->store();
-        std::vector<std::string> result;
+        std::vector<String> result;
 
         if (pattern == "*")
         {
@@ -188,7 +208,7 @@ public:
         }
 
         // Otherwise, perform regex matching on keys
-        std::string regexPattern = std::regex_replace(pattern, std::regex(R"(\*)"), ".*");
+        String regexPattern = std::regex_replace(pattern, std::regex(R"(\*)"), ".*");
         regexPattern = std::regex_replace(regexPattern, std::regex(R"(\?)"), ".");
         std::regex regexPatternCompiled(regexPattern);
 
@@ -215,13 +235,13 @@ public:
     JsonDictStorageController(std::shared_ptr<JsonDictStorage> model)
         : TemplateDictStorageController<json>(std::move(model)) {}
 
-    void loads(const std::string &jsonString) override
+    void loads(const String &jsonString) override
     {
         try
         {
             // Parse the input JSON string
             json jsonObject = json::parse(jsonString);
-            
+
             // Iterate through the parsed JSON object and set each key-value pair
             for (auto &[key, value] : jsonObject.items())
             {
@@ -234,11 +254,11 @@ public:
         }
     }
 
-    std::string dumps() override
+    String dumps() override
     {
         // Create a new JSON object
         json jsonObject = json::object();
-        
+
         // Iterate through all keys and insert them into the JSON object
         for (const auto &key : keys("*"))
         {
@@ -249,14 +269,14 @@ public:
         return jsonObject.dump();
     }
 };
-using FunctionType = std::function<void(const std::string &, const json &)>;
+using FunctionType = std::function<void(const String &, const json &)>;
 using FunctionStorage = TemplateDictStorage<FunctionType>;
 using FunctionStorageController = TemplateDictStorageController<FunctionType>;
 
 class EventDispatcherController
 {
 public:
-    static const std::string ROOT_KEY;
+    static const String ROOT_KEY;
 
     explicit EventDispatcherController(std::shared_ptr<FunctionStorageController> client = nullptr)
     {
@@ -268,29 +288,29 @@ public:
     }
 
     // Get all registered events
-    std::vector<std::string> events() const
+    std::vector<String> events() const
     {
         return client->keys(ROOT_KEY + ":*");
     }
 
     // Delete a specific event
-    void delete_event(const std::string &event_name)
+    void delete_event(const String &event_name)
     {
         client->deleteKey(event_name);
     }
 
     // Set a new event callback, generating a UUID if no ID is provided
-    void set_event(const std::string &event_name, FunctionType callback, const std::string &id = "")
+    void set_event(const String &event_name, FunctionType callback, const String &id = "")
     {
-        std::string event_id = id.empty() ? generateUUID() : id;
-        std::string key = construct_event_key(event_name, event_id);
+        String event_id = id.empty() ? generateUUID() : id;
+        String key = construct_event_key(event_name, event_id);
         client->set(key, std::move(callback));
     }
 
     // Dispatch an event to all registered callbacks
-    void dispatch(const std::string &event_name, const std::string &key = "", const json &value = json())
+    void dispatch(const String &event_name, const String &key = "", const json &value = json())
     {
-        std::string pattern = ROOT_KEY + ":" + event_name + ":*";
+        String pattern = ROOT_KEY + ":" + event_name + ":*";
         for (const auto &k : client->keys(pattern))
         {
             auto callback_opt = client->get(k);
@@ -314,13 +334,12 @@ private:
     std::shared_ptr<FunctionStorageController> client;
 
     // Helper to construct event key
-    std::string construct_event_key(const std::string &event_name, const std::string &event_id) const
+    String construct_event_key(const String &event_name, const String &event_id) const
     {
         return ROOT_KEY + ":" + event_name + ":" + event_id;
     }
 };
-const std::string EventDispatcherController::ROOT_KEY = "Event";
-
+const String EventDispatcherController::ROOT_KEY = "Event";
 
 class LocalVersionController : public JsonDictStorageController
 {
@@ -334,10 +353,10 @@ public:
     }
 
     // Adds a new operation and its revert operation
-    void add_operation(const std::tuple<std::string, std::string, json> &operation,
-                       const std::tuple<std::string, std::string, json> &revert = std::make_tuple("", "", json()))
+    void add_operation(const std::tuple<String, String, json> &operation,
+                       const std::tuple<String, String, json> &revert = std::make_tuple("", "", json()))
     {
-        std::string uuid_str = generateUUID();
+        String uuid_str = generateUUID();
         json opData = {{"forward", operation}, {"revert", revert}};
         set(OPERATION_KEY_PREFIX + uuid_str, opData);
 
@@ -347,40 +366,41 @@ public:
     }
 
     // Reverts the last operation in the list using the provided callback
-    void revert_one_operation(const std::function<void(const std::string &, const std::string &, const json &)> &revert_callback)
+    void revert_one_operation(const std::function<void(const String &, const String &, const json &)> &revert_callback)
     {
         auto versions = get_versions();
-        if(versions.empty())return;
+        if (versions.empty())
+            return;
 
         auto ops = versions;
-        std::string opuuid = ops.back();
+        String opuuid = ops.back();
         auto op = get(OPERATION_KEY_PREFIX + opuuid);
         auto revert = op["revert"];
-        if (revert.is_null() || revert[0].get<std::string>().empty())
+        if (revert.is_null() || revert[0].get<String>().empty())
         {
             throw std::runtime_error("No valid revert operation found.");
         }
 
-        std::string func_name = revert[0];
-        std::string key = revert[1];
+        String func_name = revert[0];
+        String key = revert[1];
         json value = revert[2];
 
         revert_callback(func_name, key, value);
 
-        ops.pop_back();  // Remove last operation
+        ops.pop_back(); // Remove last operation
         set(OPERATIONS_KEY, {{"ops", ops}});
     }
 
     // Returns a list of all operation UUIDs
-    std::vector<std::string> get_versions()
+    std::vector<String> get_versions()
     {
         json ops = get(OPERATIONS_KEY)["ops"];
-        return ops.get<std::vector<std::string>>();
+        return ops.get<std::vector<String>>();
     }
 
     // Reverts operations until the given operation UUID
-    void revert_operations_until(const std::string &opuuid,
-                                 const std::function<void(const std::string &, const std::string &, const json &)> &revert_callback)
+    void revert_operations_until(const String &opuuid,
+                                 const std::function<void(const String &, const String &, const json &)> &revert_callback)
     {
         auto ops = get_versions();
         auto it = std::find(ops.rbegin(), ops.rend(), opuuid);
@@ -415,13 +435,13 @@ public:
     }
 
     // Set the storage directory, defaulting to "./store"
-    void set_directory(const std::string &directory = "./store")
+    void set_directory(const String &directory = "./store")
     {
         model->store()["directory"] = directory;
     }
 
     // Retrieve the storage directory, ensuring it exists
-    std::string get_directory() const
+    String get_directory() const
     {
         auto it = model->store().find("directory");
         if (it == model->store().end() || it->second.is_null())
@@ -429,7 +449,7 @@ public:
             throw std::invalid_argument("No directory specified!");
         }
 
-        std::string directory = it->second.get<std::string>();
+        String directory = it->second.get<String>();
 
         if (directory.empty())
         {
@@ -446,13 +466,13 @@ public:
     }
 
     // Generate a full file path based on the key
-    std::string get_directory_id(const std::string &key) const
+    String get_directory_id(const String &key) const
     {
         return get_directory() + "/" + key + ".json";
     }
 
     // Override set method to write data to a file
-    void set(const std::string &key, const json &value) override
+    void set(const String &key, const json &value) override
     {
         std::ofstream file(get_directory_id(key));
         if (!file.is_open())
@@ -463,7 +483,7 @@ public:
     }
 
     // Override get method to read data from a file
-    json get(const std::string &key) override
+    json get(const String &key) override
     {
         std::ifstream file(get_directory_id(key));
         if (!file.is_open())
@@ -477,9 +497,9 @@ public:
     }
 
     // Override deleteKey to remove the file associated with the key
-    void deleteKey(const std::string &key) override
+    void deleteKey(const String &key) override
     {
-        std::string filename = get_directory_id(key);
+        String filename = get_directory_id(key);
         if (fs::exists(filename))
         {
             fs::remove(filename);
@@ -491,16 +511,16 @@ public:
     }
 
     // Override keys to retrieve all files matching the glob pattern
-    std::vector<std::string> keys(const std::string &pattern = "*") override
+    std::vector<String> keys(const String &pattern = "*") override
     {
-        std::vector<std::string> matchingKeys;
+        std::vector<String> matchingKeys;
         std::regex regexPattern(glob_to_regex(pattern));
 
         for (const auto &entry : fs::directory_iterator(get_directory()))
         {
             if (entry.is_regular_file())
             {
-                std::string filename = entry.path().filename().string();
+                String filename = entry.path().filename().string();
                 if (std::regex_match(filename, regexPattern))
                 {
                     matchingKeys.push_back(entry.path().stem().string()); // Use stem() to get the base filename without extension
@@ -511,9 +531,9 @@ public:
     }
 
     // Convert glob pattern (e.g., "*.json") to regex
-    std::string glob_to_regex(const std::string &glob = "*") const
+    String glob_to_regex(const String &glob = "*") const
     {
-        std::string regex = "^";
+        String regex = "^";
         for (char ch : glob + ".json")
         {
             switch (ch)
@@ -543,17 +563,16 @@ private:
 class SingletonKeyValueStorage
 {
 public:
-    SingletonKeyValueStorage()
-        : conn(nullptr), _verc(std::make_shared<JsonDictStorage>()) 
+    SingletonKeyValueStorage() : conn(nullptr), _verc(std::make_shared<JsonDictStorage>())
     {
         cpp_backend();
     }
 
-    std::string uuid() const {  return conn->uuid();  }
-    void cpp_backend(){ conn = _switch_backend("cpp"); }
-    void file_backend(){ conn = _switch_backend("file"); }
+    String uuid() const { return conn->uuid(); }
+    void cpp_backend() { conn = _switch_backend("cpp"); }
+    void file_backend() { conn = _switch_backend("file"); }
 
-    void add_slave(const std::shared_ptr<SingletonKeyValueStorage> &slave, const std::vector<std::string> &event_names = {"set", "deleteKey"})
+    void add_slave(const std::shared_ptr<SingletonKeyValueStorage> &slave, const std::vector<String> &event_names = {"set", "deleteKey"})
     {
         if (slave->uuid().empty())
         {
@@ -564,10 +583,8 @@ public:
         {
             if (slave->conn->has_event(event))
             {
-                event_dispa.set_event(event, [=](const std::string &key, const json &value)
-                {
-                    slave->conn->call_event(event, key, value);
-                }, slave->uuid());
+                event_dispa.set_event(event, [=](const String &key, const json &value)
+                                      { slave->conn->call_event(event, key, value); }, slave->uuid());
             }
             else
             {
@@ -576,47 +593,43 @@ public:
         }
     }
 
-    void delete_slave(const auto &slave){ event_dispa.delete_event(slave->uuid()); }
+    void delete_slave(const auto &slave) { event_dispa.delete_event(slave->uuid()); }
 
     void revert_one_operation()
     {
-        _verc.revert_one_operation([=](const std::string &func_name, const std::string &key = "", const json &value = json())
-        {
-            _edit(func_name, key, value);
-        });
+        _verc.revert_one_operation([=](const String &func_name, const String &key = "", const json &value = json())
+                                   { _edit(func_name, key, value); });
     }
 
-    std::string get_current_version()
+    String get_current_version()
     {
         auto versions = _verc.get_versions();
         return versions.empty() ? "No versions" : versions.back();
     }
 
-    void revert_operations_until(const std::string &opuuid)
+    void revert_operations_until(const String &opuuid)
     {
-        _verc.revert_operations_until(opuuid, [=](const std::string &func_name, const std::string &key = "", const json &value = json())
-        {
-            _edit(func_name, key, value);
-        });
+        _verc.revert_operations_until(opuuid, [=](const String &func_name, const String &key = "", const json &value = json())
+                                      { _edit(func_name, key, value); });
     }
 
     // Public API to interact with the storag
-    void set(const std::string &key, const json &value) { _edit("set", key, value); }
-    void deleteKey(const std::string &key) { _edit("deleteKey", key); }
+    void set(const String &key, const json &value) { _edit("set", key, value); }
+    void deleteKey(const String &key) { _edit("deleteKey", key); }
     void clean() { _edit("clean"); }
-    void load(const std::string &json_path) { _edit("load", json_path); }
-    void loads(const std::string &json_str) { _edit("loads", json_str); }
-    bool exists(const std::string &key) const { return conn->exists(key); }
-    std::vector<std::string> keys(const std::string &pattern = "*") const { return conn->keys(pattern); }
-    json get(const std::string &key) const { return conn->get(key); }
-    std::string dumps() const { return conn->dumps(); }
+    void load(const String &json_path) { _edit("load", json_path); }
+    void loads(const String &json_str) { _edit("loads", json_str); }
+    bool exists(const String &key) const { return conn->exists(key); }
+    std::vector<String> keys(const String &pattern = "*") const { return conn->keys(pattern); }
+    json get(const String &key) const { return conn->get(key); }
+    String dumps() const { return conn->dumps(); }
 
 private:
     std::shared_ptr<JsonDictStorageController> conn;
     EventDispatcherController event_dispa;
     LocalVersionController _verc;
 
-    std::shared_ptr<JsonDictStorageController> _switch_backend(const std::string &name)
+    std::shared_ptr<JsonDictStorageController> _switch_backend(const String &name)
     {
         if (name == "cpp")
         {
@@ -629,12 +642,12 @@ private:
         throw std::invalid_argument("No backend named: " + name);
     }
 
-    void _print(const std::string &msg) const
+    void _print(const String &msg) const
     {
         std::cout << "[" << typeid(*this).name() << "]: " << msg << std::endl;
     }
 
-    void _edit(const std::string &func_name, const std::string &key = "", const json &value = json::parse("{}"))
+    void _edit(const String &func_name, const String &key = "", const json &value = json::parse("{}"))
     {
         // Perform operation and track history
         if (func_name == "set")
@@ -661,9 +674,12 @@ private:
         {
             json revert = json::array({"loads", dumps(), json()});
             _verc.add_operation(std::make_tuple(func_name, key, value), revert);
-            if (func_name == "clean") conn->clean();
-            if (func_name == "load") conn->load(key);
-            if (func_name == "loads") conn->loads(key);
+            if (func_name == "clean")
+                conn->clean();
+            if (func_name == "load")
+                conn->load(key);
+            if (func_name == "loads")
+                conn->loads(key);
         }
         event_dispa.dispatch(func_name, key, value);
     }
