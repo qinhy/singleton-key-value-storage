@@ -6,6 +6,8 @@ import fnmatch
 import json
 import unittest
 
+from SingletonStorage.Storages.utils import SimpleRSAChunkEncryptor
+
 class AbstractStorage:
     # statics for singleton
     _uuid = uuid.uuid4()
@@ -49,6 +51,15 @@ class AbstractStorageController:
         return data
 
     def load(self,path):
+        with open(path, "r") as tf: self.loads(tf.read())
+
+    def dump_RSA(self,path,pub_key_path):
+        data = self.dumps()
+        data = SimpleRSAChunkEncryptor()
+        with open(path, "w") as tf: tf.write(data)
+        return data
+
+    def load_RSA(self,path,sec_key_path):
         with open(path, "r") as tf: self.loads(tf.read())
 
 class PythonDictStorage(AbstractStorage):
