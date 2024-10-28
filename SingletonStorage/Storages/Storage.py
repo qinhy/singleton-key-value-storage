@@ -6,7 +6,7 @@ import fnmatch
 import json
 import unittest
 
-from SingletonStorage.Storages.utils import SimpleRSAChunkEncryptor
+from .utils import SimpleRSAChunkEncryptor
 
 class AbstractStorage:
     # statics for singleton
