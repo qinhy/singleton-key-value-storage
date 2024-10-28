@@ -24,8 +24,7 @@ class AbstractStorage:
         return self.__class__(self._uuid,self._store,self._is_singleton)
     
 class AbstractStorageController:
-    def __init__(self, model):
-        self.model:AbstractStorage = model
+    def __init__(self, model): self.model:AbstractStorage = model
     
     def is_singleton(self)->bool: return self.model.is_singleton if 'is_singleton' in self.model else False
 
@@ -53,14 +52,17 @@ class AbstractStorageController:
     def load(self,path):
         with open(path, "r") as tf: self.loads(tf.read())
 
-    def dump_RSA(self,path,pub_key_path):
-        data = self.dumps()
-        data = SimpleRSAChunkEncryptor()
-        with open(path, "w") as tf: tf.write(data)
+    def dump_RSA(self,path,public_key_path):
+        data = self.dumps()        
+        public_key = SimpleRSAChunkEncryptor.load_public_key_from_pkcs8(public_key_path)
+        encryptor = SimpleRSAChunkEncryptor(public_key, None)
+        with open(path, "w") as tf: tf.write(encryptor.encrypt_string(data))
         return data
 
-    def load_RSA(self,path,sec_key_path):
-        with open(path, "r") as tf: self.loads(tf.read())
+    def load_RSA(self,path,private_key_path):
+        private_key = SimpleRSAChunkEncryptor.load_private_key_from_pkcs8(private_key_path)
+        encryptor = SimpleRSAChunkEncryptor(None, private_key)
+        with open(path, "r") as tf: self.loads(encryptor.decrypt_string(tf.read()))
 
 class PythonDictStorage(AbstractStorage):
     def __init__(self, id=None, store=None, is_singleton=None):
