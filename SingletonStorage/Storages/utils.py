@@ -49,20 +49,17 @@ class SimpleRSAChunkEncryptor:
         index = 0
         # Parse top-level SEQUENCE
         tag, length, value, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(key_bytes, index)
-        if tag != 0x30:
-            raise ValueError("Invalid PKCS#8 file: expected SEQUENCE")
+        if tag != 0x30: raise ValueError("Invalid PKCS#8 file: expected SEQUENCE")
         data = value
         index = 0
 
         # Parse algorithm identifier SEQUENCE
         tag, length, value, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(data, index)
-        if tag != 0x30:
-            raise ValueError("Invalid PKCS#8 file: expected SEQUENCE for algorithm identifier")
+        if tag != 0x30: raise ValueError("Invalid PKCS#8 file: expected SEQUENCE for algorithm identifier")
 
         # Next, parse the BIT STRING
         tag, length, value, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(data, index)
-        if tag != 0x03:
-            raise ValueError("Invalid PKCS#8 file: expected BIT STRING")
+        if tag != 0x03: raise ValueError("Invalid PKCS#8 file: expected BIT STRING")
         # The value of the BIT STRING contains the public key
         # The first byte in BIT STRING is the number of unused bits (should be 0)
         if value[0] != 0x00:
@@ -72,21 +69,18 @@ class SimpleRSAChunkEncryptor:
         # Now parse the RSAPublicKey SEQUENCE inside the BIT STRING
         index = 0
         tag, length, value, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(public_key_bytes, index)
-        if tag != 0x30:
-            raise ValueError("Invalid RSAPublicKey structure: expected SEQUENCE")
+        if tag != 0x30: raise ValueError("Invalid RSAPublicKey structure: expected SEQUENCE")
         rsa_key_data = value
         index = 0
 
         # Parse modulus INTEGER
         tag, length, n_bytes, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(rsa_key_data, index)
-        if tag != 0x02:
-            raise ValueError("Invalid RSAPublicKey structure: expected INTEGER for modulus")
+        if tag != 0x02: raise ValueError("Invalid RSAPublicKey structure: expected INTEGER for modulus")
         n = int.from_bytes(n_bytes, byteorder='big')
 
         # Parse exponent INTEGER
         tag, length, e_bytes, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(rsa_key_data, index)
-        if tag != 0x02:
-            raise ValueError("Invalid RSAPublicKey structure: expected INTEGER for exponent")
+        if tag != 0x02: raise ValueError("Invalid RSAPublicKey structure: expected INTEGER for exponent")
         e = int.from_bytes(e_bytes, byteorder='big')
 
         return (e, n)
@@ -105,62 +99,52 @@ class SimpleRSAChunkEncryptor:
         index = 0
         # Parse top-level SEQUENCE
         tag, length, value, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(key_bytes, index)
-        if tag != 0x30:
-            raise ValueError("Invalid PKCS#8 file: expected SEQUENCE")
+        if tag != 0x30: raise ValueError("Invalid PKCS#8 file: expected SEQUENCE")
         data = value
         index = 0
 
         # Parse version INTEGER
         tag, length, version_bytes, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(data, index)
-        if tag != 0x02:
-            raise ValueError("Invalid PKCS#8 file: expected INTEGER for version")
+        if tag != 0x02: raise ValueError("Invalid PKCS#8 file: expected INTEGER for version")
         version = int.from_bytes(version_bytes, byteorder='big')
 
         # Parse algorithm identifier SEQUENCE
         tag, length, value, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(data, index)
-        if tag != 0x30:
-            raise ValueError("Invalid PKCS#8 file: expected SEQUENCE for algorithm identifier")
+        if tag != 0x30: raise ValueError("Invalid PKCS#8 file: expected SEQUENCE for algorithm identifier")
 
         # Parse privateKey OCTET STRING
         tag, length, private_key_bytes, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(data, index)
-        if tag != 0x04:
-            raise ValueError("Invalid PKCS#8 file: expected OCTET STRING for privateKey")
+        if tag != 0x04: raise ValueError("Invalid PKCS#8 file: expected OCTET STRING for privateKey")
 
         # The private_key_bytes contains the RSAPrivateKey structure
         # Now parse RSAPrivateKey
         index = 0
         tag, length, value, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(private_key_bytes, index)
-        if tag != 0x30:
-            raise ValueError("Invalid RSAPrivateKey structure: expected SEQUENCE")
+        if tag != 0x30: raise ValueError("Invalid RSAPrivateKey structure: expected SEQUENCE")
         rsa_key_data = value
         index = 0
 
         # Parse version INTEGER
         tag, length, version_bytes, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(rsa_key_data, index)
-        if tag != 0x02:
-            raise ValueError("Invalid RSAPrivateKey structure: expected INTEGER for version")
+        if tag != 0x02: raise ValueError("Invalid RSAPrivateKey structure: expected INTEGER for version")
         version = int.from_bytes(version_bytes, byteorder='big')
 
         # Parse modulus INTEGER
         tag, length, n_bytes, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(rsa_key_data, index)
-        if tag != 0x02:
-            raise ValueError("Invalid RSAPrivateKey structure: expected INTEGER for modulus")
+        if tag != 0x02: raise ValueError("Invalid RSAPrivateKey structure: expected INTEGER for modulus")
         n = int.from_bytes(n_bytes, byteorder='big')
 
         # Parse publicExponent INTEGER
         tag, length, e_bytes, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(rsa_key_data, index)
-        if tag != 0x02:
-            raise ValueError("Invalid RSAPrivateKey structure: expected INTEGER for publicExponent")
+        if tag != 0x02: raise ValueError("Invalid RSAPrivateKey structure: expected INTEGER for publicExponent")
         e = int.from_bytes(e_bytes, byteorder='big')
 
         # Parse privateExponent INTEGER
         tag, length, d_bytes, index = SimpleRSAChunkEncryptor.parse_asn1_der_element(rsa_key_data, index)
-        if tag != 0x02:
-            raise ValueError("Invalid RSAPrivateKey structure: expected INTEGER for privateExponent")
+        if tag != 0x02: raise ValueError("Invalid RSAPrivateKey structure: expected INTEGER for privateExponent")
         d = int.from_bytes(d_bytes, byteorder='big')
 
         # We can skip the rest of the private key parameters
-
         return (d, n)
 
     def encrypt_chunk(self, chunk):
@@ -187,13 +171,11 @@ class SimpleRSAChunkEncryptor:
         if not self.chunk_size:
             raise ValueError("Public key required for encryption.")
         encrypted_chunks = []
-        plaintext_bytes = plaintext.encode('utf-8')
-        
+        plaintext_bytes = plaintext.encode('utf-8')        
         for i in range(0, len(plaintext_bytes), self.chunk_size):
             chunk = plaintext_bytes[i:i + self.chunk_size]
             encrypted_chunk = self.encrypt_chunk(chunk)
-            encrypted_chunks.append(base64.b64encode(encrypted_chunk))
-        
+            encrypted_chunks.append(base64.b64encode(encrypted_chunk))        
         return b'|'.join(encrypted_chunks).decode('utf-8')
 
     def decrypt_string(self, encrypted_data):
@@ -216,7 +198,6 @@ class SimpleRSAChunkEncryptor:
 def ex1():
     # Example RSA key components (these are just sample values, not secure for actual use)
     from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives import serialization
 
     # Generate a 2048-bit RSA private key
     private_key = rsa.generate_private_key(
