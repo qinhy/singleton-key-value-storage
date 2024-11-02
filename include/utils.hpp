@@ -132,32 +132,7 @@ public:
         key_bytes_ = read_pem_file();
     }
     
-
-    // Load Public Key and convert components to InfInt
-    std::tuple<InfInt, InfInt> load_public_key_from_pkcs8() {
-        // Get the modulus and exponent as vectors of uint8_t
-        auto [e_vec, n_vec] = load_public_key_from_pkcs8_vec_uint8();
-
-        // Convert vectors to InfInt
-        InfInt e = vector_to_infint(e_vec);
-        InfInt n = vector_to_infint(n_vec);
-
-        return std::make_tuple(e, n);
-    }
-
-    // Load Private Key and convert components to InfInt
-    std::tuple<InfInt, InfInt> load_private_key_from_pkcs8() {
-        // Get the modulus and private exponent as vectors of uint8_t
-        auto [d_vec, n_vec] = load_private_key_from_pkcs8_vec_uint8();
-
-        // Convert vectors to InfInt
-        InfInt d = vector_to_infint(d_vec);
-        InfInt n = vector_to_infint(n_vec);
-
-        return std::make_tuple(d, n);
-    }
-
-    std::tuple<std::vector<uint8_t>, std::vector<uint8_t>> load_public_key_from_pkcs8_vec_uint8()
+    std::tuple<std::vector<uint8_t>, std::vector<uint8_t>> load_public_key_from_pkcs8()
     {
         auto [data, data_index] = parse_asn1_der_sequence(key_bytes_, 0);
         size_t index = 0;
@@ -185,7 +160,7 @@ public:
         return std::make_tuple(e, n);
     }
 
-    std::tuple<std::vector<uint8_t>, std::vector<uint8_t>> load_private_key_from_pkcs8_vec_uint8()
+    std::tuple<std::vector<uint8_t>, std::vector<uint8_t>> load_private_key_from_pkcs8()
     {
         auto [data, data_index] = parse_asn1_der_sequence(key_bytes_, 0);
         size_t index = 0;
@@ -222,15 +197,6 @@ public:
 private:
     std::string file_path_;
     std::vector<uint8_t> key_bytes_;
-
-    // Helper function to convert a vector<uint8_t> to InfInt
-    InfInt vector_to_infint(const std::vector<uint8_t>& vec) {
-        InfInt result = 0;
-        for (uint8_t byte : vec) {
-            result = (result * 256) + byte;
-        }
-        return result;
-    }
 
     std::vector<uint8_t> read_pem_file()
     {
@@ -295,11 +261,25 @@ private:
 };
 
 
+std::string format_as_bytes(const std::vector<uint8_t>& data) {
+    std::ostringstream oss;
+    oss << "b\""; // Start with `b"`
+
+    for (uint8_t byte : data) {
+        oss << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+    }
+
+    oss << "\""; // End with `"`
+    return oss.str();
+}
+
+
 class SimpleRSAChunkEncryptor
 {
 public:
-    SimpleRSAChunkEncryptor(std::tuple<InfInt, InfInt> public_key, std::tuple<InfInt, InfInt> private_key = {})
-        : public_key_(public_key), private_key_(private_key)
+    SimpleRSAChunkEncryptor(std::tuple<std::vector<uint8_t>, std::vector<uint8_t>> public_key, std::tuple<std::vector<uint8_t>, std::vector<uint8_t>> private_key = {})
+        : public_key_(std::make_tuple(bytes_to_int(std::get<0>(public_key)),bytes_to_int(std::get<1>(public_key)))), 
+          private_key_((std::make_tuple(bytes_to_int(std::get<0>(private_key)),bytes_to_int(std::get<1>(private_key)))))
     {
         InfInt n = std::get<1>(public_key_);
         chunk_size_ = (bit_length(n) / 8) - 1;
@@ -405,12 +385,6 @@ private:
 
     std::vector<uint8_t> int_to_bytes(InfInt value, size_t size)
     {
-        std::vector<uint8_t> bytes(size);
-        for (size_t i = size; i > 0; --i)
-        {
-            bytes[i - 1] = static_cast<uint8_t>(value.toInt() & 0xFF);
-            value /= 256;
-        }
-        return bytes;
+        return value.to_bytes();
     }
 };
