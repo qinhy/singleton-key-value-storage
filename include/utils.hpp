@@ -131,7 +131,33 @@ public:
     {
         key_bytes_ = read_pem_file();
     }
-    std::tuple<InfInt, InfInt> load_public_key_from_pkcs8()
+    
+
+    // Load Public Key and convert components to InfInt
+    std::tuple<InfInt, InfInt> load_public_key_from_pkcs8() {
+        // Get the modulus and exponent as vectors of uint8_t
+        auto [e_vec, n_vec] = load_public_key_from_pkcs8_vec_uint8();
+
+        // Convert vectors to InfInt
+        InfInt e = vector_to_infint(e_vec);
+        InfInt n = vector_to_infint(n_vec);
+
+        return std::make_tuple(e, n);
+    }
+
+    // Load Private Key and convert components to InfInt
+    std::tuple<InfInt, InfInt> load_private_key_from_pkcs8() {
+        // Get the modulus and private exponent as vectors of uint8_t
+        auto [d_vec, n_vec] = load_private_key_from_pkcs8_vec_uint8();
+
+        // Convert vectors to InfInt
+        InfInt d = vector_to_infint(d_vec);
+        InfInt n = vector_to_infint(n_vec);
+
+        return std::make_tuple(d, n);
+    }
+
+    std::tuple<std::vector<uint8_t>, std::vector<uint8_t>> load_public_key_from_pkcs8_vec_uint8()
     {
         auto [data, data_index] = parse_asn1_der_sequence(key_bytes_, 0);
         size_t index = 0;
@@ -152,14 +178,14 @@ public:
         index = 0;
 
         // Parse modulus (n) and exponent (e)
-        InfInt n, e;
+        std::vector<uint8_t> n, e;
         std::tie(n, index) = parse_asn1_der_integer(rsa_key_data, index);
         std::tie(e, index) = parse_asn1_der_integer(rsa_key_data, index);
 
         return std::make_tuple(e, n);
     }
 
-    std::tuple<InfInt, InfInt> load_private_key_from_pkcs8()
+    std::tuple<std::vector<uint8_t>, std::vector<uint8_t>> load_private_key_from_pkcs8_vec_uint8()
     {
         auto [data, data_index] = parse_asn1_der_sequence(key_bytes_, 0);
         size_t index = 0;
@@ -185,7 +211,7 @@ public:
         std::tie(std::ignore, index) = parse_asn1_der_integer(rsa_key_data, index);
 
         // Parse modulus (n), publicExponent (e), and privateExponent (d)
-        InfInt n, e, d;
+        std::vector<uint8_t> n, e, d;
         std::tie(n, index) = parse_asn1_der_integer(rsa_key_data, index);
         std::tie(e, index) = parse_asn1_der_integer(rsa_key_data, index);
         std::tie(d, index) = parse_asn1_der_integer(rsa_key_data, index);
@@ -196,6 +222,15 @@ public:
 private:
     std::string file_path_;
     std::vector<uint8_t> key_bytes_;
+
+    // Helper function to convert a vector<uint8_t> to InfInt
+    InfInt vector_to_infint(const std::vector<uint8_t>& vec) {
+        InfInt result = 0;
+        for (uint8_t byte : vec) {
+            result = (result * 256) + byte;
+        }
+        return result;
+    }
 
     std::vector<uint8_t> read_pem_file()
     {
@@ -240,18 +275,13 @@ private:
         return {tag, length, value, index};
     }
 
-    std::tuple<InfInt, size_t> parse_asn1_der_integer(const std::vector<uint8_t> &data, size_t index)
-    {
-        auto [tag, _, value, new_index] = parse_asn1_der_element(data, index);
-        if (tag != 0x02)
-            throw std::runtime_error("Expected INTEGER");
 
-        InfInt integer = 0;
-        for (uint8_t byte : value)
-        {
-            integer = (integer * 256) + byte;
+    std::tuple<std::vector<uint8_t>, size_t> parse_asn1_der_integer(const std::vector<uint8_t>& data, size_t index) {
+        auto [tag, _, value, new_index] = parse_asn1_der_element(data, index);
+        if (tag != 0x02) {
+            throw std::runtime_error("Expected INTEGER");
         }
-        return {integer, new_index};
+        return {value, new_index};
     }
 
     std::tuple<std::vector<uint8_t>, size_t> parse_asn1_der_sequence(const std::vector<uint8_t> &data, size_t index)
@@ -263,6 +293,7 @@ private:
         return {value, new_index};
     }
 };
+
 
 class SimpleRSAChunkEncryptor
 {

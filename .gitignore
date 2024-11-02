@@ -5,3 +5,4 @@ test.json
 /.vscode
 SingletonStorage/sqlite.db
 *.pyc
+tmp/private_key.pem
