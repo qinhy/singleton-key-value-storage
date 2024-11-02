@@ -276,7 +276,7 @@ int test()
 
 int main()
 {
-    test();
+    // test();
     // Initialize storage
     auto controllerfs = std::make_shared<SingletonKeyValueStorage>();
     controllerfs->file_backend();
