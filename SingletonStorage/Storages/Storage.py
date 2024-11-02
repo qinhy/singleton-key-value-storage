@@ -107,8 +107,53 @@ class EventDispatcherController(PythonDictStorageController):
         for event_full_uuid in self.keys(f'{EventDispatcherController.ROOT_KEY}:{event_name}:*'):
             self.get(event_full_uuid)(*args, **kwargs)
 
-    def clean(self):
-        return self.clean()
+class MessageQueueController(PythonDictStorageController):
+    ROOT_KEY = 'MessageQueue'
+    
+    def __init__(self, model: PythonDictStorage):
+        super().__init__(model)
+        self.counters = {}  # Track counters for each queue
+
+    def _get_queue_key(self, queue_name: str, index: int) -> str:
+        return f'{MessageQueueController.ROOT_KEY}:{queue_name}:{index}'
+
+    def _get_queue_counter(self, queue_name: str) -> int:
+        if queue_name not in self.counters:
+            self.counters[queue_name] = 0
+        return self.counters[queue_name]
+
+    def _increment_queue_counter(self, queue_name: str):
+        self.counters[queue_name] = self._get_queue_counter(queue_name) + 1
+
+    def enqueue(self, message: dict, queue_name: str = 'default'):
+        counter = self._get_queue_counter(queue_name)
+        key = self._get_queue_key(queue_name, counter)
+        self.set(key, message)
+        self._increment_queue_counter(queue_name)
+        return key
+
+    def dequeue(self, queue_name: str = 'default') -> dict:
+        keys = sorted(self.keys(f'{MessageQueueController.ROOT_KEY}:{queue_name}:*'))
+        if not keys: return None  # Queue is empty
+        earliest_key = keys[0]
+        message = self.get(earliest_key)
+        self.delete(earliest_key)
+        return message
+
+    def peek(self, queue_name: str = 'default') -> dict:
+        keys = sorted(self.keys(f'{MessageQueueController.ROOT_KEY}:{queue_name}:*'))
+        if not keys:
+            return None  # Queue is empty
+        return self.get(keys[0])
+
+    def size(self, queue_name: str = 'default') -> int:
+        return len(self.keys(f'{MessageQueueController.ROOT_KEY}:{queue_name}:*'))
+
+    def clear(self, queue_name: str = 'default'):
+        for key in self.keys(f'{MessageQueueController.ROOT_KEY}:{queue_name}:*'):
+            self.delete(key)
+        if queue_name in self.counters:
+            del self.counters[queue_name]
 
 class LocalVersionController:
     
@@ -126,12 +171,10 @@ class LocalVersionController:
         self._current_version = None
     
     def get_versions(self)->list: 
-        return self.client.get(LocalVersionController.TABLENAME
-                               )[LocalVersionController.KEY]
+        return self.client.get(LocalVersionController.TABLENAME)[LocalVersionController.KEY]
     
     def _set_versions(self,ops:list): 
-        return self.client.set(LocalVersionController.TABLENAME,
-                               {LocalVersionController.KEY:ops})
+        return self.client.set(LocalVersionController.TABLENAME,{LocalVersionController.KEY:ops})
     
     def find_version(self,version_uuid:str):         
         versions = [i for i in self.get_versions()]
@@ -235,33 +278,28 @@ class SingletonKeyValueStorage(AbstractStorageController):
                         db_name:str="SingletonDB", collection_name:str="store"):
         self.conn = self._switch_backend('mongodb')(mongo_URL,db_name,collection_name)
 
-    def _print(self,msg):
-        print(f'[{self.__class__.__name__}]: {msg}')
+    def _print(self,msg): print(f'[{self.__class__.__name__}]: {msg}')
+       
+    def delete_slave(self, slave:object)->bool: self.delete_event(getattr(slave,'uuid',None))
 
     def add_slave(self, slave:object, event_names=['set','delete'])->bool:
         if getattr(slave,'uuid',None) is None:
             try:
                 setattr(slave,'uuid',uuid.uuid4())
             except Exception:
-                self._print(f'can not set uuid to {slave}. Skip this slave.')
-                return
+                return self._print(f'can not set uuid to {slave}. Skip this slave.')
         for m in event_names:
             if hasattr(slave, m):
                 self.set_event(m,getattr(slave,m),getattr(slave,'uuid'))
             else:
-                self._print(f'no func of "{m}" in {slave}. Skip it.')
-                
-    def delete_slave(self, slave:object)->bool:
-        self.delete_event(getattr(slave,'uuid',None))
+                self._print(f'no func of "{m}" in {slave}. Skip it.')         
 
     def _edit_local(self,func_name:str, key:str=None, value:dict=None):
         if func_name not in ['set','delete','clean','load','loads']:
-            self._print(f'no func of "{func_name}". return.')
-            return
+            return self._print(f'no func of "{func_name}". return.')
         func = getattr(self.conn, func_name)
         args = [i for i in [key,value] if i is not None]
-        res = func(*args)
-        return res
+        return func(*args)
     
     def _edit(self,func_name:str, key:str=None, value:dict=None):
         args = [i for i in [key,value] if i is not None]
@@ -303,9 +341,7 @@ class SingletonKeyValueStorage(AbstractStorageController):
 
     def get_current_version(self):
         vs = self._verc.get_versions()
-        if len(vs)==0:
-            return None
-        return vs[-1]
+        return None if len(vs)==0 else vs[-1]
 
     def local_to_version(self,opuuid:str):
         self._verc.to_version(opuuid,lambda revert:self._edit_local(*revert))
@@ -328,7 +364,7 @@ class SingletonKeyValueStorage(AbstractStorageController):
     def keys(self, regx: str='*')->list[str]: return self._try_load_error(lambda:self.conn.keys(regx))
     def get(self, key: str)->dict:            return self._try_load_error(lambda:self.conn.get(key))
     def dumps(self)->str:                     return self._try_load_error(lambda:self.conn.dumps())
-    def dump(self,json_path)->str:            return self._try_load_error(lambda:self.conn.dump(json_path))
+    def dump(self,json_path)->None:           return self._try_load_error(lambda:self.conn.dump(json_path))
 
     # events 
     def events(self): return self._event_dispa.events()
