@@ -168,6 +168,36 @@ void handle_command(Shared_store_ptr controller, const std::string &command)
 }
 
 
+void test_rsa()
+{
+    // Define paths to the PEM files
+    std::string public_key_path = "public_key.pem";
+    std::string private_key_path = "private_key.pem";
+
+    // Load the public key from the PEM file
+    PEMFileReader public_key_reader(public_key_path);
+    auto public_key = public_key_reader.load_public_key_from_pkcs8();
+
+    // Load the private key from the PEM file
+    PEMFileReader private_key_reader(private_key_path);
+    auto private_key = private_key_reader.load_private_key_from_pkcs8();
+
+    // Instantiate the encryptor with the loaded keys
+    SimpleRSAChunkEncryptor encryptor(public_key, private_key);
+
+    // Define the plaintext to be encrypted
+    std::string plaintext = "Hello, RSA encryption with .pem support!";
+    std::cout << "Original Plaintext: [" << plaintext << "]" << std::endl;
+
+    // Encrypt the plaintext
+    std::string encrypted_text = encryptor.encrypt_string(plaintext);
+    std::cout << "\nEncrypted (Base64 encoded): [" << encrypted_text << "]" << std::endl;
+
+    // Decrypt the encrypted text
+    std::string decrypted_text = encryptor.decrypt_string(encrypted_text);
+    std::cout << "\nDecrypted Text: [" << decrypted_text << "]" << std::endl;
+}
+
 int test()
 {
     std::cout << "######## start." << std::endl;
@@ -239,12 +269,14 @@ int test()
 
     std::cout << controller.dumps() << std::endl;
 
+    test_rsa();
+
     return 0;
 }
 
 int main()
 {
-    // test();
+    test();
     // Initialize storage
     auto controllerfs = std::make_shared<SingletonKeyValueStorage>();
     controllerfs->file_backend();
