@@ -50,7 +50,7 @@ class PEMFileReader:
             raise ValueError("Expected SEQUENCE")
         return value, index
 
-    def load_public_key_from_pkcs8(self):
+    def load_public_pkcs8_key(self):
         """Load an RSA public key from a PKCS#8 PEM file."""
         data, _ = self._parse_asn1_der_sequence(self.key_bytes, 0)
         index = 0
@@ -76,7 +76,7 @@ class PEMFileReader:
 
         return e, n
 
-    def load_private_key_from_pkcs8(self):
+    def load_private_pkcs8_key(self):
         """Load an RSA private key from a PKCS#8 PEM file."""
         data, _ = self._parse_asn1_der_sequence(self.key_bytes, 0)
         index = 0
@@ -231,8 +231,8 @@ def ex3():
     public_key_path = 'public_key.pem'
     private_key_path = 'private_key.pem'
 
-    public_key = PEMFileReader(public_key_path).load_public_key_from_pkcs8()
-    private_key = PEMFileReader(private_key_path).load_private_key_from_pkcs8()
+    public_key = PEMFileReader(public_key_path).load_public_pkcs8_key()
+    private_key = PEMFileReader(private_key_path).load_private_pkcs8_key()
 
     # Instantiate the encryptor with the loaded keys
     encryptor = SimpleRSAChunkEncryptor(public_key, private_key)

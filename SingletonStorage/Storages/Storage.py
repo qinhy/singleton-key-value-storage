@@ -53,16 +53,14 @@ class AbstractStorageController:
     def load(self, path: str):return self.loads(Path(path).read_text())
 
     def dump_RSA(self,path,public_pkcs8_key_path):
-        data = self.dumps()        
-        public_key = PEMFileReader(public_pkcs8_key_path).load_public_key_from_pkcs8()
-        encryptor = SimpleRSAChunkEncryptor(public_key, None)
-        with open(path, "w") as tf: tf.write(encryptor.encrypt_string(data))
-        return data
+        encryptor = SimpleRSAChunkEncryptor(
+            PEMFileReader(public_pkcs8_key_path).load_public_pkcs8_key(), None)
+        return Path(path).write_text(encryptor.encrypt_string(self.dumps()))
 
     def load_RSA(self,path,private_pkcs8_key_path):
-        private_key = PEMFileReader(private_pkcs8_key_path).load_private_key_from_pkcs8()
-        encryptor = SimpleRSAChunkEncryptor(None, private_key)
-        with open(path, "r") as tf: self.loads(encryptor.decrypt_string(tf.read()))
+        encryptor = SimpleRSAChunkEncryptor(
+            None, PEMFileReader(private_pkcs8_key_path).load_private_pkcs8_key())
+        return self.loads(encryptor.decrypt_string(Path(path).read_text()))
 
 class PythonDictStorage(AbstractStorage):
     def __init__(self, id=None, store=None, is_singleton=None):
