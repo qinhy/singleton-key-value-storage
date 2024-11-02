@@ -1,9 +1,5 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
-import base64
-import math
 import os
-import uuid
-import fnmatch
 import json
 import unittest
 

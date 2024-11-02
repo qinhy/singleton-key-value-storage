@@ -5,8 +5,12 @@ import uuid
 import fnmatch
 import json
 import unittest
+from pathlib import Path
 
-from .utils import SimpleRSAChunkEncryptor
+try:
+    from .utils import SimpleRSAChunkEncryptor, PEMFileReader
+except Exception as e:
+    from utils import SimpleRSAChunkEncryptor, PEMFileReader
 
 class AbstractStorage:
     # statics for singleton
@@ -44,23 +48,19 @@ class AbstractStorageController:
     
     def loads(self, json_string=r'{}'): [ self.set(k,v) for k,v in json.loads(json_string).items()]
 
-    def dump(self,path):
-        data = self.dumps()
-        with open(path, "w") as tf: tf.write(data)
-        return data
+    def dump(self, path: str):return Path(path).write_text(self.dumps())
 
-    def load(self,path):
-        with open(path, "r") as tf: self.loads(tf.read())
+    def load(self, path: str):return self.loads(Path(path).read_text())
 
-    def dump_RSA(self,path,public_key_path):
+    def dump_RSA(self,path,public_pkcs8_key_path):
         data = self.dumps()        
-        public_key = SimpleRSAChunkEncryptor.load_public_key_from_pkcs8(public_key_path)
+        public_key = PEMFileReader(public_pkcs8_key_path).load_public_key_from_pkcs8()
         encryptor = SimpleRSAChunkEncryptor(public_key, None)
         with open(path, "w") as tf: tf.write(encryptor.encrypt_string(data))
         return data
 
-    def load_RSA(self,path,private_key_path):
-        private_key = SimpleRSAChunkEncryptor.load_private_key_from_pkcs8(private_key_path)
+    def load_RSA(self,path,private_pkcs8_key_path):
+        private_key = PEMFileReader(private_pkcs8_key_path).load_private_key_from_pkcs8()
         encryptor = SimpleRSAChunkEncryptor(None, private_key)
         with open(path, "r") as tf: self.loads(encryptor.decrypt_string(tf.read()))
 
@@ -80,9 +80,7 @@ class PythonDictStorageController(AbstractStorageController):
 
     def get(self, key: str)->dict: return self.store.get(key,None)
 
-    def delete(self, key: str):
-        if key in self.store:
-            del self.store[key]
+    def delete(self, key: str): return self.store.pop(key)
 
     def keys(self, pattern: str='*'): return fnmatch.filter(self.store.keys(), pattern)
 
@@ -113,32 +111,6 @@ class EventDispatcherController(PythonDictStorageController):
 
     def clean(self):
         return self.clean()
-    
-# class KeysHistoryController:
-#     def __init__(self, client=None):
-#         if client is None:
-#             client = PythonDictStorageController(PythonDictStorage())
-#         self.client:AbstractStorageController = client
-
-#     def _str2base64(self,key: str):
-#         return base64.b64encode(key.encode()).decode()
-#     def reset(self):
-#         self.client = PythonDictStorageController(PythonDictStorage())        
-#     def set_history(self,key: str, result:dict):
-#         if result:
-#             self.client.set(f'_History:{self._str2base64(key)}',{'result':result})
-#         return result
-    
-#     def get_history(self,key: str):
-#         res = self.client.get(f'_History:{self._str2base64(key)}')
-#         return res.get('result',None) if res else None
-
-#     def try_history(self,key: str, result_func=lambda :None):
-#         res = self.get_history(key)
-#         if res is None:
-#             res = result_func()
-#             if res : self.set_history(key,res)
-#         return res
 
 class LocalVersionController:
     
@@ -231,7 +203,6 @@ class SingletonKeyValueStorage(AbstractStorageController):
     
     def _switch_backend(self,name:str='python',*args,**kwargs):
         self._event_dispa = EventDispatcherController(PythonDictStorage())
-        # self._hist = KeysHistoryController()
         self._verc = LocalVersionController()
         back=self.backs.get(name.lower(),None)
         if back is None:raise ValueError(f'no back end of {name}, has {list(self.backs.items())}')
@@ -289,7 +260,6 @@ class SingletonKeyValueStorage(AbstractStorageController):
         if func_name not in ['set','delete','clean','load','loads']:
             self._print(f'no func of "{func_name}". return.')
             return
-        # self._hist.reset()
         func = getattr(self.conn, func_name)
         args = [i for i in [key,value] if i is not None]
         res = func(*args)
