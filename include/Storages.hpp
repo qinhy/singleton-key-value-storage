@@ -13,6 +13,7 @@
 // Include header-only JSON and UUID libraries
 #include <json.hpp>
 #include <uuid.h>
+#include <utils.hpp>
 
 using json = nlohmann::json;
 using String = std::string;
@@ -92,6 +93,48 @@ public:
         std::ifstream file(path);
         String jsonString((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         loads(jsonString);
+    }
+
+    std::string dump_RSA(const std::string &path, const std::string &public_pkcs8_key_path)
+    {
+        std::string data = dumps();
+
+        PEMFileReader public_key_reader(public_pkcs8_key_path);
+        auto public_key = public_key_reader.load_public_key_from_pkcs8();
+
+        SimpleRSAChunkEncryptor encryptor(public_key);
+
+        std::string encrypted_data = encryptor.encrypt_string(data);
+
+        std::ofstream tf(path);
+        if (!tf.is_open())
+        {
+            throw std::runtime_error("Unable to open file for writing: " + path);
+        }
+        tf << encrypted_data;
+        tf.close();
+
+        return data;
+    }
+
+    void load_RSA(const std::string &path, const std::string &private_pkcs8_key_path)
+    {
+        PEMFileReader private_key_reader(private_pkcs8_key_path);
+        auto private_key = private_key_reader.load_private_key_from_pkcs8();
+
+        SimpleRSAChunkEncryptor encryptor({}, private_key);
+
+        std::ifstream tf(path);
+        if (!tf.is_open())
+        {
+            throw std::runtime_error("Unable to open file for reading: " + path);
+        }
+        std::string encrypted_data((std::istreambuf_iterator<char>(tf)), std::istreambuf_iterator<char>());
+        tf.close();
+
+        std::string decrypted_data = encryptor.decrypt_string(encrypted_data);
+
+        loads(decrypted_data);
     }
 
     void clean()
