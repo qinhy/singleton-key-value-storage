@@ -62,10 +62,20 @@ class AbstractStorageController:
             None, PEMFileReader(private_pkcs8_key_path).load_private_pkcs8_key())
         return self.loads(encryptor.decrypt_string(Path(path).read_text()))
 
-class PythonDictStorage(AbstractStorage):
-    def __init__(self, id=None, store=None, is_singleton=None):
-        super().__init__(id, store, is_singleton)
-        self.store = {} if store is None else store
+class PythonDictStorage:
+    # statics for singleton
+    _uuid = uuid.uuid4()
+    _store = {}
+    _is_singleton = True
+    _meta = {}
+        
+    def __init__(self,id=None,store=None,is_singleton=None):
+        self.uuid = uuid.uuid4() if id is None else id
+        self.store = None if store is None else store
+        self.is_singleton = False if is_singleton is None else is_singleton
+    
+    def get_singleton(self):
+        return self.__class__(self._uuid,self._store,self._is_singleton)
 
 class PythonDictStorageController(AbstractStorageController):
     def __init__(self, model:PythonDictStorage):
@@ -125,15 +135,15 @@ class MessageQueueController(PythonDictStorageController):
     def _increment_queue_counter(self, queue_name: str):
         self.counters[queue_name] = self._get_queue_counter(queue_name) + 1
 
-    def enqueue(self, message: dict, queue_name: str = 'default'):
+    def push(self, message: dict, queue_name: str = 'default'):
         counter = self._get_queue_counter(queue_name)
         key = self._get_queue_key(queue_name, counter)
         self.set(key, message)
         self._increment_queue_counter(queue_name)
         return key
 
-    def dequeue(self, queue_name: str = 'default') -> dict:
-        keys = sorted(self.keys(f'{MessageQueueController.ROOT_KEY}:{queue_name}:*'))
+    def pop(self, queue_name: str = 'default') -> dict:
+        keys = self.keys(f'{MessageQueueController.ROOT_KEY}:{queue_name}:*')
         if not keys: return None  # Queue is empty
         earliest_key = keys[0]
         message = self.get(earliest_key)
@@ -141,9 +151,8 @@ class MessageQueueController(PythonDictStorageController):
         return message
 
     def peek(self, queue_name: str = 'default') -> dict:
-        keys = sorted(self.keys(f'{MessageQueueController.ROOT_KEY}:{queue_name}:*'))
-        if not keys:
-            return None  # Queue is empty
+        keys = self.keys(f'{MessageQueueController.ROOT_KEY}:{queue_name}:*')
+        if not keys: return None  # Queue is empty
         return self.get(keys[0])
 
     def size(self, queue_name: str = 'default') -> int:
@@ -224,10 +233,8 @@ class LocalVersionController:
         
         while abs(delta_idx) != 0:
             if sign>0:
-                # print('forward_one_operation')
                 self.forward_one_operation(version_callback)
             else:
-                # print('revert_one_operation')
                 self.revert_one_operation(version_callback)
             delta_idx = delta_idx - sign
 
