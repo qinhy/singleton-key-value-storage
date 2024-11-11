@@ -71,7 +71,7 @@ class PythonDictStorage:
         
     def __init__(self,id=None,store=None,is_singleton=None):
         self.uuid = uuid.uuid4() if id is None else id
-        self.store = None if store is None else store
+        self.store = {} if store is None else store
         self.is_singleton = False if is_singleton is None else is_singleton
     
     def get_singleton(self):
