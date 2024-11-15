@@ -43,3 +43,58 @@ fn main() {
         None => println!("Object with ID {:?} not found", obj.get_id()),
     }
 }
+// use std::collections::HashMap;
+// use serde_json::Value;
+
+// trait Model {
+//     fn as_any(&self) -> &dyn std::any::Any;
+// }
+// #[derive(Debug)]
+// struct User {
+//     name: String,
+//     age: u32,
+// }
+
+// impl Model for User {
+//     fn as_any(&self) -> &dyn std::any::Any {
+//         self
+//     }
+// }
+// #[derive(Debug)]
+// struct Product {
+//     title: String,
+//     price: f64,
+// }
+
+// impl Model for Product {
+//     fn as_any(&self) -> &dyn std::any::Any {
+//         self
+//     }
+// }
+
+// fn find(id: u32) -> Box<dyn Model> {
+//     if id == 1 {
+//         Box::new(User {
+//             name: "Alice".to_string(),
+//             age: 30,
+//         })
+//     } else {
+//         Box::new(Product {
+//             title: "Gadget".to_string(),
+//             price: 99.99,
+//         })
+//     }
+// }
+
+// fn main() {
+//     let found = find(1);
+//     if let Some(user) = found.as_any().downcast_ref::<User>() {
+//         println!("Found user: {:?}", user);
+//     }
+//     else {
+//         println!("No found");
+//     }
+//     // else if let Some(product) = found.as_any().downcast_ref::<Product>() {
+//     //     println!("Found product: {:?}", product);
+//     // }
+// }
