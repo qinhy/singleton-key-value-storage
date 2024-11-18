@@ -93,12 +93,6 @@ impl<'a> AbstractObjController<'a> {
     }
 }
 
-// pub trait BasicStore {
-//     fn store(&mut self, id: &str, obj: &AbstractObj);
-//     fn find(&self, id: &str) -> Option<AbstractObj>;
-//     fn delete(&mut self, id: &str);
-// }
-
 pub struct BasicStore {
     storage: RustDictStorageController,
 }
@@ -125,10 +119,10 @@ impl BasicStore {
             return  None;
         }
         let json_value = json_value.unwrap();
-        match serde_json::from_value(json_value){
+        match serde_json::from_value::<AbstractObj>(json_value){
             Ok(obj) => {
                 // return  obj;
-                let obj_con = AbstractObjController::new( obj,self);
+                let obj_con = obj.get_controller(self);//AbstractObjController::new( obj,self);
                 return  Some(obj_con);
             }
             Err(e) => {
