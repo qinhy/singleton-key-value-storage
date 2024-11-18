@@ -1,11 +1,16 @@
 mod singleton_storage;
 mod basic_store;
+mod rsa;
 
 use singleton_storage::{RustDictStorage, RustDictStorageController, AbstractStorageController};
 use basic_store::{AbstractObj, BasicStore};
 use serde_json::json;
 
-fn main() {
+use rsa::PEMFileReader;
+use rsa::SimpleRSAChunkEncryptor;
+
+
+fn test_store() {
     // Initialize storage and controller
     let storage = RustDictStorage::get_singleton();
     println!("Storage UUID: {:?}", storage.uuid);
@@ -43,6 +48,43 @@ fn main() {
         None => println!("Object with ID {:?} not found", obj.get_id()),
     }
 }
+fn test_rsa() -> Result<(), Box<dyn std::error::Error>> {
+    // Load keys from .pem files
+    let public_key_path = "./tmp/public_key.pem";
+    let private_key_path = "./tmp/private_key.pem";
+
+    let public_key_reader = PEMFileReader::new(public_key_path)?;
+    let private_key_reader = PEMFileReader::new(private_key_path)?;
+
+    let public_key = public_key_reader.load_public_pkcs8_key();
+    let private_key = private_key_reader.load_private_pkcs8_key();
+
+    // Instantiate the encryptor with the loaded keys
+    let encryptor = SimpleRSAChunkEncryptor::new(
+        Some(public_key.clone()), Some((private_key.0.clone(), private_key.1.clone())));
+
+    // Encrypt and decrypt a sample string
+    let plaintext = "Hello, RSA encryption with .pem support!";
+    println!("Original Plaintext: [{}]", plaintext);
+
+    // Encrypt the plaintext
+    let encrypted_text = encryptor.encrypt_string(plaintext);
+    println!("\nEncrypted (Base64 encoded): [{}]", encrypted_text);
+
+    // Decrypt the encrypted text
+    let decrypted_text = encryptor.decrypt_string(&encrypted_text);
+    println!("\nDecrypted Text: [{}]", decrypted_text);
+
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = test_rsa() {
+        eprintln!("Error: {}", e);
+    }
+    test_store();
+}
+
 // use std::collections::HashMap;
 // use serde_json::Value;
 

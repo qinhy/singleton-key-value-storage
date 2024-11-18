@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use base64::read;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -27,6 +28,10 @@ impl AbstractObj {
             metadata: HashMap::new(),
             // controller: None,
         }
+    }
+
+    pub fn get_controller<'a>(& self, store: &'a mut BasicStore) -> AbstractObjController<'a>{
+        AbstractObjController::new(self.clone(),store)
     }
 
     pub fn set_id(&mut self, id: &str) {
