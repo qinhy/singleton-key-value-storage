@@ -11,6 +11,12 @@ import uuid,hashlib
 
 import numpy as np
 
+
+
+def text2hash2base32Str(text:str):
+    hash_uuid = hashlib.sha256(text.encode()).digest()
+    return base64.b32encode(hash_uuid).decode('utf-8').strip('=')
+
 def text2hash2base64Str(text:str,salt:bytes = b'',ite:int = 10**6):
     return base64.b64encode(hashlib.pbkdf2_hmac('sha256', text.encode(), salt, ite, dklen=16)).decode()
 
@@ -128,6 +134,8 @@ class Model4User:
 
         def gen_new_id(self): return f"{self.class_name()}:{text2hash2uuid(self.email.lower())}"
 
+        def is_root(self):return self.role == 'root'
+
         def check_password(self,password):
             return self.hashed_password==text2hash2base64Str(password)
         
@@ -180,7 +188,9 @@ class UsersStore(BasicStore):
     def add_new_user(self, username:str,hashed_password:str,full_name:str,email:str,role:str='user',rank:list=[0], metadata={}) -> Model4User.User:
         tmp = Model4User.User(username=username, role=role,full_name=full_name,hashed_password=hashed_password,
                                             email=email,rank=rank, metadata=metadata)
-        if self.exists(tmp.gen_new_id()) : raise ValueError('user already exists!')
+        if self.exists(tmp.gen_new_id()) :
+            return None
+            raise ValueError('user already exists!')
         return self.add_new_obj(tmp)
     
     def add_new_app(self, major_name:str,minor_name:str,running_cost:int=0,parent_App_id:str=None) -> Model4User.App:
