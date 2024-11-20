@@ -1,11 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status, Request
 from jose import JWTError, jwt
 import requests
 from datetime import datetime, timedelta, timezone
-import sqlite3
 import secrets
 import os
 from SingletonStorage.UserModel import UsersStore,Model4User
@@ -23,12 +22,9 @@ db = UsersStore()
 db.redis_backend()
 router = APIRouter()
 #######################################################################################
-
-
 class UserModels:
     class User(Model4User.User):
         pass
-    
         # username:str
         # full_name: str
         # role:str = 'user'
@@ -51,159 +47,152 @@ class UserModels:
         is_remove: bool
         password: str
 
-class AuthService:
+    class PayloadModel(BaseModel):
+        email: EmailStr = Field(..., description="The email address of the user")
+        exp: datetime = Field(..., description="The expiration time of the token as a datetime object")
 
+    class SessionModel(BaseModel):
+        token_type: str = 'bearer'
+        app_access_token: str
+        user_uuid: str
+        
+# AuthService for managing authentication
+class AuthService:
     @staticmethod
-    def create_access_token(*, data: dict, expires_delta: timedelta = None):
-        to_encode = data.copy()
-        if expires_delta:
-            expire = datetime.now(timezone.utc) + expires_delta
-        else:
-            expire = datetime.now(timezone.utc) + \
-                timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        to_encode.update({"exp": expire})
-        return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    def create_access_token(email: str, expires_delta: timedelta = None):
+        expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+        payload = UserModels.PayloadModel(email=email,exp=expire)
+        return jwt.encode(payload.model_dump(), SECRET_KEY, algorithm=ALGORITHM)
 
     @staticmethod
     async def get_current_user(request: Request):
         token = request.session.get("app_access_token")
         if not token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            email: str = payload.get("email")
-            if email is None:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
+            payload = UserModels.PayloadModel(**jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM]))
+            email = payload.email
+            if not email:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
         except JWTError:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                                detail="Invalid authentication credentials")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
 
         user = db.find_user_by_email(email)
-        if user.disabled:
-            raise HTTPException(status_code=400, detail="Inactive user")
-
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        if not user or user.disabled:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
         return user
 
-
+# OAuth routes
 class OAuthRoutes:
     @staticmethod
     @router.get("/register", response_class=HTMLResponse)
     async def get_register_page():
-        return FileResponse(os.path.join(os.path.split(__file__)[0], 'data', 'templates', "register.html"))
+        return FileResponse(os.path.join(os.path.dirname(__file__), 'data', 'templates', "register.html"))
 
     @staticmethod
     @router.post("/register")
     async def register_user(request: UserModels.RegisterRequest):
+        # 1. **Email Format Validation**:
+        # 2. **Password Strength Validation**:
+        # 3. **Checking for Missing Fields**:
+        # 4. **Duplicate Username/Email Checks**:
+        # 5. **Invite Code Expiration**:
+        # 6. **Validation for Other Fields**:
+        # 7. **Rate Limiting**:
+        # 8. **Cross-Site Request Forgery (CSRF) Tokens**:
+
         data = request.model_dump()
+        
         if data.pop('invite_code') != INVITE_CODE:
-            raise HTTPException(status_code=400, detail="invite code not valid")
-        try:
-            data['hashed_password'] = UserModels.User.hash_password(data.pop('password'))
-            res = []
-            res.append( db.add_new_user(**data) )
-            return {"status": "success", "message": "User registered successfully"}
-        except sqlite3.IntegrityError:
-            raise HTTPException(
-                status_code=400, detail="Username already exists")
+            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail="Invalid invite code")
 
-    @staticmethod
-    @router.post("/edit")
-    async def edit_user_info(request: UserModels.EditUserRequest, current_user: UserModels.User = Depends(AuthService.get_current_user)):
-        """Edit user information."""
-        # First, verify the password
-        if not current_user.check_password(request.password):
-            raise HTTPException(status_code=400, detail="Incorrect password")
-        try:
-            # Update user info
-            if request.new_password == '': request.new_password = request.password
-            current_user.get_controller().update(full_name=request.full_name,
-                                                 email=current_user.email,
-                                                 hashed_password=UserModels.User.hash_password(request.new_password),
-                                                 disabled=current_user.disabled)
-            return {"status": "success", "message": "User info updated successfully"}
-        except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to update user info: {e}")
-
-    @staticmethod
-    @router.post("/remove")
-    async def remove_account(request: UserModels.EditUserRequest, current_user: UserModels.User = Depends(AuthService.get_current_user)):
-        # First, verify the password
-        if not current_user.check_password(request.password):
-            raise HTTPException(status_code=400, detail="Incorrect password")
-        try:
-            current_user.get_controller().delete()
-            return {"status": "success", "message": "User account removed successfully"}
-        except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to remove account: {e}")
-
-    @staticmethod
-    @router.get("/login", response_class=HTMLResponse)
-    async def get_login_page():
-        return FileResponse(os.path.join(os.path.split(__file__)[0], 'data', 'templates', "login.html"))
-
-    @staticmethod
-    @router.get("/edit", response_class=HTMLResponse)
-    async def get_edit_page():
-        return FileResponse(os.path.join(os.path.split(__file__)[0], 'data', 'templates', "edit.html"))
+        if db.find_user_by_email(request.email) is not None:            
+            raise HTTPException(status_code=400, detail="Username already exists")
+        
+        data['hashed_password'] = UserModels.User.hash_password(data.pop('password'))
+        db.add_new_user(**data)
+        return {"status": "success", "message": "User registered successfully"}
 
     @staticmethod
     @router.post("/token")
     def get_token(form_data: OAuth2PasswordRequestForm = Depends(), request: Request = None):
-        print(form_data.__dict__)
         email = form_data.username
-        user = db.find_user_by_email(email)
-        
-        if not user or not user.check_password(form_data.password):
-            raise HTTPException(
-                status_code=400, detail="Incorrect username or password")
 
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = AuthService.create_access_token(
-            data={"email": email}, expires_delta=access_token_expires
-        )
-        request.session["uuid"] = user.get_id()
-        request.session["app_access_token"] = access_token
+        user = db.find_user_by_email(email)        
+        if user is None  or not user.check_password(form_data.password):
+            raise HTTPException(status_code=400, detail="Incorrect username or password")
+
+        access_token = AuthService.create_access_token(email=email)
+        data = UserModels.SessionModel(app_access_token=access_token,user_uuid=user.get_id()).model_dump()
+        request.session.update(data)
         
-        return {"app_access_token": access_token, "token_type": "bearer", "uuid": user.get_id()}
+        return data
+        
+    @staticmethod
+    @router.get("/login", response_class=HTMLResponse)
+    async def get_login_page():
+        return FileResponse(os.path.join(os.path.dirname(__file__), 'data', 'templates', "login.html"))
+
+    @staticmethod
+    @router.get("/edit", response_class=HTMLResponse)
+    async def get_edit_page(current_user: UserModels.User = Depends(AuthService.get_current_user)):
+        return FileResponse(os.path.join(os.path.dirname(__file__), 'data', 'templates', "edit.html"))
+    
+    @staticmethod
+    @router.get("/", response_class=HTMLResponse)
+    async def read_home(current_user: UserModels.User = Depends(AuthService.get_current_user)):
+        return FileResponse(os.path.join(os.path.dirname(__file__), 'data', 'templates', 'edit.html'))
+    
+    @staticmethod
+    @router.post("/edit")
+    async def edit_user_info(request: UserModels.EditUserRequest, current_user: UserModels.User = Depends(AuthService.get_current_user)):
+        if not current_user.check_password(request.password):
+            raise HTTPException(status_code=400, detail="Incorrect password")
+
+        try:
+            new_password = request.new_password or request.password
+            current_user.get_controller().update(
+                full_name=request.full_name,
+                hashed_password=UserModels.User.hash_password(new_password),
+            )
+            return {"status": "success", "message": "User info updated successfully"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to update user info: {e}")
+
+    @staticmethod
+    @router.post("/remove")
+    async def remove_account(request: UserModels.EditUserRequest, current_user: UserModels.User = Depends(AuthService.get_current_user)):
+        if not current_user.check_password(request.password):
+            raise HTTPException(status_code=400, detail="Incorrect password")
+
+        try:
+            current_user.get_controller().delete()
+            return {"status": "success", "message": "User account removed successfully"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to remove account: {e}")
+
 
     @staticmethod
     @router.get("/me")
     async def read_users_me(current_user: UserModels.User = Depends(AuthService.get_current_user)):
-        data = current_user.model_dump()
-        data['uuid'] = current_user.get_id()
-        return data
+        return dict(**current_user.model_dump(),uuid=current_user.get_id())
 
     @staticmethod
     @router.get("/session")
     def read_session(request: Request, current_user: UserModels.User = Depends(AuthService.get_current_user)):
-        return {**current_user.model_dump(), "app_access_token": request.session.get("app_access_token", "")}
-
-    @staticmethod
-    @router.get("/", response_class=HTMLResponse)
-    async def read_home(current_user: UserModels.User = Depends(AuthService.get_current_user)):
-        this_dir, this_filename = os.path.split(__file__)
-        return FileResponse(os.path.join(this_dir, 'data', 'templates', 'edit.html'))
+        return dict(**current_user.model_dump(),app_access_token=request.session.get("app_access_token", ""))
 
     @router.get("/icon/{icon_name}", response_class=HTMLResponse)
-    async def read_home(request: Request, icon_name: str, current_user: UserModels.User = Depends(AuthService.get_current_user)):
-        this_dir, this_filename = os.path.split(__file__)
-        return FileResponse(os.path.join(this_dir, 'data', 'icon', icon_name))
+    async def read_icon(icon_name: str, current_user: UserModels.User = Depends(AuthService.get_current_user)):
+        return FileResponse(os.path.join(os.path.dirname(__file__), 'data', 'icon', icon_name))
 
     @staticmethod
     @router.get("/logout")
-    async def logout(request: Request, current_user: UserModels.User = Depends(AuthService.get_current_user)):
-        # Clear the session
+    async def logout(request: Request):
         request.session.clear()
         return {"status": "logged out"}
+
 
 
 from fastapi.middleware.cors import CORSMiddleware

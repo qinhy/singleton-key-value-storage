@@ -191,7 +191,7 @@ class UsersStore(BasicStore):
         return self.find_all('User:*')
     
     def find_user_by_email(self,email)->Model4User.User:
-        user_uuid =  Model4User.User.static_gen_new_id(email)
+        user_uuid =  Model4User.User.static_gen_new_id(format_email(email))
         return self.find(user_uuid)
     
 
