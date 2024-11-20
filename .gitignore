@@ -4,6 +4,6 @@ test.json
 /__pycache__
 /.vscode
 SingletonStorage/sqlite.db
-*.pyc
-/target
+*.db
+/SingletonStorage/Storages/__pycache__
 tmp/private_key.pem

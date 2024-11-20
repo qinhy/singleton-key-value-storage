@@ -1,7 +1,7 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 import unittest
 from fastapi import FastAPI, HTTPException
-from Storages import SingletonKeyValueStorage, SingletonStorageController
+from Storages import SingletonKeyValueStorage, AbstractStorageController
 
 from dateutil import parser
 
@@ -64,7 +64,7 @@ class RESTapi:
 import requests
 import json
 
-class RestApiStorageController(SingletonStorageController):
+class RestApiStorageController(AbstractStorageController):
     def __init__(self, base_url: str, default_headers: dict = None):
         self.base_url = base_url
         self.default_headers = default_headers or {"Content-Type": "application/json"}
