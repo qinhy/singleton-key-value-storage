@@ -65,22 +65,21 @@ class AuthService:
         return jwt.encode(payload.model_dump(), SECRET_KEY, algorithm=ALGORITHM)
 
     @staticmethod
-    async def get_current_user(request: Request):
-        token = request.session.get("app_access_token")
-        if not token:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
+    async def get_current_user(request: Request): 
         try:
-            payload = UserModels.PayloadModel(**jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM]))
-            email = payload.email
-            if not email:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+            session = UserModels.SessionModel(**request.session)
+        except Exception as e:            
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
+          
+        try:            
+            payload = UserModels.PayloadModel(**jwt.decode(session.app_access_token, SECRET_KEY, algorithms=[ALGORITHM]))
         except JWTError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
 
-        user = db.find_user_by_email(email)
+        user = db.find_user_by_email(payload.email)
         if not user or user.disabled:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+        
         return user
 
 # OAuth routes
