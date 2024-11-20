@@ -1,7 +1,10 @@
 
 from datetime import datetime
+import re
 
-from BasicModel import BasicStore,Controller4Basic,Model4Basic
+from pydantic import field_validator
+
+from .BasicModel import BasicStore,Controller4Basic,Model4Basic
 
 import base64
 import uuid,hashlib
@@ -35,6 +38,11 @@ def base64Str2list(bs:str):
     r = base64.decodebytes(bs.encode())
     return np.frombuffer(r).tolist()
 
+def format_email(email: str) -> str:
+    EMAIL_REGEX = r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)"
+    if not re.match(EMAIL_REGEX, email):
+        raise ValueError("Invalid email format")
+    return email.lower().strip()
 
 class Controller4User:
     class AbstractObjController(Controller4Basic.AbstractObjController):
@@ -44,14 +52,8 @@ class Controller4User:
             self.model:Model4User.User = model
             self._store:UsersStore = store
 
-        def mail2user(self,message):
-            pass
-
         def set_password(self,password):
             self.update(hashed_password=text2hash2base64Str(password))
-
-        def check_password(self,password):
-            return self.model.hashed_password==text2hash2base64Str(password)
 
         def set_name(self,):
             pass
@@ -104,17 +106,30 @@ class Model4User:
     class AbstractObj(Model4Basic.AbstractObj):
         pass
     class User(AbstractObj):
-        name:str
+        username:str
         full_name: str
-        role:str
+        role:str = 'user'
         hashed_password:str # text2hash2base64Str(password),
         email:str
         disabled: bool=False
         
+        @field_validator('username', mode='before')
+        def preprocess_username(cls, value:str):return value.strip()
+        @field_validator('full_name', mode='before')
+        def preprocess_full_name(cls, value:str):return value.strip()
+        @field_validator('email', mode='before')
+        def preprocess_email(cls, value:str):return format_email(value)
+    
         @staticmethod
-        def static_gen_new_id(email): return f"User:{text2hash2uuid(email)}"
+        def hash_password(password:str):return text2hash2base64Str(password)
 
-        def gen_new_id(self): return f"{self.class_name()}:{text2hash2uuid(self.email)}"
+        @staticmethod
+        def static_gen_new_id(email:str): return f"User:{text2hash2uuid(email.lower())}"
+
+        def gen_new_id(self): return f"{self.class_name()}:{text2hash2uuid(self.email.lower())}"
+
+        def check_password(self,password):
+            return self.hashed_password==text2hash2base64Str(password)
         
         _controller: Controller4User.UserController = None
         def get_controller(self)->Controller4User.UserController: return self._controller
@@ -162,8 +177,8 @@ class UsersStore(BasicStore):
     def _get_class(self, id: str, modelclass=Model4User):
         return super()._get_class(id, modelclass)
 
-    def add_new_user(self, name:str,role:str,hashed_password:str,full_name:str,email:str, rank:list=[0], metadata={}) -> Model4User.User:
-        tmp = Model4User.User(name=name, role=role,full_name=full_name,hashed_password=hashed_password,
+    def add_new_user(self, username:str,hashed_password:str,full_name:str,email:str,role:str='user',rank:list=[0], metadata={}) -> Model4User.User:
+        tmp = Model4User.User(username=username, role=role,full_name=full_name,hashed_password=hashed_password,
                                             email=email,rank=rank, metadata=metadata)
         if self.exists(tmp.gen_new_id()) : raise ValueError('user already exists!')
         return self.add_new_obj(tmp)
@@ -175,7 +190,7 @@ class UsersStore(BasicStore):
     def find_all_users(self)->list[Model4User.User]:
         return self.find_all('User:*')
     
-    def find_user_by_email(self,email):
+    def find_user_by_email(self,email)->Model4User.User:
         user_uuid =  Model4User.User.static_gen_new_id(email)
         return self.find(user_uuid)
     

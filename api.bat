@@ -1,1 +1,1 @@
-uvicorn tasks:CeleryTask.api
+uvicorn users:app
