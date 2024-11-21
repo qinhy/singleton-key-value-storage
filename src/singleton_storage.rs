@@ -4,7 +4,7 @@ use std::fs;
 use uuid::Uuid;
 // use serde_json::json;
 use serde_json::Value;
-use std::sync::RwLock;
+use std::sync::{RwLock, Arc};
 use lazy_static::lazy_static;
 
 
@@ -25,29 +25,28 @@ pub trait AbstractStorageController {
 
 lazy_static! {
     static ref _RustDict_UUID: Uuid = Uuid::new_v4();
-    static ref _RustDict_STORE: RwLock<Option<HashMap<String, Value>>> = RwLock::new(None);
-    static ref _RustDict_IS_SINGLETON: RwLock<bool> = RwLock::new(true);
+    static ref _RustDict_STORE: Arc<RwLock<HashMap<String, Value>>> = Arc::new(RwLock::new(HashMap::new()));
 }
 pub struct RustDictStorage {    
     pub uuid: Uuid,
-    pub store: HashMap<String, Value>,
+    pub store: Option<HashMap<String, Value>>,
+    pub store_lock: Option<Arc<RwLock<HashMap<String, Value>>>>,
     pub is_singleton: bool,
 }
 
-impl RustDictStorage {
-    pub fn new(id: Option<Uuid>, store: Option<HashMap<String, Value>>, is_singleton: Option<bool>) -> Self {
+impl RustDictStorage {    
+    pub fn new() -> Self {
         Self {
-            uuid: id.unwrap_or_else(Uuid::new_v4),
-            store: store.unwrap_or_else(HashMap::new),
-            is_singleton: is_singleton.unwrap_or(false),
+            uuid: Uuid::new_v4(),
+            store: Some(HashMap::new()),
+            store_lock: None,
+            is_singleton: false,
         }
     }
-
     pub fn get_singleton() -> Self {
         let uuid = *_RustDict_UUID;
-        let store = _RustDict_STORE.read().unwrap().clone();
-        let is_singleton = *_RustDict_IS_SINGLETON.read().unwrap();
-        Self::new(Some(uuid), store, Some(is_singleton))
+        let store_lock = Arc::clone(&*_RustDict_STORE);
+        Self{uuid, store:None, store_lock:Some(store_lock), is_singleton:true}
     }
 }
 
@@ -61,51 +60,92 @@ impl RustDictStorageController {
     }
 }
 
-impl AbstractStorageController for RustDictStorageController {
-    fn is_singleton(&self) -> bool {
+impl RustDictStorageController {
+    pub fn is_singleton(&self) -> bool {
         self.model.is_singleton
     }
 
-    fn exists(&self, key: &str) -> bool {
-        self.model.store.contains_key(key)
+    pub fn exists(&self, key: &str) -> bool {
+        if self.is_singleton() {
+            return self.model.store_lock
+                .as_ref()
+                .map_or(false, |store_lock| store_lock.read().unwrap().contains_key(key));
+        }
+        self.model.store
+            .as_ref()
+            .map_or(false, |store| store.contains_key(key))
     }
 
-    fn set(&mut self, key: &str, value: Value) {
-        self.model.store.insert(key.to_string(), value);
-    }
-
-    fn get(&self, key: &str) -> Option<Value> {
-        self.model.store.get(key).cloned()
-    }
-
-    fn delete(&mut self, key: &str) {
-        self.model.store.remove(key);
-    }
-
-    fn keys(&self, _pattern: &str) -> Vec<String> {
-        self.model.store.keys().cloned().collect()
-    }
-
-    fn clean(&mut self) {
-        self.model.store.clear();
-    }
-
-    fn dumps(&self) -> String {
-        serde_json::to_string(&self.model.store).unwrap_or_else(|_| "{}".to_string())
-    }
-
-    fn loads(&mut self, json_string: &str) {
-        if let Ok(map) = serde_json::from_str::<HashMap<String, Value>>(json_string) {
-            self.model.store = map;
+    pub fn set(&mut self, key: &str, value: Value) {
+        if self.is_singleton() {
+            if let Some(store_lock) = &self.model.store_lock {
+                store_lock.write().unwrap().insert(key.to_string(), value);
+            }
+        } else if let Some(store) = &mut self.model.store {
+            store.insert(key.to_string(), value);
         }
     }
 
-    fn dump(&self, path: &str) {
+    pub fn get(&self, key: &str) -> Option<Value> {
+        if self.is_singleton() {
+            self.model.store_lock
+                .as_ref()
+                .and_then(|store_lock| store_lock.read().unwrap().get(key).cloned())
+        } else {
+            self.model.store
+                .as_ref()
+                .and_then(|store| store.get(key).cloned())
+        }
+    }
+
+    pub fn delete(&mut self, key: &str) {
+        if self.is_singleton() {
+            if let Some(store_lock) = &self.model.store_lock {
+                store_lock.write().unwrap().remove(key);
+            }
+        } else if let Some(store) = &mut self.model.store {
+            store.remove(key);
+        }
+    }
+
+    pub fn keys(&self, _pattern: &str) -> Vec<String> {
+        if self.is_singleton() {
+            self.model.store_lock
+                .as_ref()
+                .map_or_else(Vec::new, |store_lock| store_lock.read().unwrap().keys().cloned().collect())
+        } else {
+            self.model.store
+                .as_ref()
+                .map_or_else(Vec::new, |store| store.keys().cloned().collect())
+        }
+    }
+
+    pub fn clean(&mut self) {
+        if self.is_singleton() {
+            if let Some(store_lock) = &self.model.store_lock {
+                store_lock.write().unwrap().clear();
+            }
+        } else if let Some(store) = &mut self.model.store {
+            store.clear();
+        }
+    }
+
+    pub fn dumps(&self) -> String {
+        serde_json::to_string(&self.model.store).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    pub fn loads(&mut self, json_string: &str) {
+        if let Ok(map) = serde_json::from_str::<HashMap<String, Value>>(json_string) {
+            // self.model.store = map;
+        }
+    }
+
+    pub fn dump(&self, path: &str) {
         let json_string = self.dumps();
         fs::write(path, json_string).expect("Unable to write file");
     }
 
-    fn load(&mut self, path: &str) {
+    pub fn load(&mut self, path: &str) {
         if let Ok(contents) = fs::read_to_string(path) {
             self.loads(&contents);
         }
