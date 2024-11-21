@@ -3,6 +3,7 @@ use base64::read;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json;
+use serde_json::Value;
 use uuid::Uuid;
 use crate::singleton_storage::{AbstractStorageController, RustDictStorage, RustDictStorageController};
 
@@ -94,11 +95,11 @@ impl<'a> AbstractObjController<'a> {
 }
 
 pub struct BasicStore {
-    storage: RustDictStorageController,
+    storage: RustDictStorageController<Value>,
 }
 
 impl BasicStore {
-    pub fn new(storage:RustDictStorageController) -> Self {
+    pub fn new(storage:RustDictStorageController<Value>) -> Self {
         Self {storage}
     }
 

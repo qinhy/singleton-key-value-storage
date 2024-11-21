@@ -14,7 +14,7 @@ fn test_store() {
     // Initialize storage and controller
     let storage = RustDictStorage::get_singleton();
     println!("Storage UUID: {:?}", storage.uuid);
-    let mut storage_conn = RustDictStorageController::new(storage);
+    let mut storage_conn = RustDictStorageController{model:storage};
 
     // Perform operations on the controller
     storage_conn.set("key1", json!({"example": "data"}));
@@ -22,6 +22,17 @@ fn test_store() {
         println!("Value for 'key1': {:?}", value);
     } else {
         println!("No value found for 'key1'");
+    }
+
+    // check singleton
+    {
+        let tmp_storage = RustDictStorage::get_singleton();
+        let mut tmp_conn = RustDictStorageController{model:tmp_storage};
+        if let Some(value) = tmp_conn.get("key1") {
+            println!("Value for 'key1': {:?}", value);
+        } else {
+            println!("No value found for 'key1'");
+        }
     }
 
     // Create an AbstractObj and generate ID
