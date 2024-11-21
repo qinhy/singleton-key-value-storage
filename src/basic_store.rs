@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use base64::read;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use serde_json::Value;
 use uuid::Uuid;
-use crate::singleton_storage::{AbstractStorageController, RustDictStorage, RustDictStorageController};
+use crate::singleton_storage::{AbstractStorageController, RustDictStorageController};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AbstractObj {
@@ -15,7 +14,6 @@ pub struct AbstractObj {
     pub update_time: DateTime<Utc>,
     pub status: String,
     pub metadata: HashMap<String, String>,
-    // controller: Option<Box<dyn AbstractObjController>>,
 }
 
 impl AbstractObj {

@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
-// use std::path::Path;
 use uuid::Uuid;
-// use serde_json::json;
 use lazy_static::lazy_static;
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
+use regex::Regex;
 
 pub trait AbstractStorageController<T> {
     fn is_singleton(&self) -> bool;
@@ -103,20 +102,27 @@ impl<T> AbstractStorageController<T> for RustDictStorageController<T> {
         }
     }
 
-    fn keys(&self, _pattern: &str) -> Vec<String> {
+    fn keys(&self, pattern: &str) -> Vec<String> {
+        let mut ks:Vec<String> = vec![];
         if self.is_singleton() {
-            self.model
+            ks = self.model
                 .store_lock
                 .as_ref()
                 .map_or_else(Vec::new, |store_lock| {
                     store_lock.read().unwrap().keys().cloned().collect()
-                })
+                });
         } else {
-            self.model
+            ks = self.model
                 .store
                 .as_ref()
-                .map_or_else(Vec::new, |store| store.keys().cloned().collect())
-        }
+                .map_or_else(Vec::new, |store| store.keys().cloned().collect());
+        };
+        // Perform regex filtering on keys
+        let regex = Regex::new(pattern).unwrap();
+        ks.retain(|key| regex.is_match(key));
+    
+        // Return the filtered keys
+        ks
     }
 
     fn clean(&mut self) {

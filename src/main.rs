@@ -48,6 +48,7 @@ fn test_store() {
     // Search and conditionally delete object
     if let Some(mut obj_conn) = basic_store.find(&obj.get_id()) {
         println!("Found object with ID: {:?}", obj_conn.model.id);
+        println!("{:?}", obj_conn.model);
         obj_conn.delete();
     } else {
         println!("Object with ID {:?} not found", obj.get_id());
