@@ -53,13 +53,11 @@ impl RustDictStorage {
 
 pub struct RustDictStorageController {
     model: RustDictStorage,
-    store: HashMap<String, Value>,
 }
 
 impl RustDictStorageController {
     pub fn new(model: RustDictStorage) -> Self {
-        let store = model.store.clone();
-        Self { model, store }
+        Self { model }
     }
 }
 
@@ -69,36 +67,36 @@ impl AbstractStorageController for RustDictStorageController {
     }
 
     fn exists(&self, key: &str) -> bool {
-        self.store.contains_key(key)
+        self.model.store.contains_key(key)
     }
 
     fn set(&mut self, key: &str, value: Value) {
-        self.store.insert(key.to_string(), value);
+        self.model.store.insert(key.to_string(), value);
     }
 
     fn get(&self, key: &str) -> Option<Value> {
-        self.store.get(key).cloned()
+        self.model.store.get(key).cloned()
     }
 
     fn delete(&mut self, key: &str) {
-        self.store.remove(key);
+        self.model.store.remove(key);
     }
 
     fn keys(&self, _pattern: &str) -> Vec<String> {
-        self.store.keys().cloned().collect()
+        self.model.store.keys().cloned().collect()
     }
 
     fn clean(&mut self) {
-        self.store.clear();
+        self.model.store.clear();
     }
 
     fn dumps(&self) -> String {
-        serde_json::to_string(&self.store).unwrap_or_else(|_| "{}".to_string())
+        serde_json::to_string(&self.model.store).unwrap_or_else(|_| "{}".to_string())
     }
 
     fn loads(&mut self, json_string: &str) {
         if let Ok(map) = serde_json::from_str::<HashMap<String, Value>>(json_string) {
-            self.store = map;
+            self.model.store = map;
         }
     }
 
