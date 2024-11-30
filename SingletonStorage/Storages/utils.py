@@ -1,5 +1,6 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class PEMFileReader:    
     def __init__(self, file_path):
@@ -147,6 +148,32 @@ class SimpleRSAChunkEncryptor:
         if not self.private_key: raise ValueError("Private key required for decryption.")
         decrypted_chunks = [base64.b64decode(i) for i in encrypted_data.split('|')]
         decrypted_chunks = [self.decrypt_chunk(i) for i in decrypted_chunks]        
+        return b''.join(decrypted_chunks).decode('utf-8')
+    
+
+    def encrypt_string(self, plaintext: str, max_workers: int = 4) -> str:
+        if not self.chunk_size:
+            raise ValueError("Public key required for encryption.")
+        text_bytes = plaintext.encode('utf-8')
+        chunks = [text_bytes[i:i + self.chunk_size] for i in range(0, len(text_bytes), self.chunk_size)]
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self.encrypt_chunk, chunk): chunk for chunk in chunks}
+            encrypted_chunks = [future.result() for future in as_completed(futures)]
+        
+        encoded_chunks = [base64.b64encode(chunk) for chunk in encrypted_chunks]
+        return '|'.join(chunk.decode('utf-8') for chunk in encoded_chunks)
+
+    def decrypt_string(self, encrypted_data: str, max_workers: int = 4) -> str:
+        if not self.private_key:
+            raise ValueError("Private key required for decryption.")
+        encoded_chunks = encrypted_data.split('|')
+        decoded_chunks = [base64.b64decode(chunk) for chunk in encoded_chunks]
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self.decrypt_chunk, chunk): chunk for chunk in decoded_chunks}
+            decrypted_chunks = [future.result() for future in as_completed(futures)]
+
         return b''.join(decrypted_chunks).decode('utf-8')
 
 # Example Usage
