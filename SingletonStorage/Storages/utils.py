@@ -173,21 +173,21 @@ class SimpleRSAChunkEncryptor:
     #     return '|'.join(chunk.decode('utf-8') for chunk in encoded_chunks)
 
     # def decrypt_string(self, encrypted_data: str, max_workers: int = 8) -> str:
-        if not self.private_key:
-            raise ValueError("Private key required for decryption.")
-        encoded_chunks = encrypted_data.split('|')
-        decoded_chunks = [base64.b64decode(chunk) for chunk in encoded_chunks]
+        # if not self.private_key:
+        #     raise ValueError("Private key required for decryption.")
+        # encoded_chunks = encrypted_data.split('|')
+        # decoded_chunks = [base64.b64decode(chunk) for chunk in encoded_chunks]
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Map futures with their original index
-            futures = {executor.submit(self.decrypt_chunk, chunk): index for index, chunk in enumerate(decoded_chunks)}
-            decrypted_chunks = [None] * len(decoded_chunks)
-            for future in futures:
-                index = futures[future]
-                decrypted_chunks[index] = future.result()
+        # with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        #     # Map futures with their original index
+        #     futures = {executor.submit(self.decrypt_chunk, chunk): index for index, chunk in enumerate(decoded_chunks)}
+        #     decrypted_chunks = [None] * len(decoded_chunks)
+        #     for future in futures:
+        #         index = futures[future]
+        #         decrypted_chunks[index] = future.result()
 
-        # Combine decrypted chunks
-        return b''.join(decrypted_chunks).decode('utf-8')
+        # # Combine decrypted chunks
+        # return b''.join(decrypted_chunks).decode('utf-8')
 
 # Example Usage
 def ex1():
