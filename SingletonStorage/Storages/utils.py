@@ -1,6 +1,7 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import zlib
 
 class PEMFileReader:    
     def __init__(self, file_path):
@@ -132,43 +133,46 @@ class SimpleRSAChunkEncryptor:
         decrypted_chunk = decrypted_chunk_int.to_bytes((n.bit_length() + 7) // 8, byteorder='big')
         return decrypted_chunk.lstrip(b'\x00')
 
-    def encrypt_string(self, plaintext:str):
-        """Encrypt a string by splitting it into chunks and encoding with Base64."""
-        if not self.chunk_size: raise ValueError("Public key required for encryption.")        
-        text_bytes = plaintext.encode('utf-8')        
-        chunk_indices = range(0, len(text_bytes), self.chunk_size)
-        chunks = [text_bytes[i:i + self.chunk_size] for i in chunk_indices]
+    def encrypt_string(self, plaintext: str, compress: bool = False):
+        if not self.chunk_size: raise ValueError("Public key required for encryption.")
+        data = zlib.compress(plaintext.encode('utf-8')) if compress else plaintext.encode('utf-8')
+        chunk_indices = range(0, len(data), self.chunk_size)
+        chunks = [data[i:i + self.chunk_size] for i in chunk_indices]
         encrypted_chunks = [self.encrypt_chunk(chunk) for chunk in chunks]
         encoded_chunks = [base64.b64encode(chunk) for chunk in encrypted_chunks]
-        encrypted_string = b'|'.join(encoded_chunks).decode('utf-8')        
+        encrypted_string = b'|'.join(encoded_chunks).decode('utf-8')
         return encrypted_string
 
-    def decrypt_string(self, encrypted_data:str):
-        """Decrypt a Base64-encoded string by decoding and decrypting each chunk."""
+    def decrypt_string(self, encrypted_data: str):
         if not self.private_key: raise ValueError("Private key required for decryption.")
-        decrypted_chunks = [base64.b64decode(i) for i in encrypted_data.split('|')]
-        decrypted_chunks = [self.decrypt_chunk(i) for i in decrypted_chunks]        
-        return b''.join(decrypted_chunks).decode('utf-8')
+        encrypted_chunks = encrypted_data.split('|')
+        decoded_chunks = [base64.b64decode(chunk) for chunk in encrypted_chunks]
+        decrypted_chunks = [self.decrypt_chunk(chunk) for chunk in decoded_chunks]
+        data = b''.join(decrypted_chunks)
+        try:
+            return zlib.decompress(data).decode('utf-8')
+        except zlib.error:
+            return data.decode('utf-8')
     
-    def encrypt_string(self, plaintext: str, max_workers: int = 8) -> str:
-        if not self.chunk_size:
-            raise ValueError("Public key required for encryption.")
-        text_bytes = plaintext.encode('utf-8')
-        chunks = [text_bytes[i:i + self.chunk_size] for i in range(0, len(text_bytes), self.chunk_size)]
+    # def encrypt_string(self, plaintext: str, max_workers: int = 8) -> str:
+    #     if not self.chunk_size:
+    #         raise ValueError("Public key required for encryption.")
+    #     text_bytes = plaintext.encode('utf-8')
+    #     chunks = [text_bytes[i:i + self.chunk_size] for i in range(0, len(text_bytes), self.chunk_size)]
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Map futures with their original index
-            futures = {executor.submit(self.encrypt_chunk, chunk): index for index, chunk in enumerate(chunks)}
-            encrypted_chunks = [None] * len(chunks)
-            for future in futures:
-                index = futures[future]
-                encrypted_chunks[index] = future.result()
+    #     with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    #         # Map futures with their original index
+    #         futures = {executor.submit(self.encrypt_chunk, chunk): index for index, chunk in enumerate(chunks)}
+    #         encrypted_chunks = [None] * len(chunks)
+    #         for future in futures:
+    #             index = futures[future]
+    #             encrypted_chunks[index] = future.result()
 
-        # Encode and join encrypted chunks
-        encoded_chunks = [base64.b64encode(chunk) for chunk in encrypted_chunks]
-        return '|'.join(chunk.decode('utf-8') for chunk in encoded_chunks)
+    #     # Encode and join encrypted chunks
+    #     encoded_chunks = [base64.b64encode(chunk) for chunk in encrypted_chunks]
+    #     return '|'.join(chunk.decode('utf-8') for chunk in encoded_chunks)
 
-    def decrypt_string(self, encrypted_data: str, max_workers: int = 8) -> str:
+    # def decrypt_string(self, encrypted_data: str, max_workers: int = 8) -> str:
         if not self.private_key:
             raise ValueError("Private key required for decryption.")
         encoded_chunks = encrypted_data.split('|')
