@@ -112,9 +112,10 @@ class SimpleRSAChunkEncryptor:
     def __init__(self, public_key:tuple[int,int]=None, private_key:tuple[int,int]=None):
         self.public_key = public_key
         self.private_key = private_key
-        self.chunk_size = (public_key[1].bit_length() // 8) - 1
-        if self.chunk_size <= 0:
-            raise ValueError("The modulus 'n' is too small. Please use a larger key size.")
+        if public_key:
+            self.chunk_size = (public_key[1].bit_length() // 8) - 1
+            if self.chunk_size <= 0:
+                raise ValueError("The modulus 'n' is too small. Please use a larger key size.")
 
     def encrypt_chunk(self, chunk:bytes):
         """Encrypt a single chunk using RSA public key."""
