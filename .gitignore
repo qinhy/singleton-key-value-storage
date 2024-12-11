@@ -3,3 +3,6 @@ test.json
 /__pycache__
 /.vscode
 /build
+/SingletonStorage/Storages/__pycache__
+/target
+tmp/private_key.pem
