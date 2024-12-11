@@ -134,7 +134,7 @@ class SimpleRSAChunkEncryptor:
         decrypted_chunk = decrypted_chunk_int.to_bytes((n.bit_length() + 7) // 8, byteorder='big')
         return decrypted_chunk.lstrip(b'\x00')
 
-    def encrypt_string(self, plaintext: str, compress: bool = False):
+    def encrypt_string(self, plaintext: str, compress: bool = True):
         if not self.chunk_size: raise ValueError("Public key required for encryption.")
         data = zlib.compress(plaintext.encode('utf-8')) if compress else plaintext.encode('utf-8')
         chunk_indices = range(0, len(data), self.chunk_size)
@@ -269,8 +269,8 @@ def ex2():
 
 def ex3():
     # Load keys from .pem files
-    public_key_path = 'public_key.pem'
-    private_key_path = 'private_key.pem'
+    public_key_path = './tmp/public_key.pem'
+    private_key_path = './tmp/private_key.pem'
 
     public_key = PEMFileReader(public_key_path).load_public_pkcs8_key()
     private_key = PEMFileReader(private_key_path).load_private_pkcs8_key()
@@ -289,3 +289,5 @@ def ex3():
     # Decrypt the encrypted text
     decrypted_text = encryptor.decrypt_string(encrypted_text)
     print(f"\nDecrypted Text:[{decrypted_text}]")
+
+# ex3()
