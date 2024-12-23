@@ -113,11 +113,19 @@ class SimpleRSAChunkEncryptor:
         self.public_key = public_key
         self.private_key = private_key
         if public_key:
-            self.chunk_size = (public_key[1].bit_length() // 8) - 1
+            self.chunk_size = (public_key[1].bit_length() // 8)
             if self.chunk_size <= 0:
                 raise ValueError("The modulus 'n' is too small. Please use a larger key size.")
 
-    def encrypt_chunk(self, chunk:bytes):
+        # if (publicKey) {
+        #     const [e, n] = this.publicKey;
+        #     this.chunkSize = Math.floor(n.toString(2).length / 8);
+        #     if (this.chunkSize <= 0) {
+        #         throw new Error('The modulus "n" is too small. Please use a larger key size.');
+        #     }
+        # }
+    
+    def old_encrypt_chunk(self, chunk:bytes):
         """Encrypt a single chunk using RSA public key."""
         if not self.public_key: raise ValueError("Public key is required for encryption.")
         e, n = self.public_key
@@ -125,7 +133,7 @@ class SimpleRSAChunkEncryptor:
         encrypted_chunk_int = pow(chunk_int, e, n)
         return encrypted_chunk_int.to_bytes((n.bit_length() + 7) // 8, byteorder='big')
 
-    def decrypt_chunk(self, encrypted_chunk:bytes):
+    def old_decrypt_chunk(self, encrypted_chunk:bytes):
         """Decrypt a single chunk using RSA private key."""
         if not self.private_key: raise ValueError("Private key is required for decryption.")
         d, n = self.private_key
@@ -134,7 +142,7 @@ class SimpleRSAChunkEncryptor:
         decrypted_chunk = decrypted_chunk_int.to_bytes((n.bit_length() + 7) // 8, byteorder='big')
         return decrypted_chunk.lstrip(b'\x00')
 
-    def encrypt_string(self, plaintext: str, compress: bool = True):
+    def old_encrypt_string(self, plaintext: str, compress: bool = True):
         if not self.chunk_size: raise ValueError("Public key required for encryption.")
         data = zlib.compress(plaintext.encode('utf-8')) if compress else plaintext.encode('utf-8')
         chunk_indices = range(0, len(data), self.chunk_size)
@@ -144,7 +152,7 @@ class SimpleRSAChunkEncryptor:
         encrypted_string = b'|'.join(encoded_chunks).decode('utf-8')
         return encrypted_string
 
-    def decrypt_string(self, encrypted_data: str):
+    def old_decrypt_string(self, encrypted_data: str):
         if not self.private_key: raise ValueError("Private key required for decryption.")
         encrypted_chunks = encrypted_data.split('|')
         decoded_chunks = [base64.b64decode(chunk) for chunk in encrypted_chunks]
@@ -154,6 +162,80 @@ class SimpleRSAChunkEncryptor:
             return zlib.decompress(data).decode('utf-8')
         except zlib.error:
             return data.decode('utf-8')
+        
+
+    def encrypt_string(self, plaintext: str, compress: bool = True) -> str:
+        if not self.chunk_size:
+            raise ValueError("Public key required for encryption.")
+        
+        # Step 1: Compress or encode the plaintext
+        if compress:
+            data = zlib.compress(plaintext.encode('utf-8'))
+        else:
+            data = plaintext.encode('utf-8')
+        
+        chunk_size = self.chunk_size - 1
+
+        # Step 2: Split the data into chunks
+        chunks = [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
+
+        e, n = self.public_key
+
+
+        # Step 3: Encrypt each chunk, step by step
+        encrypted_chunks = []
+        for chunk in chunks:
+            # a. Convert chunk to hex
+            chunk_hex = chunk.hex()
+            # print(f"Chunk Hex: {chunk_hex}")  # Debug: Log chunk as hex
+
+            # b. Convert hex string to BigInt, ensuring it starts without 0
+            chunk_int = int('0x1' + chunk_hex, 16)
+            # print(f"Chunk Int: {chunk_int}")  # Debug: Log chunk as BigInt
+
+            # c. Encrypt the BigInt using the public key
+            encrypted_int = pow(chunk_int, e, n)
+            # print(f"Encrypted Int: {encrypted_int}")  # Debug: Log encrypted BigInt
+
+            # d. Convert the encrypted BigInt to a padded hex string
+            encrypted_hex = encrypted_int.to_bytes((self.chunk_size*2) *4//8, 'big').hex()
+            # print(f"Encrypted Hex: {encrypted_hex}")  # Debug: Log encrypted hex
+
+            # e. Encode the hex string to Base64
+            encrypted_base64 = base64.b64encode(bytes.fromhex(encrypted_hex)).decode('utf-8')
+            # print(f"Encrypted Base64: {encrypted_base64}")  # Debug: Log Base64
+
+            # Add the final encrypted Base64 string to the list
+            encrypted_chunks.append(encrypted_base64)
+
+        # Step 4: Join encrypted chunks with a separator
+        return '|'.join(encrypted_chunks)
+
+    def decrypt_string(self, encrypted_data: str) -> str:
+        if not self.private_key:
+            raise ValueError("Private key required for decryption.")
+
+        d, n = self.private_key
+
+        # Step 1: Decode and decrypt each chunk
+        decrypted_chunks = [
+            bytes.fromhex(
+                hex(pow(int.from_bytes(base64.b64decode(chunk), 'big'), d, n))[3:]  # Remove '0x1' prefix
+            )
+            for chunk in encrypted_data.split('|')
+        ]
+
+        # Step 2: Concatenate decrypted chunks
+        data = b''.join(decrypted_chunks)
+
+        # Step 3: Decode the concatenated data
+        try:
+            return data.decode('utf-8')  # Attempt decoding as UTF-8
+        except UnicodeDecodeError:
+            try:
+                return zlib.decompress(data).decode('utf-8')  # Attempt decompression if decoding fails
+            except Exception as e:
+                raise ValueError("Failed to decode data after all attempts.") from e
     
     # def encrypt_string(self, plaintext: str, max_workers: int = 8) -> str:
     #     if not self.chunk_size:
@@ -283,7 +365,7 @@ def ex3():
     print(f"Original Plaintext:[{plaintext}]")
 
     # Encrypt the plaintext
-    encrypted_text = encryptor.encrypt_string(plaintext)
+    encrypted_text = encryptor.encrypt_string(plaintext,True)
     print(f"\nEncrypted (Base64 encoded):[{encrypted_text}]")
 
     # Decrypt the encrypted text
