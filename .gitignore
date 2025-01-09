@@ -8,3 +8,4 @@ SingletonStorage/sqlite.db
 /SingletonStorage/Storages/__pycache__
 tmp/private_key.pem
 /target
+/ts
