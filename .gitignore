@@ -1,2 +1,9 @@
 SingletonStorage/__pycache__/*
 test.json
+/.vscode
+/__pycache__
+/build
+/SingletonStorage/Storages/__pycache__
+/target
+tmp/private_key.pem
+/ts
