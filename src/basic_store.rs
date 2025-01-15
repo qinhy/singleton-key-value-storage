@@ -112,21 +112,19 @@ impl BasicStore {
         }
     }
 
-    pub fn find(&mut self, id: &str) -> Option<AbstractObjController<'_>> {    
-        let json_value = self.storage.get(id);
-        if json_value==None {
-            return  None;
-        }
-        let json_value = json_value.unwrap();
-        match serde_json::from_value::<AbstractObj>(json_value){
-            Ok(obj) => {
-                // return  obj;
-                let obj_con = obj.get_controller(self);//AbstractObjController::new( obj,self);
-                return  Some(obj_con);
-            }
+    pub fn find<T>(&mut self, id: &str) -> Option<T> 
+    where
+        T: serde::de::DeserializeOwned, // Ensure T implements DeserializeOwned
+    {
+        // Get the JSON value from storage
+        let json_value = self.storage.get(id)?;
+    
+        // Try to deserialize the JSON value into the expected type
+        match serde_json::from_value::<T>(json_value.clone()) {
+            Ok(obj) => Some(obj), // Successfully deserialized, return the object
             Err(e) => {
-                eprintln!("Failed to get: {}", e);
-                return  None;
+                eprintln!("Failed to deserialize value for id {}: {}", id, e);
+                None // Return None if deserialization fails
             }
         }
     }

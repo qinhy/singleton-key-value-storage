@@ -1,8 +1,12 @@
 use base64;
+use flate2::read::ZlibDecoder;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Error, ErrorKind, Result};
+use std::io::{BufRead, BufReader, Error, ErrorKind, Result, Write, Read};
+
 
 pub struct PEMFileReader {
     key_bytes: Vec<u8>,
@@ -207,21 +211,44 @@ impl SimpleRSAChunkEncryptor {
         }
     }
 
-    pub fn encrypt_string(&self, plaintext: &str) -> Result<String> {
+    fn compress_data(&self, text_bytes: Vec<u8>) -> Vec<u8> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write(&text_bytes ).expect("Failed to write data");
+        encoder.finish().expect("Failed to compress data")
+    }
+    
+    pub fn encrypt_string(&self, plaintext: &str, compress:bool) -> Result<String> {
         if self.chunk_size == 0 {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "Public key required for encryption",
             ));
         }
-        let text_bytes = plaintext.as_bytes();
-        let chunks = text_bytes.chunks(self.chunk_size);
+        
+        let mut text_bytes:Vec<u8> = plaintext.as_bytes().to_vec();
+        if compress {
+            text_bytes = self.compress_data(text_bytes);
+        }
+
+        let chunks = text_bytes.chunks(self.chunk_size-1);
+        
         let encrypted_chunks: Result<Vec<String>> = chunks
             .map(|chunk| {
-                let encrypted_chunk = self.encrypt_chunk(chunk)?;
+                // Create a new vector starting with 1, followed by the current chunk
+                let mut modified_chunk = vec![1];
+                modified_chunk.extend_from_slice(chunk);
+                
+                // {
+                //     println!("{:?}", chunk);
+                //     let chunk_int = BigUint::from_bytes_be(chunk);
+                //     println!("{:?}", chunk_int);
+                // }
+                // Encrypt the modified chunk
+                let encrypted_chunk = self.encrypt_chunk(&modified_chunk)?;
                 Ok(base64::encode(encrypted_chunk))
             })
             .collect();
+    
         Ok(encrypted_chunks?.join("|"))
     }
 
@@ -232,6 +259,7 @@ impl SimpleRSAChunkEncryptor {
                 "Private key required for decryption",
             ));
         }
+    
         let encrypted_chunks: Result<Vec<Vec<u8>>> = encrypted_data
             .split('|')
             .map(|chunk| {
@@ -240,12 +268,41 @@ impl SimpleRSAChunkEncryptor {
                 })
             })
             .collect();
+    
         let decrypted_chunks: Result<Vec<Vec<u8>>> = encrypted_chunks?
             .iter()
             .map(|chunk| self.decrypt_chunk(chunk))
             .collect();
-        let decrypted_bytes = decrypted_chunks?.concat();
-        String::from_utf8(decrypted_bytes)
-            .map_err(|e| Error::new(ErrorKind::InvalidData, format!("UTF-8 error: {}", e)))
+    
+        let decrypted_bytes: Vec<u8> = decrypted_chunks?
+            .into_iter()
+            .map(|mut chunk| {
+                // Remove the first byte (1) from the chunk
+                if !chunk.is_empty() && chunk[0] == 1 {
+                    chunk.drain(0..1);
+                }
+                chunk
+            })
+            .flatten()
+            .collect();
+    
+        // Attempt to convert the bytes to a UTF-8 string
+        match String::from_utf8(decrypted_bytes.clone()) {
+            Ok(valid_string) => Ok(valid_string), // Successfully converted to UTF-8
+            Err(_) => {
+                // If invalid UTF-8, attempt decompression
+                let mut decoder = ZlibDecoder::new(&decrypted_bytes[..]);
+                let mut decompressed_bytes = Vec::new();
+                match decoder.read_to_end(&mut decompressed_bytes) {
+                    Ok(_) => {                    
+                        // Attempt to convert decompressed bytes to UTF-8                        
+                        String::from_utf8(decompressed_bytes)
+                            .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Decompressed data UTF-8 error: {}", e)))
+                    }
+                    Err(err) => Err( Error::new(ErrorKind::InvalidData, format!("Failed to decompress data: {}", err))),
+                }
+            }
+        }
     }
+    
 }

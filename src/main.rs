@@ -45,19 +45,21 @@ fn test_store() {
     let mut basic_store = BasicStore::new(storage_conn);
     basic_store.store(&obj);
 
-    // Search and conditionally delete object
-    if let Some(mut obj_conn) = basic_store.find(&obj.get_id()) {
-        println!("Found object with ID: {:?}", obj_conn.model.id);
-        println!("{:?}", obj_conn.model);
-        obj_conn.delete();
-    } else {
-        println!("Object with ID {:?} not found", obj.get_id());
+    // Search and conditionally delete object    
+    match basic_store.find::<AbstractObj>(&obj.get_id()) {
+        Some(obj) => {            
+            let mut obj_conn = obj.get_controller(&mut basic_store);
+            println!("Found object with ID: {:?}", obj_conn.model.id);
+            println!("{:?}", obj_conn.model);
+            obj_conn.delete();
+        },
+        None => println!("Object with ID {:?} not found", obj.get_id()),
     }
 
     // Verify deletion
-    match basic_store.find(&obj.get_id()) {
-        Some(obj_conn) => println!(
-            "Object still exists with ID: {:?}", obj_conn.model.id),
+    match basic_store.find::<AbstractObj>(&obj.get_id()) {
+        Some(obj) => println!(
+            "Object still exists with ID: {:?}", obj.get_id()),
         None => println!("Object with ID {:?} not found", obj.get_id()),
     }
 }
@@ -81,7 +83,7 @@ fn test_rsa() -> Result<(), Box<dyn std::error::Error>> {
     println!("Original Plaintext: [{}]", plaintext);
 
     // Encrypt the plaintext
-    let encrypted_text = encryptor.encrypt_string(plaintext)?;
+    let encrypted_text = encryptor.encrypt_string(plaintext,true)?;
     println!("\nEncrypted (Base64 encoded): [{}]", encrypted_text);
 
     // Decrypt the encrypted text
