@@ -111,7 +111,15 @@ class Model4Basic:
         update_time: datetime = Field(default_factory=now_utc)
         status: str = ""
         metadata: dict = {}
-
+        auto_del: bool = False # auto delete when removed from memory 
+  
+        def __obj_del__(self):
+            # print(f'BasicApp.store().delete({self.id})')
+            self.get_controller().delete()
+        
+        def __del__(self):
+            if self.auto_del: self.__obj_del__()
+        
         def model_dump_json_dict(self):
             return json.loads(self.model_dump_json())
 
@@ -145,6 +153,7 @@ class Model4Basic:
         children_id: list[str] = []
         _controller: Controller4Basic.AbstractGroupController = None
         def get_controller(self):return self._controller
+
 class BasicStore(SingletonKeyValueStorage):
     MODEL_CLASS_GROUP = Model4Basic
     
