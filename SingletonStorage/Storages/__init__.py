@@ -5,4 +5,5 @@ from .AwsStorage import *
 from .FirestoreStorage import *
 from .SqliteStorage import *
 from .MongoStorage import *
+from .FileSystemStorage import *
 from .TestStorage import *

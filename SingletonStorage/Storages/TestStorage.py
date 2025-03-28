@@ -10,6 +10,7 @@ try:
     from .FirestoreStorage import *
     from .SqliteStorage import *
     from .MongoStorage import *
+    from .FileSystemStorage import *
 except Exception as e:
     from Storage import SingletonKeyValueStorage
     from RedisStorage import *
@@ -17,6 +18,7 @@ except Exception as e:
     from FirestoreStorage import *
     from SqliteStorage import *
     from MongoStorage import *
+    from FileSystemStorage import *
 
 class Tests(unittest.TestCase):
     def __init__(self,*args,**kwargs)->None:
@@ -27,9 +29,14 @@ class Tests(unittest.TestCase):
         self.test_python(num)
         self.test_sqlite(num)
         self.test_sqlite_pymix(num)
+        self.test_file(num)
         # self.test_mongo(num)
         # self.test_redis(num)
         # self.test_firestore(num)
+
+    def test_file(self,num=1):
+        self.store.file_backend()
+        for i in range(num):self.test_all_cases()
 
     def test_python(self,num=1):
         self.store.python_backend()
@@ -104,7 +111,7 @@ class Tests(unittest.TestCase):
         self.store.dump('test.json')
 
         self.store.clean()
-        self.assertEqual(self.store.dumps(),'{}', "Should return the correct keys and values.")
+        self.assertEqual(self.store.dumps(),'{}', "Should return \{\} after clean.")
 
         self.store.load('test.json')
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
@@ -141,3 +148,6 @@ class Tests(unittest.TestCase):
 
         self.store.local_to_version(v2)
         self.assertEqual(json.loads(self.store.dumps()),json.loads(data2), "Should return the same keys and values.")
+
+
+# Tests().test_file()
