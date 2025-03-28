@@ -2,8 +2,6 @@
 import fnmatch
 import uuid
 import json
-import uuid
-import json
 from pathlib import Path
 
 try:
