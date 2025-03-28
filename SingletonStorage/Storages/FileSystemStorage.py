@@ -80,5 +80,5 @@ class SingletonFileSystemStorageController(AbstractStorageController):
         return [f.stem for f in self.model.storage_dir.glob('*.json')]
 
 
-SingletonKeyValueStorage.backs['redis']=lambda *args,**kwargs:SingletonFileSystemStorageController(SingletonFileSystemStorage(*args,**kwargs))
+SingletonKeyValueStorage.backs['file']=lambda *args,**kwargs:SingletonFileSystemStorageController(SingletonFileSystemStorage(*args,**kwargs))
 
