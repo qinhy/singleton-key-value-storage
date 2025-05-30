@@ -244,8 +244,10 @@ class SingletonKeyValueStorage(AbstractStorageController):
         'python':lambda *args,**kwargs:PythonDictStorageController(PythonDictStorage(*args,**kwargs).get_singleton()),
     }
 
-    def __init__(self,version_controll=False)->None:
+    def __init__(self,version_controll=False,
+                 encryptor:SimpleRSAChunkEncryptor=None)->None:
         self.version_controll = version_controll
+        self.encryptor = encryptor
         self.conn:AbstractStorageController = None
         self.python_backend()
     
@@ -312,7 +314,11 @@ class SingletonKeyValueStorage(AbstractStorageController):
         return func(*args)
     
     def _edit(self,func_name:str, key:str=None, value:dict=None):
-        args = [i for i in [key,value] if i is not None]
+        args = [i for i in [key,value] if i is not None]        
+        
+        if self.encryptor and func_name=='set':
+            value = {'rjson':self.encryptor.encrypt_string(json.dumps(value))}
+
         res = self._edit_local(func_name,key,value)
         self.dispatch_event(func_name,*args)
         return res
@@ -322,7 +328,7 @@ class SingletonKeyValueStorage(AbstractStorageController):
             # do local version controll
             func = args[0]
             if func == 'set':
-                func,key,value =args
+                func,key,_ =args
                 revert = None
                 if self.exists(key):
                     revert = (func,key,self.get(key))
@@ -372,8 +378,17 @@ class SingletonKeyValueStorage(AbstractStorageController):
     # Object, None(in error)    
     def exists(self, key: str)->bool:         return self._try_load_error(lambda:self.conn.exists(key))
     def keys(self, regx: str='*')->list[str]: return self._try_load_error(lambda:self.conn.keys(regx))
-    def get(self, key: str)->dict:            return self._try_load_error(lambda:self.conn.get(key))
-    def dumps(self)->str:                     return self._try_load_error(lambda:self.conn.dumps())
+
+    def get(self, key: str)->dict:            
+        value = self._try_load_error(lambda:self.conn.get(key))
+        if value and self.encryptor and 'rjson' in value:
+            value = self._try_load_error(
+                lambda:json.loads(self.encryptor.decrypt_string(value['rjson'])))
+        return value
+    
+    def dumps(self)->str:                  
+        return self._try_load_error(lambda:json.dumps({k:self.get(k) for k in self.keys('*')}))
+    
     def dump(self,json_path)->None:           return self._try_load_error(lambda:self.conn.dump(json_path))
 
     # events 
