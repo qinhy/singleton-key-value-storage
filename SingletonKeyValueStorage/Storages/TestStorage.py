@@ -13,6 +13,7 @@ try:
     from .SqliteStorage import *
     from .MongoStorage import *
     from .FileSystemStorage import *
+    from .CouchStorage import *
 except Exception as e:
     from Storage import SingletonKeyValueStorage
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
@@ -22,6 +23,7 @@ except Exception as e:
     from SqliteStorage import *
     from MongoStorage import *
     from FileSystemStorage import *
+    from CouchStorage import *
 
 ENCRYPPR=None
 # ENCRYPPR=SimpleRSAChunkEncryptor(
@@ -40,6 +42,7 @@ class Tests(unittest.TestCase):
         self.test_python(num)
         self.test_sqlite_pymix(num)
         self.test_file(num)
+        # self.test_couch(num)
         # self.test_sqlite(num)
         # self.test_mongo(num)
         # self.test_redis(num)
@@ -78,6 +81,11 @@ class Tests(unittest.TestCase):
     def test_mongo(self,num=1):
         print('###### test_mongo ######')
         self.store.mongo_backend()
+        for i in range(num):self.test_all_cases()
+        
+    def test_couch(self,num=1):
+        print('###### test_couch ######')
+        self.store.couch_backend('admin','admin')
         for i in range(num):self.test_all_cases()
 
     def test_s3(self,num=1):
@@ -179,4 +187,4 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(self.store.dumps()),json.loads(data2), "Should return the same keys and values.")
 
 
-Tests().test_all()
+# Tests().test_all()

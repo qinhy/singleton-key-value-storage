@@ -290,6 +290,10 @@ class SingletonKeyValueStorage(AbstractStorageController):
                         db_name:str="SingletonDB", collection_name:str="store"):
         self.conn = self._switch_backend('mongodb')(mongo_URL,db_name,collection_name)
 
+    def couch_backend(self,username:str, password:str,
+                      couchdb_URL:str="couchdb://localhost:5984/", dbname="singleton_db"):
+        self.conn = self._switch_backend('couch')(couchdb_URL, username, password, dbname)
+
     def _print(self,msg): print(f'[{self.__class__.__name__}]: {msg}')
        
     def delete_slave(self, slave:object)->bool: self.delete_event(getattr(slave,'uuid',None))

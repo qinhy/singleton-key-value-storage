@@ -9,3 +9,6 @@ SingletonStorage/sqlite.db
 tmp/private_key.pem
 /target
 /ts
+/SingletonKeyValueStorage/__pycache__
+/SingletonKeyValueStorage/Storages/__pycache__
+*.pyc

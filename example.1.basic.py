@@ -1,4 +1,4 @@
-from SingletonStorage import SingletonKeyValueStorage
+from SingletonKeyValueStorage import SingletonKeyValueStorage
 
 #################################### basic
 store = SingletonKeyValueStorage()
