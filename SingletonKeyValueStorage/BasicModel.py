@@ -14,6 +14,26 @@ except Exception as e:
 def now_utc():
     return datetime.now().replace(tzinfo=ZoneInfo("UTC"))
 
+class BasicModel(BaseModel):
+    def __call__(self, *args, **kwargs):
+        raise NotImplementedError('This method should be implemented by subclasses.')
+    
+    def _log_error(self, e):
+        return f"[{self.__class__.__name__}] Error: {str(e)}"
+    
+    def _try_error(self, func, default_value=('NULL',None)):
+        try:
+            return (True,func())
+        except Exception as e:
+            self._log_error(e)
+            return (False,default_value)
+        
+    def _try_binary_error(self, func):
+        return self._try_error(func)[0]
+    
+    def _try_obj_error(self, func, default_value=('NULL',None)):
+        return self._try_error(func,default_value)[1]
+    
 class Controller4Basic:
     class AbstractObjController:
         def __init__(self, store, model):
@@ -105,7 +125,7 @@ class Controller4Basic:
             return self
 
 class Model4Basic:
-    class AbstractObj(BaseModel):
+    class AbstractObj(BasicModel):
         _id: str=None
         rank: list = [0]
         create_time: datetime = Field(default_factory=now_utc)
@@ -204,6 +224,16 @@ class BasicStore(SingletonKeyValueStorage):
             setattr(self.MODEL_CLASS_GROUP,obj_name,obj.__class__)  
         if obj._id is not None: raise ValueError(f'obj._id is {obj._id}, must be none')
         return self._add_new_obj(obj,id)
+    
+    def add_new(self, obj_class_type=MODEL_CLASS_GROUP.AbstractObj,id:str=None):#, id:str=None)->MODEL_CLASS_GROUP.AbstractObj:
+        obj_name = obj_class_type.__name__
+        if not hasattr(self.MODEL_CLASS_GROUP,obj_name):
+            setattr(self.MODEL_CLASS_GROUP,obj_name,obj_class_type)
+        def add_obj(*args,**kwargs):
+            obj = obj_class_type(*args,**kwargs)
+            if obj._id is not None: raise ValueError(f'obj._id is "{obj._id}", must be none')
+            return self._add_new_obj(obj,id)
+        return add_obj
     
     def add_new_group(self, obj:Model4Basic.AbstractGroup, id:str=None)->Model4Basic.AbstractGroup:        
         if obj._id is not None: raise ValueError(f'obj._id is {obj._id}, must be none')
