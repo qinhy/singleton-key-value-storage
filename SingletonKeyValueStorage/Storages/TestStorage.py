@@ -39,10 +39,10 @@ class Tests(unittest.TestCase):
         )
 
     def test_all(self,num=1):
-        self.test_python(num)
-        self.test_sqlite_pymix(num)
-        self.test_file(num)
-        # self.test_couch(num)
+        # self.test_python(num)
+        # self.test_sqlite_pymix(num)
+        # self.test_file(num)
+        self.test_couch(num)
         # self.test_sqlite(num)
         # self.test_mongo(num)
         # self.test_redis(num)

@@ -72,6 +72,21 @@ class SingletonCouchDBStorage:
         resp = requests.request(method, url, auth=(self.username, self.password), **kwargs)
         return resp
 
+    def find(self, selector: dict, limit=1000, skip=0, fields=None, sort=None):
+        payload = {
+            "selector": selector,
+            "limit": limit,
+            "skip": skip
+        }
+        if fields:
+            payload["fields"] = fields
+        if sort:
+            payload["sort"] = sort
+        resp = self._request("POST", "/_find", json=payload)
+        if not resp.ok:
+            raise Exception(f"Mango query failed: {resp.text}")
+        return resp.json().get("docs", [])
+    
 class SingletonCouchDBStorageController(AbstractStorageController):
     def __init__(self, model: SingletonCouchDBStorage):
         self.model: SingletonCouchDBStorage = model
@@ -111,13 +126,11 @@ class SingletonCouchDBStorageController(AbstractStorageController):
         resp = self.model._request("HEAD", f"/{key}")
         return resp.status_code == 200
 
-    def keys(self, pattern='*'):
-        resp = self.model._request("GET", "/_all_docs")
-        rows = resp.json().get("rows", []) if resp.ok else []
-        all_keys = [row["id"] for row in rows]
-        regex = re.compile(fnmatch.translate(pattern))
-        matched_keys = [key for key in all_keys if regex.match(key)]
-        return matched_keys
+    def keys(self, pattern: str = '*', limit=1000) -> list[str]:
+        regex = '^' + re.escape(pattern).replace(r'\*', '.*') + '$'
+        selector = {"_id": {"$regex": regex}}
+        docs = self.model.find(selector, fields=["_id"], limit=limit)
+        return [doc['_id'] for doc in docs]
 
 SingletonKeyValueStorage.backs['couch'] = lambda *args, **kwargs: SingletonCouchDBStorageController(
     SingletonCouchDBStorage(*args, **kwargs)
