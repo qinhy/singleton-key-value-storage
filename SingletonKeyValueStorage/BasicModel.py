@@ -1,6 +1,7 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 from datetime import datetime
 import json
+from typing import Optional
 import unittest
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -41,7 +42,7 @@ class Controller4Basic:
 
         def delete(self):
             self.storage().delete(self.model.get_id())
-            self.model._controller = None
+            self.model.controller = None
 
         def update_metadata(self, key, value):
             updated_metadata = {**self.model.metadata, key: value}
@@ -59,13 +60,13 @@ class Controller4Basic:
                     continue
                 child: Model4Basic.AbstractObj = self.storage().find(child_id)
                 if hasattr(child, 'parent_id') and hasattr(child, 'children_id'):
-                    group:Controller4Basic.AbstractGroupController = child.get_controller()
+                    group:Controller4Basic.AbstractGroupController = child.controller
                     yield from group.yield_children_recursive(depth + 1)
                 yield child, depth
 
         def delete_recursive(self):
             for child, _ in self.yield_children_recursive():
-                child.get_controller().delete()
+                child.controller.delete()
             self.delete()
 
         def get_children_recursive(self):
@@ -75,7 +76,7 @@ class Controller4Basic:
                     continue
                 child: Model4Basic.AbstractObj = self.storage().find(child_id)
                 if hasattr(child, 'parent_id') and hasattr(child, 'children_id'):
-                    group:Controller4Basic.AbstractGroupController = child.get_controller()
+                    group:Controller4Basic.AbstractGroupController = child.controller
                     children_list.append(group.get_children_recursive())
                 else:
                     children_list.append(child)            
@@ -94,7 +95,7 @@ class Controller4Basic:
         def delete_child(self, child_id:str):
             if child_id not in self.model.children_id:return self
             remaining_ids = [cid for cid in self.model.children_id if cid != child_id]
-            child_con = self.storage().find(child_id).get_controller()
+            child_con = self.storage().find(child_id).controller
             if hasattr(child_con, 'delete_recursive'):
                 child_con:Controller4Basic.AbstractGroupController = child_con
                 child_con.delete_recursive()
@@ -112,10 +113,14 @@ class Model4Basic:
         status: str = ""
         metadata: dict = {}
         auto_del: bool = False # auto delete when removed from memory 
-  
+          
+        # auto exclude when model dump
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        controller: Optional[Controller4Basic.AbstractObjController] = None
+
         def __obj_del__(self):
             # print(f'BasicApp.store().delete({self.id})')
-            self.get_controller().delete()
+            self.controller.delete()
         
         def __del__(self):
             if self.auto_del: self.__obj_del__()
@@ -135,24 +140,38 @@ class Model4Basic:
         def get_id(self):
             assert self._id is not None, 'this obj is not setted!'
             return self._id
-        
-        model_config = ConfigDict(arbitrary_types_allowed=True)
-        _controller: Controller4Basic.AbstractObjController = None
+
+        def model_dump_json(self, *, indent = None, include = None, exclude = None, context = None, by_alias = False, exclude_unset = False, exclude_defaults = False, exclude_none = False, round_trip = False, warnings = True, serialize_as_any = False):
+            if exclude:
+                exclude += ['controller']
+            else:
+                exclude = ['controller']
+            return super().model_dump_json(indent=indent, include=include, exclude=exclude, context=context, by_alias=by_alias, exclude_unset=exclude_unset, exclude_defaults=exclude_defaults, exclude_none=exclude_none, round_trip=round_trip, warnings=warnings, serialize_as_any=serialize_as_any)
+
+        def model_dump(self, *, mode = 'python', include = None, exclude = None, context = None, by_alias = False, exclude_unset = False, exclude_defaults = False, exclude_none = False, round_trip = False, warnings = True, serialize_as_any = False):
+            if exclude:
+                exclude += ['controller']
+            else:
+                exclude = ['controller']
+            return super().model_dump(mode=mode, include=include, exclude=exclude, context=context, by_alias=by_alias, exclude_unset=exclude_unset, exclude_defaults=exclude_defaults, exclude_none=exclude_none, round_trip=round_trip, warnings=warnings, serialize_as_any=serialize_as_any)
+
         def _get_controller_class(self,modelclass=Controller4Basic):
             class_type = self.__class__.__name__+'Controller'
             res = {c.__name__:c for c in [i for k,i in modelclass.__dict__.items() if '_' not in k]}
             res = res.get(class_type, None)
             if res is None: raise ValueError(f'No such class of {class_type}')
             return res
-        def get_controller(self): return self._controller
-        def init_controller(self,store):self._controller = self._get_controller_class()(store,self)
+        
+        def init_controller(self,store):
+            self.controller = self._get_controller_class()(store,self)
 
     class AbstractGroup(AbstractObj):
         author_id: str=''
         parent_id: str = ''
         children_id: list[str] = []
-        _controller: Controller4Basic.AbstractGroupController = None
-        def get_controller(self):return self._controller
+
+        # auto exclude when model dump
+        controller: Optional[Controller4Basic.AbstractGroupController] = None
 
 class BasicStore(SingletonKeyValueStorage):
     MODEL_CLASS_GROUP = Model4Basic
@@ -163,13 +182,14 @@ class BasicStore(SingletonKeyValueStorage):
 
     def _get_class(self, id: str, modelclass=MODEL_CLASS_GROUP):
         class_type = id.split(':')[0]
-        res = {c.__name__:c for c in [i for k,i in modelclass.__dict__.items() if '_' not in k]}
+        res = [i for k,i in modelclass.__dict__.items() if '_' not in k]
+        res = {c.__name__:c for c in res}
         res = res.get(class_type, None)
         if res is None: raise ValueError(f'No such class of {class_type}')
         return res
     
     def _get_as_obj(self,id,data_dict)->MODEL_CLASS_GROUP.AbstractObj:
-        obj = self._get_class(id)(**data_dict)
+        obj:Model4Basic.AbstractObj = self._get_class(id)(**data_dict)
         obj.set_id(id).init_controller(self)
         return obj
     
@@ -245,30 +265,30 @@ class Tests(unittest.TestCase):
 
     def test_delete(self):
         obj = self.store.find_all()[0]
-        obj.get_controller().delete()
+        obj.controller.delete()
         self.assertFalse(self.store.exists(obj.get_id()), "Key should not exist after being deleted.")
         
     def test_group(self):
         self.store.clean()
         obj = self.store.add_new_obj(Model4Basic.AbstractObj())
         group = self.store.add_new_group(Model4Basic.AbstractGroup())
-        group.get_controller().add_child(obj.get_id())
-        self.assertEqual(group.get_controller().get_child(group.children_id[0]).model_dump_json_dict(),
+        group.controller.add_child(obj.get_id())
+        self.assertEqual(group.controller.get_child(group.children_id[0]).model_dump_json_dict(),
                          obj.model_dump_json_dict(),
                          "The retrieved value should match the child value.")
         
         group2_id = self.store.add_new_group(Model4Basic.AbstractGroup()).get_id()
-        group.get_controller().add_child(group2_id)
+        group.controller.add_child(group2_id)
         obj2 = self.store.add_new_obj(Model4Basic.AbstractObj())
 
-        group.get_controller().get_child(group2_id).get_controller().add_child(obj2.get_id())
+        group.controller.get_child(group2_id).controller.add_child(obj2.get_id())
         group2 = self.store.find(group2_id)
         
         self.assertTrue(all([x.model_dump_json_dict()==y.model_dump_json_dict() for x,y in zip(
-                                                group.get_controller().get_children(),[obj,group2])]),
+                                                group.controller.get_children(),[obj,group2])]),
                          "check get_children.")
         
-        children = group.get_controller().get_children_recursive()
+        children = group.controller.get_children_recursive()
         
         self.assertEqual(children[0].model_dump_json_dict(),
                          obj.model_dump_json_dict(),
@@ -281,8 +301,8 @@ class Tests(unittest.TestCase):
                          obj2.model_dump_json_dict(),
                          "The retrieved second child value should match the child value.")
         
-        group.get_controller().delete_child(group2_id)
-        self.assertEqual(group.get_controller().get_children()[0].model_dump_json_dict(),
+        group.controller.delete_child(group2_id)
+        self.assertEqual(group.controller.get_children()[0].model_dump_json_dict(),
                          obj.model_dump_json_dict(),
                          "The retrieved value should match the child value.")
 
