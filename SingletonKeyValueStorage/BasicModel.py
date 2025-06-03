@@ -213,8 +213,16 @@ class BasicStore(SingletonKeyValueStorage):
         obj.set_id(id).init_controller(self)
         return obj
     
+    def _auto_fix_id(self,obj:MODEL_CLASS_GROUP.AbstractObj, id:str="None"):
+        class_type = id.split(':')[0]
+        obj_class_type = obj.__class__.__name__
+        if class_type != obj_class_type:
+            id = f'{obj_class_type}:{id}'
+        return id
+
     def _add_new_obj(self, obj:MODEL_CLASS_GROUP.AbstractObj, id:str=None):
         id,d = obj.gen_new_id() if id is None else id, obj.model_dump_json_dict()
+        id = self._auto_fix_id(obj,id)
         self.set(id,d)
         return self._get_as_obj(id,d)
     
@@ -241,7 +249,11 @@ class BasicStore(SingletonKeyValueStorage):
     
     def find(self,id:str) -> MODEL_CLASS_GROUP.AbstractObj:
         raw = self.get(id)
-        if raw is None:return None
+        if raw is None:
+            raws = self.find_all(f'*:{id}')
+            if len(raws)==1:
+                return raws[0]
+            return None
         return self._get_as_obj(id,raw)
     
     def find_all(self,id:str=f'AbstractObj:*')->list[MODEL_CLASS_GROUP.AbstractObj]:
