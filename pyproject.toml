@@ -12,17 +12,26 @@ authors = [
 license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.8"
+
 dependencies = [
-  "pydantic",
+    "pydantic"
 ]
 
 [project.optional-dependencies]
 redis = ["redis"]
 firestore = ["google-cloud-firestore"]
-aws = ["boto3"]
+aws = ["boto3", "botocore", "mypy-boto3-s3"]
 mongo = ["pymongo"]
 couch = ["requests"]
-all = ["redis", "google-cloud-firestore", "boto3", "pymongo", "requests", "pydantic"]
+all = [
+    "redis",
+    "google-cloud-firestore",
+    "boto3",
+    "botocore",
+    "mypy-boto3-s3",
+    "pymongo",
+    "requests"
+]
 
 [project.urls]
 Homepage = "https://github.com/qinhy/singleton-key-value-storage"
