@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "singleton-key-value-storage"
+version = "0.1.0"
+description = "Python Singleton Key-Value Storage System supporting multiple backends."
+authors = [
+  { name = "HUANGYI QINH", email = "qinhunagyi@email.com" }
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "pydantic",
+]
+
+[project.optional-dependencies]
+redis = ["redis"]
+firestore = ["google-cloud-firestore"]
+aws = ["boto3"]
+mongo = ["pymongo"]
+couch = ["requests"]
+all = ["redis", "google-cloud-firestore", "boto3", "pymongo", "requests", "pydantic"]
+
+[project.urls]
+Homepage = "https://github.com/qinhy/singleton-key-value-storage"
+
+[tool.setuptools.packages.find]
+where = ["SingletonKeyValueStorage"]
+include = ["SingletonKeyValueStorage*"]

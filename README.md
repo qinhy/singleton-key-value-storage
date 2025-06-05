@@ -1,112 +1,64 @@
 # Python Singleton Key-Value Storage System
 
 ## Overview
-This project implements a key-value storage system in Python with a singleton design pattern. It allows for different backends such as Python dictionaries, Redis, and Firestore. The system supports basic CRUD operations and can handle multiple slaves for synchronization.
+This project implements a flexible, extensible key-value storage system in Python using the singleton design pattern. It supports multiple backends, including Python dictionaries, Redis, Firestore, AWS DynamoDB, MongoDB, SQLite, CouchDB, and the local file system. The system provides basic CRUD operations and supports slave synchronization.
 
-## Components
+## Features
+- Singleton pattern for all storage backends
+- Pluggable backends: Python dict, Redis, Firestore, AWS DynamoDB, MongoDB, SQLite, CouchDB, FileSystem
+- Unified CRUD API
+- Optional encryption support
+- Easy backend switching
 
-### SingletonPythonDictStorage and SingletonPythonDictStorageController
-- A singleton class that maintains a single instance of the dictionary storage.
-- Supports adding slaves that can be notified when the dictionary is modified.
-- Manages interactions with the `SingletonPythonDictStorage`.
-- Implements methods to perform CRUD operations on the storage and manage slaves.
-
-### SingletonFirestoreStorage and SingletonFirestoreStorageController
-- require
-```python
-    from google.cloud import firestore
-    os.environ['GOOGLE_PROJECT_ID']
-    os.environ['GOOGLE_FIRESTORE_COLLECTION']
+## Installation
+Install directly from GitHub using pip:
+```bash
+pip install "git+https://github.com/qinhy/singleton-key-value-storage.git"
 ```
-
-### SingletonRedisStorage and SingletonRedisStorageController
-- require
-```python
-    import redis
-    os.environ['REDIS_URL'] # 'redis://127.0.0.1:6379'
+To install with specific backend dependencies (e.g., Redis and MongoDB):
+```bash
+pip install "git+https://github.com/qinhy/singleton-key-value-storage.git#egg=singleton-key-value-storage[redis,mongo]"
 ```
-
-
-### SingletonKeyValueStorage
-- Acts as a facade for various storage backends.
-- Facilitates switching between different storage implementations such as Python dictionary, Redis, and Firestore.
+Available extras: `redis`, `firestore`, `aws`, `mongo`, `couch`, `pydantic`, `all`
 
 ## Usage
-
-### Initialization
+### Basic Initialization
 ```python
+from SingletonKeyValueStorage import SingletonKeyValueStorage
 storage = SingletonKeyValueStorage()
-storage.python_backend()  # Initialize with Python dictionary as the backend
+storage.python_backend()  # Use Python dict backend
 ```
-
 ### CRUD Operations
 ```python
-# Add a key-value pair
 storage.set('key1', {'data': 'value1'})
-
-# Retrieve a value
 print(storage.get('key1'))
-
-# Check if a key exists
 print(storage.exists('key1'))
-
-# Delete a key
 storage.delete('key1')
-
-# List keys with a specific pattern
 print(storage.keys('*key*'))
 ```
-
+### Switching Backends
+```python
+storage.redis_backend(redis_URL="redis://127.0.0.1:6379")
+storage.firestore_backend(project_id="your-gcp-project", collection="your-collection")
+storage.aws_backend(table_name="your-dynamodb-table")
+storage.mongo_backend(mongo_URL="mongodb://127.0.0.1:27017/", db_name="SingletonDB", collection_name="store")
+storage.sqlite_backend(mode="sqlite.db")
+storage.file_backend(storage_dir="./data")
+storage.couch_backend(couchdb_URL="http://127.0.0.1:5984", username="user", password="pass")
+```
 ### Managing Slaves
-Slaves can be added to the storage. These slaves are updated whenever changes occur in the main storage.
+You can add slave storages for synchronization. See the code for details.
 
-```python
-class ExampleSlave:
-    def set(self, key, value):
-        print(f"Slave setting: {key} = {value}")
+## Optional Dependencies
+- `redis` for Redis backend
+- `google-cloud-firestore` for Firestore backend
+- `boto3` for AWS DynamoDB backend
+- `pymongo` for MongoDB backend
+- `requests` for CouchDB backend
+- `pydantic` for advanced model support
 
-    def delete(self, key):
-        print(f"Slave deleting: {key}")
+## License
+MIT License
 
-slave = ExampleSlave()
-storage.add_slave(slave)
-
-# Now operations on `storage` will also notify `slave`.
-storage.set('key2', {'data': 'value2'})
-```
-
-### Serialization ( Firestore is not support )
-The Python dictionary storage can be dumped to a JSON file and loaded from it.
-
-```python
-# Dump to file
-storage.state.dump('storage_dump.json')
-
-# Load from file
-storage.state.load('storage_dump.json')
-```
-
-## Additional Features
-- Extensible to other backends like Redis and Firestore by implementing the corresponding storage controller classes.
-
-## Limitations
-- Error handling and data validation are minimal and should be enhanced for production use.
-
-
-## Ideas
-### object store
-
-#### atomic object store
-#### reproducible object store
-
-#### persistant file system represent
-#### temporary  file system represent
-
-### object communication
-### event listen/dispatch
-### history controll
-### version controll
-### micro service
-
-### bl store
-
+## Links
+- [GitHub Repository](https://github.com/qinhy/singleton-key-value-storage)
