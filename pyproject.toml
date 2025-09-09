@@ -1,34 +1,22 @@
-[tool.poetry]
+[project]
 name = "singleton-key-value-storage"
 version = "0.1.0"
-description = "Python Singleton Key-Value Storage System supporting multiple backends."
-authors = ["HUANGYI QINH <qinhunagyi@email.com>"]
-license = "MIT"  # Adjust if your LICENSE file is a different license
+description = "Add your description here"
 readme = "README.md"
-homepage = "https://github.com/qinhy/singleton-key-value-storage"
-packages = [{ include = "SingletonKeyValueStorage" }]
-keywords = ["singleton", "key-value", "storage", "multi-backend"]
-
-[tool.poetry.dependencies]
-python = ">=3.8"
-pydantic = "*"
-
-[tool.poetry.extras]
-redis = ["redis"]
-firestore = ["google-cloud-firestore"]
-aws = ["boto3", "botocore", "mypy-boto3-s3"]
-mongo = ["pymongo"]
-couch = ["requests"]
-all = [
-    "redis",
-    "google-cloud-firestore",
-    "boto3",
-    "botocore",
-    "mypy-boto3-s3",
-    "pymongo",
-    "requests"
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.40.26",
+    "botocore>=1.40.26",
+    "google-cloud-firestore>=2.21.0",
+    "mypy-boto3-s3>=1.40.26",
+    "pydantic>=2.11.7",
+    "pymongo>=4.14.1",
+    "redis>=6.4.0",
+    "requests>=2.32.5",
+    "tzdata>=2025.2",
 ]
 
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "ipython>=9.5.0",
+]

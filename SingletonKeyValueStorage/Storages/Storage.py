@@ -1,6 +1,7 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 import math
 import os
+from typing import Any, Callable, List, Optional, Tuple
 import uuid
 import fnmatch
 import json
@@ -163,80 +164,111 @@ class MessageQueueController(PythonDictStorageController):
             self.delete(key)
         if queue_name in self.counters:
             del self.counters[queue_name]
-
+            
 class LocalVersionController:
-    
     TABLENAME = '_Operation'
-    LISTNAME = '_Operations'
+    LISTNAME = '_Operations'  # not used anywhere else, kept for compatibility
     KEY = 'ops'
-    FORWARD = 'forward'    
+    FORWARD = 'forward'
     REVERT = 'revert'
 
-    def __init__(self,client=None):
+    def __init__(self, client=None):
         if client is None:
             client = PythonDictStorageController(PythonDictStorage())
-        self.client:AbstractStorageController = client
-        self._set_versions([])
-        self._current_version = None
-    
-    def get_versions(self)->list: 
-        return self.client.get(LocalVersionController.TABLENAME)[LocalVersionController.KEY]
-    
-    def _set_versions(self,ops:list): 
-        return self.client.set(LocalVersionController.TABLENAME,{LocalVersionController.KEY:ops})
-    
-    def find_version(self,version_uuid:str):         
-        versions = [i for i in self.get_versions()]
-        current_version_idx = versions.index(self._current_version
-                                             ) if self._current_version in versions else None
-        target_version_idx = versions.index(version_uuid
-                                            ) if version_uuid in versions else None
-        op = self.client.get(f'{LocalVersionController.TABLENAME}:{versions[target_version_idx]}'
-                             ) if target_version_idx else None
-        return versions,current_version_idx,target_version_idx,op
+        self.client: AbstractStorageController = client
 
-    def add_operation(self,operation:tuple,revert:tuple=None):
+        # Ensure the ops list exists without clobbering existing data
+        try:
+            table = self.client.get(LocalVersionController.TABLENAME) or {}
+        except Exception:
+            table = {}
+        if LocalVersionController.KEY not in table:
+            self.client.set(LocalVersionController.TABLENAME, {LocalVersionController.KEY: []})
+
+        self._current_version: Optional[str] = None
+
+    def get_versions(self) -> List[str]:
+        """Return the ordered list of version UUIDs (empty list if none)."""
+        try:
+            table = self.client.get(LocalVersionController.TABLENAME) or {}
+        except Exception:
+            table = {}
+        return list(table.get(LocalVersionController.KEY, []))
+
+    def _set_versions(self, ops: List[str]) -> Any:
+        """Persist the ordered list of version UUIDs."""
+        return self.client.set(LocalVersionController.TABLENAME, {LocalVersionController.KEY: list(ops)})
+
+    def find_version(self, version_uuid: Optional[str]):
+        versions = self.get_versions()
+        current_version_idx = versions.index(self._current_version) if self._current_version in versions else -1
+        target_version_idx = versions.index(version_uuid) if (version_uuid in versions) else None
+
+        op = None
+        if target_version_idx is not None:
+            op_id = versions[target_version_idx]
+            op = self.client.get(f'{LocalVersionController.TABLENAME}:{op_id}')
+
+        return versions, current_version_idx, target_version_idx, op
+
+    def add_operation(self, operation: Tuple[Any, ...], revert: Optional[Tuple[Any, ...]] = None) -> None:
+        """Append a new operation after the current pointer, truncating any redo tail."""
         opuuid = str(uuid.uuid4())
-        self.client.set(f'{LocalVersionController.TABLENAME}:{opuuid}',{
-            LocalVersionController.FORWARD:operation,LocalVersionController.REVERT:revert})
-        
-        ops = self.get_versions()
-        if self._current_version is not None:
-            opidx = ops.index(self._current_version)
-            ops = ops[:opidx+1]
+        self.client.set(
+            f'{LocalVersionController.TABLENAME}:{opuuid}',
+            {LocalVersionController.FORWARD: operation, LocalVersionController.REVERT: revert},
+        )
 
+        ops = self.get_versions()
+        if self._current_version is not None and self._current_version in ops:
+            opidx = ops.index(self._current_version)
+            ops = ops[: opidx + 1]  # drop any redo branch
         ops.append(opuuid)
         self._set_versions(ops)
         self._current_version = opuuid
 
-    def forward_one_operation(self,forward_callback:lambda forward:None):
-        versions,current_version_idx,_,_ = self.find_version(self._current_version)
-        if current_version_idx is None or len(versions)<=(current_version_idx+1):return
-        op = self.client.get(f'{LocalVersionController.TABLENAME}:{versions[current_version_idx+1]}')
-        # do forward
+    def forward_one_operation(self, forward_callback: Callable[[Tuple[Any, ...]], None]) -> None:
+        versions, current_version_idx, _, _ = self.find_version(self._current_version)
+        next_idx = current_version_idx + 1
+        if next_idx >= len(versions):
+            return
+
+        op = self.client.get(f'{LocalVersionController.TABLENAME}:{versions[next_idx]}')
+        if not op or LocalVersionController.FORWARD not in op:
+            return
+
+        # Only advance the pointer if the callback succeeds
         forward_callback(op[LocalVersionController.FORWARD])
-        self._current_version = versions[current_version_idx+1]
-    
-    def revert_one_operation(self,revert_callback:lambda revert:None):        
-        versions,current_version_idx,_,op = self.find_version(self._current_version)
-        if current_version_idx is None or (current_version_idx-1)<0:return
-        # do revert
+        self._current_version = versions[next_idx]
+
+    def revert_one_operation(self, revert_callback: Callable[[Optional[Tuple[Any, ...]]], None]) -> None:
+        versions, current_version_idx, _, op = self.find_version(self._current_version)
+        if current_version_idx is None or current_version_idx <= 0:
+            return
+        if not op or LocalVersionController.REVERT not in op:
+            return
+
         revert_callback(op[LocalVersionController.REVERT])
-        self._current_version = versions[current_version_idx-1]
+        self._current_version = versions[current_version_idx - 1]
 
-    def to_version(self,version_uuid:str,version_callback:lambda ops:None):
-        _,current_version_idx,target_version_idx,_ = self.find_version(version_uuid)
-        if target_version_idx is None:raise ValueError(f'no such version of {version_uuid}')
+    def to_version(self, version_uuid: str, version_callback: Callable[[Tuple[Any, ...]], None]) -> None:
+        versions, current_idx, target_idx, _ = self.find_version(version_uuid)
+        if target_idx is None:
+            raise ValueError(f'no such version of {version_uuid}')
 
-        delta_idx = target_version_idx - current_version_idx
-        sign = math.copysign(1, delta_idx)
-        
-        while abs(delta_idx) != 0:
-            if sign>0:
+        # Normalize 'no current' to -1 so we can walk forward cleanly
+        if current_idx is None:
+            current_idx = -1
+
+        while current_idx != target_idx:
+            if current_idx < target_idx:
+                # move forward by one
                 self.forward_one_operation(version_callback)
+                current_idx += 1
             else:
+                # move backward by one
                 self.revert_one_operation(version_callback)
-            delta_idx = delta_idx - sign
+                current_idx -= 1
 
 class SingletonKeyValueStorage(AbstractStorageController):    
     backs={

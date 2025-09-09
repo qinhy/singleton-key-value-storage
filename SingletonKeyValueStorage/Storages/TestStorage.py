@@ -39,10 +39,10 @@ class Tests(unittest.TestCase):
         )
 
     def test_all(self,num=1):
-        # self.test_python(num)
+        self.test_python(num)
         # self.test_sqlite_pymix(num)
         # self.test_file(num)
-        self.test_couch(num)
+        # self.test_couch(num)
         # self.test_sqlite(num)
         # self.test_mongo(num)
         # self.test_redis(num)
@@ -116,6 +116,7 @@ class Tests(unittest.TestCase):
         self.test_slaves()
         print('start : self.store.clean()')
         self.store.clean()
+        print('end all.')
 
     def test_set_and_get(self):
         self.store.set('test1', {'data': 123})
@@ -147,7 +148,7 @@ class Tests(unittest.TestCase):
         self.store.dump('test.json')
 
         self.store.clean()
-        self.assertEqual(self.store.dumps(),'{}', "Should return \{\} after clean.")
+        self.assertEqual(self.store.dumps(),'{}', "Should return {{}} after clean.")
 
         self.store.load('test.json')
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
