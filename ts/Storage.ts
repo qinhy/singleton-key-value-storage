@@ -1,10 +1,15 @@
 // import * as fs from 'fs';
 import {PEMFileReader,SimpleRSAChunkEncryptor} from './RSA';
 
-function uuidv4(prefix = '') {
-    return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
-        return Math.floor(Math.random() * 16).toString(16);
-    });
+function uuidv4() {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);          // 128 random bits
+
+  b[6] = (b[6] & 0x0f) | 0x40;        // version = 4
+  b[8] = (b[8] & 0x3f) | 0x80;        // variant = RFC 4122
+
+  const hex = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
 
 class AbstractStorage {

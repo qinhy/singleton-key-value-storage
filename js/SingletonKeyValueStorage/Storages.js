@@ -1,5 +1,16 @@
 // from https://github.com/qinhy/singleton-key-value-storage.git
 // A utility function to handle errors in JavaScript
+function uuidv4() {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);          // 128 random bits
+
+  b[6] = (b[6] & 0x0f) | 0x40;        // version = 4
+  b[8] = (b[8] & 0x3f) | 0x80;        // variant = RFC 4122
+
+  const hex = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+
 class SingletonStorageController {
     exists(key) { console.log(`[${this.constructor.name}]: not implemented`); }
     set(key, value) { console.log(`[${this.constructor.name}]: not implemented`); }
@@ -9,22 +20,11 @@ class SingletonStorageController {
     clean() { this.keys('*').forEach(k => this.delete(k)); }
     dumps() { var res = {}; this.keys('*').forEach(k => res[k] = this.get(k)); return JSON.stringify(res); }
     loads(jsonString = '{}') { this.clean(); Object.entries(JSON.parse(jsonString)).forEach(d => this.set(d[0], d[1])); }
-
-    _randuuid(prefix = '') {
-        return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
-            return Math.floor(Math.random() * 16).toString(16);
-        });
-    }
 }
 class JavascriptDictStorage {
     constructor() {
-        this.uuid = this._randuuid();
+        this.uuid = uuidv4();
         this.store = {};
-    }
-    _randuuid(prefix = '') {
-        return prefix + 'xxxx-xxxx-xxxx-xxxx-xxxx'.replace(/x/g, function () {
-            return Math.floor(Math.random() * 16).toString(16);
-        });
     }
     get() {
         return this.store;
@@ -127,7 +127,7 @@ class EventDispatcherController {
     }
 
     set_event(event_name, callback, id = null) {
-        if (id === null) id = this.client._randuuid();
+        if (id === null) id = uuidv4();
         this.client.set(`${EventDispatcherController.ROOT_KEY}:${event_name}:${id}`, callback);
         return id;
     }
@@ -199,7 +199,6 @@ class LocalVersionController {
    * Expects a storage controller with:
    *   get(key): any | undefined
    *   set(key, value): void
-   *   _randuuid(): string   (fallbacks to crypto.randomUUID if not present)
    */
   constructor(client = null) {
     if (client === null) {
@@ -261,10 +260,7 @@ class LocalVersionController {
    * @param {any|null} revert
    */
   add_operation(operation, revert = null) {
-    const newUuid =
-      typeof this.client._randuuid === 'function'
-        ? this.client._randuuid()
-        : (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
+    const newUuid = uuidv4();
 
     this.client.set(`${LocalVersionController.TABLENAME}:${newUuid}`, {
       [LocalVersionController.FORWARD]: operation,
@@ -760,7 +756,7 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         console.log(`add a slave with events of ${event_names}`);
         if (!slave.uuid) {
             try {
-                slave.uuid = this.conn._randuuid();
+                slave.uuid = uuidv4();
             } catch (e) {
                 this._print(`Cannot set uuid to ${slave}. Skipping this slave.`);
                 return false;

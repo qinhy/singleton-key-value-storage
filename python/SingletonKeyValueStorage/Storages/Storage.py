@@ -14,7 +14,6 @@ except Exception as e:
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
 
 class AbstractStorage:
-    # statics for singleton
     _uuid = uuid.uuid4()
     _store = None
     _is_singleton = True
@@ -63,20 +62,8 @@ class AbstractStorageController:
             None, PEMFileReader(private_pkcs8_key_path).load_private_pkcs8_key())
         return self.loads(encryptor.decrypt_string(Path(path).read_text()))
 
-class PythonDictStorage:
-    # statics for singleton
-    _uuid = uuid.uuid4()
-    _store = {}
-    _is_singleton = True
-    _meta = {}
-        
-    def __init__(self,id=None,store=None,is_singleton=None):
-        self.uuid = uuid.uuid4() if id is None else id
-        self.store = {} if store is None else store
-        self.is_singleton = False if is_singleton is None else is_singleton
-    
-    def get_singleton(self):
-        return self.__class__(self._uuid,self._store,self._is_singleton)
+class PythonDictStorage(AbstractStorage):
+    pass
 
 class PythonDictStorageController(AbstractStorageController):
     def __init__(self, model:PythonDictStorage):
