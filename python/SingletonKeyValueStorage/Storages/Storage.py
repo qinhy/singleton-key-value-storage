@@ -1,6 +1,7 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 import math
 import os
+import sys
 from typing import Any, Callable, List, Optional, Tuple
 import uuid
 import fnmatch
@@ -12,6 +13,56 @@ try:
     from .utils import SimpleRSAChunkEncryptor, PEMFileReader
 except Exception as e:
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
+
+
+def get_deep_size(obj, seen=None):
+    """
+    Recursively compute the deep size of Python objects, including:
+    - dicts (keys + values)
+    - lists/tuples/sets/frozensets (all items)
+    - user-defined objects via __dict__ and __slots__
+    """
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0
+    seen.add(obj_id)
+
+    size = sys.getsizeof(obj)
+
+    # Dicts
+    if isinstance(obj, dict):
+        size += sum((get_deep_size(k, seen) + get_deep_size(v, seen)) for k, v in obj.items())
+        return size
+
+    # Builtin containers
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        size += sum(get_deep_size(i, seen) for i in obj)
+        return size
+
+    # User-defined objects: traverse __dict__
+    if hasattr(obj, "__dict__"):
+        size += get_deep_size(vars(obj), seen)
+
+    # Also traverse __slots__ if defined
+    if hasattr(obj, "__slots__"):
+        for slot in obj.__slots__:
+            # some slots might not be set
+            try:
+                size += get_deep_size(getattr(obj, slot), seen)
+            except AttributeError:
+                pass
+
+    return size
+
+def humanize_bytes(n):
+    size = float(n)
+    for unit in ['B','KB','MB','GB','TB']:
+        if size < 1024.0:
+            return f"{size:3.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} PB"
 
 class AbstractStorage:
     _uuid = uuid.uuid4()
@@ -25,8 +76,21 @@ class AbstractStorage:
         self.is_singleton = False if is_singleton is None else is_singleton
     
     def get_singleton(self):
-        return self.__class__(self._uuid,self._store,self._is_singleton)
+        return self.__class__(self._uuid,self._store,self._is_singleton)    
     
+    def memory_usage(self, deep=True):
+        raise NotImplementedError("Subclasses must implement memory_usage method")
+    
+class PythonDictStorage(AbstractStorage):
+    def __init__(self, id=None, is_singleton=True):
+        super().__init__(id=id, store={}, is_singleton=is_singleton)
+        
+    def memory_usage(self, deep=True, human_readable=True):
+        """Return memory usage (deep or shallow)."""
+        size = get_deep_size(self) if deep else sys.getsizeof(self)
+        return humanize_bytes(size) if human_readable else size
+    
+
 class AbstractStorageController:
     def __init__(self, model): self.model:AbstractStorage = model
     
@@ -62,8 +126,6 @@ class AbstractStorageController:
             None, PEMFileReader(private_pkcs8_key_path).load_private_pkcs8_key())
         return self.loads(encryptor.decrypt_string(Path(path).read_text()))
 
-class PythonDictStorage(AbstractStorage):
-    pass
 
 class PythonDictStorageController(AbstractStorageController):
     def __init__(self, model:PythonDictStorage):
