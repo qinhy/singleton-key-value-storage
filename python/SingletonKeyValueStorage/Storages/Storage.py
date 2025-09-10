@@ -82,9 +82,13 @@ class AbstractStorage:
         raise NotImplementedError("Subclasses must implement memory_usage method")
     
 class PythonDictStorage(AbstractStorage):
-    def __init__(self, id=None, is_singleton=True):
-        super().__init__(id=id, store={}, is_singleton=is_singleton)
+    _uuid = uuid.uuid4()
+    _store = {}
         
+    def __init__(self,id=None,store=None,is_singleton=None):
+        super().__init__(id,store,is_singleton)
+        self.store = {} if store is None else store
+
     def memory_usage(self, deep=True, human_readable=True):
         """Return memory usage (deep or shallow)."""
         size = get_deep_size(self) if deep else sys.getsizeof(self)
@@ -216,12 +220,12 @@ class MessageQueueController(PythonDictStorageController):
             
 class LocalVersionController:
     TABLENAME = '_Operation'
-    LISTNAME = '_Operations'  # not used anywhere else, kept for compatibility
     KEY = 'ops'
     FORWARD = 'forward'
     REVERT = 'revert'
 
-    def __init__(self, client=None):
+    def __init__(self, client=None, limit_memory_MB: float = 128):
+        self.limit_memory_MB = limit_memory_MB
         if client is None:
             client = PythonDictStorageController(PythonDictStorage())
         self.client: AbstractStorageController = client
@@ -260,9 +264,21 @@ class LocalVersionController:
 
         return versions, current_version_idx, target_version_idx, op
 
-    def add_operation(self, operation: Tuple[Any, ...], revert: Optional[Tuple[Any, ...]] = None) -> None:
+    def estimate_memory_MB(self):
+        return self.client.model.memory_usage(deep=True, human_readable=False) / (1024 * 1024)
+    
+    def add_operation(self, operation: Tuple[Any, ...], revert: Optional[Tuple[Any, ...]] = None):
         """Append a new operation after the current pointer, truncating any redo tail."""
         opuuid = str(uuid.uuid4())
+
+        tmp = {f'{LocalVersionController.TABLENAME}:{opuuid}':
+                 {LocalVersionController.FORWARD: operation, LocalVersionController.REVERT: revert}}        
+        will_use_MB = get_deep_size(tmp) / (1024 * 1024)
+
+        while will_use_MB+self.estimate_memory_MB() > self.limit_memory_MB:
+            popped = self.pop_operation(1)
+            if not popped: break
+
         self.client.set(
             f'{LocalVersionController.TABLENAME}:{opuuid}',
             {LocalVersionController.FORWARD: operation, LocalVersionController.REVERT: revert},
@@ -276,6 +292,39 @@ class LocalVersionController:
         self._set_versions(ops)
         self._current_version = opuuid
 
+        if self.estimate_memory_MB() > self.limit_memory_MB:
+            res = f"[LocalVersionController] Warning: memory usage {self.estimate_memory_MB():.1f} MB exceeds limit of {self.limit_memory_MB} MB"
+            print(res)
+            return res
+        return None
+
+    def pop_operation(self, n: int = 1) -> List[Tuple[str, dict]]:
+        if n <= 0: return []
+
+        # Load current list
+        ops = self.get_versions()
+        if not ops: return []
+
+        popped = []
+        for _ in range(min(n, len(ops))):
+            pop_idx = 0 if ops[0] != self._current_version else -1
+            op_id = ops[pop_idx]
+            op_record = self.client.get(f"{self.TABLENAME}:{op_id}")
+            popped.append((op_id, op_record))
+            
+            # Remove from list
+            ops.pop(pop_idx)
+            self.client.delete(f"{self.TABLENAME}:{op_id}")
+
+        # Persist trimmed list
+        self._set_versions(ops)
+
+        # Fix current pointer if it pointed to a removed op (or now out-of-range)
+        if self._current_version not in ops:
+            self._current_version = ops[-1] if ops else None
+
+        return popped
+    
     def forward_one_operation(self, forward_callback: Callable[[Tuple[Any, ...]], None]) -> None:
         versions, current_version_idx, _, _ = self.find_version(self._current_version)
         next_idx = current_version_idx + 1

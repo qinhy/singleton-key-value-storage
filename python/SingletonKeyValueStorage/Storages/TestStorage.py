@@ -187,5 +187,22 @@ class Tests(unittest.TestCase):
         self.store.local_to_version(v2)
         self.assertEqual(json.loads(self.store.dumps()),json.loads(data2), "Should return the same keys and values.")
 
+        # test memory limit
+        def make_big_payload(size_kb: int) -> str:
+            """Return a string roughly size_kb kibibytes in size."""
+            # 1024 bytes ~ 1 KiB
+            return ("X" * 1024) * size_kb
+        self.store._verc.limit_memory_MB = 0.2  # 0.2 MB limit
+        lvc2 = self.store._verc
+
+        for i in range(3):
+            small_payload = make_big_payload(90)  # 0.1 MB
+            res = lvc2.add_operation(("write", f"small_{i}", small_payload), ("delete", f"small_{i}"))
+            self.assertIsNone(res, "Should not return any warning message for small payloads.")
+        # print(f"Memory usage after small payloads: {lvc2.estimate_memory_MB():.2f} MB")
+        big_payload = make_big_payload(600)                 # 0.6 MB
+        res = lvc2.add_operation(("write", "too_big", big_payload), ("delete", "too_big"))
+        expect_res = "[LocalVersionController] Warning: memory usage"
+        self.assertEqual(res[:len(expect_res)], expect_res, "Should return warning message about memory usage.")
 
 # Tests().test_all()

@@ -11,7 +11,7 @@ function uuidv4() {
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
 
-class SingletonStorageController {
+class AbstractStorageController {
     exists(key) { console.log(`[${this.constructor.name}]: not implemented`); }
     set(key, value) { console.log(`[${this.constructor.name}]: not implemented`); }
     get(key) { console.log(`[${this.constructor.name}]: not implemented`); }
@@ -21,32 +21,36 @@ class SingletonStorageController {
     dumps() { var res = {}; this.keys('*').forEach(k => res[k] = this.get(k)); return JSON.stringify(res); }
     loads(jsonString = '{}') { this.clean(); Object.entries(JSON.parse(jsonString)).forEach(d => this.set(d[0], d[1])); }
 }
-class JavascriptDictStorage {
-    constructor() {
-        this.uuid = uuidv4();
-        this.store = {};
-    }
-    get() {
-        return this.store;
-    }
-}
-class SingletonJavascriptDictStorage {
-    static _instance = null;
-    static _meta = {};
 
-    constructor() {
-        if (!SingletonJavascriptDictStorage._instance) {
-            SingletonJavascriptDictStorage._instance = this;
-            this.store = {};
-        }
-        return SingletonJavascriptDictStorage._instance;
-    }
-    get() {
-        return this.store;
-    }
+class AbstractStorage {
+  static _uuid = uuidv4();
+  static _store = null;
+  static _is_singleton = true;
+  static _meta = {};
+
+  constructor(id = null, store = null, isSingleton = null) {
+    this.uuid = id || uuidv4();
+    this.store = store || null;
+    this.isSingleton = isSingleton ?? false;
+  }
+
+  getSingleton() {
+    return new AbstractStorage(
+      AbstractStorage._uuid,
+      AbstractStorage._store,
+      AbstractStorage._is_singleton
+    );
+  }
 }
 
-class SingletonJavascriptDictStorageController extends SingletonStorageController {
+class JavascriptDictStorage extends AbstractStorage {
+  constructor(id = null, store = null, isSingleton = null) {
+    super(id, store, isSingleton);
+    this.store = store || {};
+  }
+}
+
+class JavascriptDictStorageController extends AbstractStorageController {
     constructor(model) {
         super();
         this.model = model;
@@ -69,7 +73,7 @@ class SingletonJavascriptDictStorageController extends SingletonStorageControlle
         return Object.keys(this.model.get()).filter(key => key.match(regex));
     }
 }
-class SingletonLocalStorageController extends SingletonStorageController {
+class SingletonLocalStorageController extends AbstractStorageController {
     constructor() {
         super();
         this.model = localStorage; 
@@ -104,7 +108,7 @@ class EventDispatcherController {
 
     constructor(client = null) {
         if (client === null) {
-            client = new SingletonJavascriptDictStorageController(new JavascriptDictStorage());
+            client = new JavascriptDictStorageController(new JavascriptDictStorage());
         }
         this.client = client;
     }
@@ -152,7 +156,7 @@ class EventDispatcherController {
 class KeysHistoryController {
     constructor(client = null) {
         if (client === null) {
-            client = new SingletonJavascriptDictStorageController(new JavascriptDictStorage());
+            client = new JavascriptDictStorageController(new JavascriptDictStorage());
         }
         this.client = client;
     }
@@ -202,7 +206,7 @@ class LocalVersionController {
    */
   constructor(client = null) {
     if (client === null) {
-      client = new SingletonJavascriptDictStorageController(new JavascriptDictStorage());
+      client = new JavascriptDictStorageController(new JavascriptDictStorage());
     }
     this.client = client;
 
@@ -384,7 +388,7 @@ class SingletonVueStorage {
     }
 }
 
-class SingletonVueStorageController extends SingletonJavascriptDictStorageController {
+class SingletonVueStorageController extends JavascriptDictStorageController {
     constructor(model) {
         super();
         this.model = model;
@@ -423,7 +427,7 @@ class SingletonIndexedDBStorage {
     }
 }
 
-class SingletonIndexedDBStorageController extends SingletonStorageController {
+class SingletonIndexedDBStorageController extends AbstractStorageController {
     constructor(model) {
         super();
         this.model = model;
@@ -581,7 +585,7 @@ class SingletonIndexedDBStorageController extends SingletonStorageController {
     }
 }
 
-class SingletonFastAPIStorageController extends SingletonStorageController {
+class SingletonFastAPIStorageController extends AbstractStorageController {
     constructor(apiBaseUrl = '') {
         super();
         this.apiBaseUrl = apiBaseUrl; // Base URL for the FastAPI endpoints
@@ -720,7 +724,7 @@ class SingletonFastAPIStorageController extends SingletonStorageController {
     }
 }
 
-class SingletonKeyValueStorage extends SingletonStorageController {
+class SingletonKeyValueStorage extends AbstractStorageController {
     constructor(version_controll = false) {
         super();
         this.version_controll = version_controll;
@@ -733,7 +737,8 @@ class SingletonKeyValueStorage extends SingletonStorageController {
         this._hist = new KeysHistoryController();
         this._verc = new LocalVersionController();
         const backs = {
-            'js': () => new SingletonJavascriptDictStorageController(new SingletonJavascriptDictStorage()),
+            'tmp': () => new JavascriptDictStorageController(new JavascriptDictStorage()),
+            'js': () => new JavascriptDictStorageController(new JavascriptDictStorage().getSingleton()),
             'localstorage': () => new SingletonLocalStorageController(),
             'fastapi': () => new SingletonFastAPIStorageController()
         };
