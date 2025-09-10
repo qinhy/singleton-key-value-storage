@@ -707,6 +707,13 @@ export class SingletonKeyValueStorage {
         });
     }
 
+    forwardOneOperation(): void {
+        this.versionController.forwardOneOperation((forward) => {
+            const [func, key, value] = forward;
+            this.editLocal(func, key, value);
+        });
+    }
+    
     getCurrentVersion(): string | null {
         const versions = this.versionController.getVersions();
         return versions.length > 0 ? versions[versions.length - 1] : null;

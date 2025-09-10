@@ -1,4 +1,4 @@
-import { SingletonKeyValueStorage } from './Storage';
+import { SingletonKeyValueStorage } from './Storages';
 
 function now_utc(): string {
     // Get the current time in milliseconds since the Unix epoch
