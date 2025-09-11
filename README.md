@@ -35,31 +35,6 @@ Available in multiple languages:
 - **Easy backend switching** without code changes
 - **Slave synchronization** for data replication
 
-## Installation
-
-### Python
-Install directly from GitHub using pip:
-```bash
-pip install "git+https://github.com/qinhy/singleton-key-value-storage.git"
-```
-To install with specific backend dependencies (e.g., Redis and MongoDB):
-```bash
-pip install "git+https://github.com/qinhy/singleton-key-value-storage.git#egg=singleton-key-value-storage[redis,mongo]"
-```
-Available extras: `redis`, `firestore`, `aws`, `mongo`, `couch`, `pydantic`, `all`
-
-### JavaScript/TypeScript
-Clone the repository and use the files directly in your project:
-```bash
-git clone https://github.com/qinhy/singleton-key-value-storage.git
-```
-Or install via npm/yarn (if published):
-```bash
-npm install singleton-key-value-storage
-# or
-yarn add singleton-key-value-storage
-```
-
 ## Usage
 
 ### Python
