@@ -488,10 +488,12 @@ class SingletonKeyValueStorage(AbstractStorageController):
     
     def revert_one_operation(self):
         self._verc.revert_one_operation(lambda revert:self._edit_local(*revert))
+    
+    def forward_one_operation(self):
+        self._verc.forward_one_operation(lambda forward:self._edit_local(*forward))
 
     def get_current_version(self):
-        vs = self._verc.get_versions()
-        return None if len(vs)==0 else vs[-1]
+        return self._verc._current_version
 
     def local_to_version(self,opuuid:str):
         self._verc.to_version(opuuid,lambda revert:self._edit_local(*revert))
