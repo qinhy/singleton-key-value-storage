@@ -359,7 +359,7 @@ class LocalVersionController {
   static REVERT = "revert";
 
   private client: TsDictStorageController;
-  private _currentVersion: string | null = null;
+  _currentVersion: string = "";
   limitMemoryMB: number;
 
   constructor(client: TsDictStorageController | null = null, limitMemoryMB: number = 128) {
@@ -714,9 +714,8 @@ export class SingletonKeyValueStorage {
         });
     }
     
-    getCurrentVersion(): string | null {
-        const versions = this.versionController.getVersions();
-        return versions.length > 0 ? versions[versions.length - 1] : null;
+    getCurrentVersion(): string {
+        return this.versionController._currentVersion;
     }
 
     localToVersion(opUuid: string): void {
