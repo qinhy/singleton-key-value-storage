@@ -22,33 +22,29 @@ def get_deep_size(obj, seen=None):
     - lists/tuples/sets/frozensets (all items)
     - user-defined objects via __dict__ and __slots__
     """
+    obj_id = id(obj)
     if seen is None:
         seen = set()
-    obj_id = id(obj)
     if obj_id in seen:
         return 0
     seen.add(obj_id)
 
     size = sys.getsizeof(obj)
 
-    # Dicts
     if isinstance(obj, dict):
-        size += sum((get_deep_size(k, seen) + get_deep_size(v, seen)) for k, v in obj.items())
+        for k, v in obj.items():
+            size += get_deep_size(k, seen) + get_deep_size(v, seen)
         return size
 
-    # Builtin containers
     if isinstance(obj, (list, tuple, set, frozenset)):
         size += sum(get_deep_size(i, seen) for i in obj)
         return size
 
-    # User-defined objects: traverse __dict__
     if hasattr(obj, "__dict__"):
         size += get_deep_size(vars(obj), seen)
 
-    # Also traverse __slots__ if defined
     if hasattr(obj, "__slots__"):
         for slot in obj.__slots__:
-            # some slots might not be set
             try:
                 size += get_deep_size(getattr(obj, slot), seen)
             except AttributeError:
