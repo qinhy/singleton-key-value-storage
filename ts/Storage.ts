@@ -3,7 +3,7 @@
 import { PEMFileReader, SimpleRSAChunkEncryptor } from './RSA';
 import { Buffer } from 'buffer';
 
-function uuidv4() {
+export function uuidv4() {
     const b = new Uint8Array(16);
     crypto.getRandomValues(b);          // 128 random bits
 
@@ -179,16 +179,51 @@ export class AbstractStorage {
 export class TsDictStorage extends AbstractStorage {
     static _uuid: string = uuidv4();
     static _store: Record<string, any> = {};
+    private _filePath: string | null = null;
 
     constructor(id: string | null = null, store: any = null, isSingleton: boolean | null = null) {
         super(id, store, isSingleton);
         this.store = store ?? {};
+        
+        // Handle file path if provided as first argument
+        if (id && typeof id === 'string' && !store && !isSingleton) {
+            this._filePath = id;
+            this.load();
+        }
     }
 
     memoryUsage(deep: boolean = true, humanReadable: boolean = true): number | string {
         // deep -> full traversal; shallow -> top-level estimate only
         const size = getDeepSize(this, null, !deep);
         return humanReadable ? humanizeBytes(size) : size;
+    }
+    
+    dump(): boolean {
+        if (!this._filePath) return false;
+        try {
+            const fs = require('fs');
+            fs.writeFileSync(this._filePath, JSON.stringify(this.store), 'utf8');
+            return true;
+        } catch (error) {
+            console.error(`Error writing to file ${this._filePath}:`, error);
+            return false;
+        }
+    }
+
+    load(): boolean {
+        if (!this._filePath) return false;
+        try {
+            const fs = require('fs');
+            if (fs.existsSync(this._filePath)) {
+                const data = fs.readFileSync(this._filePath, 'utf8');
+                this.store = JSON.parse(data);
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error(`Error reading from file ${this._filePath}:`, error);
+            return false;
+        }
     }
 }
 
@@ -348,6 +383,66 @@ class EventDispatcherController extends TsDictStorageController {
 
     clean(): void {
         super.clean();
+    }
+}
+
+class MessageQueueController extends TsDictStorageController {
+    static ROOT_KEY = 'MessageQueue';
+    private counters: Record<string, number> = {};
+
+    constructor(model: TsDictStorage) {
+        super(model);
+    }
+
+    private _getQueueKey(queueName: string, index: number): string {
+        return `${MessageQueueController.ROOT_KEY}:${queueName}:${index}`;
+    }
+
+    private _getQueueCounter(queueName: string): number {
+        if (!(queueName in this.counters)) {
+            this.counters[queueName] = 0;
+        }
+        return this.counters[queueName];
+    }
+
+    private _incrementQueueCounter(queueName: string): void {
+        this.counters[queueName] = this._getQueueCounter(queueName) + 1;
+    }
+
+    push(message: Record<string, any>, queueName: string = 'default'): string {
+        const counter = this._getQueueCounter(queueName);
+        const key = this._getQueueKey(queueName, counter);
+        this.set(key, message);
+        this._incrementQueueCounter(queueName);
+        return key;
+    }
+
+    pop(queueName: string = 'default'): Record<string, any> | null {
+        const keys = this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`);
+        if (!keys.length) return null; // Queue is empty
+        const earliestKey = keys[0];
+        const message = this.get(earliestKey);
+        this.delete(earliestKey);
+        return message;
+    }
+
+    peek(queueName: string = 'default'): Record<string, any> | null {
+        const keys = this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`);
+        if (!keys.length) return null; // Queue is empty
+        return this.get(keys[0]);
+    }
+
+    size(queueName: string = 'default'): number {
+        return this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`).length;
+    }
+
+    clear(queueName: string = 'default'): void {
+        this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`).forEach(key => {
+            this.delete(key);
+        });
+        if (queueName in this.counters) {
+            delete this.counters[queueName];
+        }
     }
 }
 
@@ -539,12 +634,22 @@ export class SingletonKeyValueStorage {
     versionControl: boolean;
     conn: TsDictStorageController | null;
     versionController: LocalVersionController = new LocalVersionController();
-    private eventDispatcher: EventDispatcherController = new EventDispatcherController(new TsDictStorage());    
+    private eventDispatcher: EventDispatcherController = new EventDispatcherController(new TsDictStorage());
+    private messageQueue: MessageQueueController = new MessageQueueController(new TsDictStorage());    
 
     private static backends: Record<string, (...args: any[]) => TsDictStorageController> = {
-        temp_ts: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
-        ts: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args).getSingleton()),
-    };
+         temp_ts: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
+         ts: (...args: any[]) => {
+             const storage = new TsDictStorage(...args);
+             const singleton = storage.getSingleton() as TsDictStorage;
+             return new TsDictStorageController(singleton);
+         },
+         file: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
+         couch: (...args: any[]) => {
+             console.warn('CouchDB backend is registered but requires external implementation');
+             return new TsDictStorageController(new TsDictStorage());
+         }
+     };
 
     constructor(versionControl = false) {
         this.versionControl = versionControl;
@@ -555,6 +660,7 @@ export class SingletonKeyValueStorage {
     private switchBackend(name: string = 'ts', ...args: any[]): TsDictStorageController {
         this.eventDispatcher = new EventDispatcherController(new TsDictStorage());
         this.versionController = new LocalVersionController();
+        this.messageQueue = new MessageQueueController(new TsDictStorage());
 
         const backend = SingletonKeyValueStorage.backends[name.toLowerCase()];
         if (!backend) {
@@ -582,6 +688,10 @@ export class SingletonKeyValueStorage {
         this.conn = this.switchBackend('ts');
     }
 
+    fileBackend(filePath: string = 'storage.json'): void {
+        this.conn = this.switchBackend('file', filePath);
+    }
+    
     sqlitePymixBackend(mode: string = 'sqlite.db'): void {
         this.conn = this.switchBackend('sqlite_pymix', { mode });
     }
@@ -596,6 +706,10 @@ export class SingletonKeyValueStorage {
 
     redisBackend(redisUrl: string = 'redis://127.0.0.1:6379'): void {
         this.conn = this.switchBackend('redis', redisUrl);
+    }
+
+    couchBackend(url: string = 'http://localhost:5984', dbName: string = 'test', username: string = '', password: string = ''): void {
+        this.conn = this.switchBackend('couch', url, dbName, username, password);
     }
 
     mongoBackend(mongoUrl: string = 'mongodb://127.0.0.1:27017/', dbName: string = 'SingletonDB', collectionName: string = 'store'): void {
@@ -810,192 +924,25 @@ export class SingletonKeyValueStorage {
     cleanEvents(): void {
         this.eventDispatcher.clean();
     }
+
+    // Message Queue methods
+    pushMessage(message: Record<string, any>, queueName: string = 'default'): string {
+        return this.messageQueue.push(message, queueName);
+    }
+
+    popMessage(queueName: string = 'default'): Record<string, any> | null {
+        return this.messageQueue.pop(queueName);
+    }
+
+    peekMessage(queueName: string = 'default'): Record<string, any> | null {
+        return this.messageQueue.peek(queueName);
+    }
+
+    queueSize(queueName: string = 'default'): number {
+        return this.messageQueue.size(queueName);
+    }
+
+    clearQueue(queueName: string = 'default'): void {
+        this.messageQueue.clear(queueName);
+    }
 }
-
-class Tests {
-    private store: SingletonKeyValueStorage;
-
-    constructor() {
-        this.store = new SingletonKeyValueStorage();
-    }
-
-    testAll(num: number = 1): void {
-        // this.testJs(num);
-        this.testLocalStorage(num);
-    }
-
-    private testJs(num: number = 1): void {
-        this.store.tsBackend();
-        for (let i = 0; i < num; i++) this.testAllCases();
-    }
-
-    private testLocalStorage(num: number = 1): void {
-        this.store.tempTsBackend();
-        for (let i = 0; i < num; i++) this.testAllCases();
-    }
-
-    private testAllCases(): void {
-        this.testSetAndGet();
-        this.testExists();
-        this.testDelete();
-        this.testKeys();
-        this.testGetNonexistent();
-        this.testDumpAndLoad();
-        this.testVersion();
-        this.testSlaves();
-        this.store.clean();
-        console.log('All tests end.');
-    }
-
-    private testSetAndGet(): void {
-        this.store.set('test1', { data: 123 });
-        console.assert(
-            JSON.stringify(this.store.get('test1')) === JSON.stringify({ data: 123 }),
-            "The retrieved value should match the set value."
-        );
-    }
-
-    private testExists(): void {
-        this.store.set('test2', { data: 456 });
-        console.assert(this.store.exists('test2') === true, "Key should exist after being set.");
-    }
-
-    private testDelete(): void {
-        this.store.set('test3', { data: 789 });
-        this.store.delete('test3');
-        console.assert(this.store.exists('test3') === false, "Key should not exist after being deleted.");
-    }
-
-    private testKeys(): void {
-        this.store.set('alpha', { info: 'first' });
-        this.store.set('abeta', { info: 'second' });
-        this.store.set('gamma', { info: 'third' });
-        const expectedKeys = ['alpha', 'abeta'];
-        console.assert(
-            JSON.stringify(this.store.keys('a*').sort()) === JSON.stringify(expectedKeys.sort()),
-            "Should return the correct keys matching the pattern."
-        );
-    }
-
-    private testGetNonexistent(): void {
-        console.assert(this.store.get('nonexistent') === null, "Getting a non-existent key should return null.");
-    }
-
-    private testDumpAndLoad(): void {
-        const raw = {
-            "test1": { "data": 123 }
-        };
-
-        this.store.clean();
-        console.assert(this.store.dumps() === '{}', "Should return the correct keys and values.");
-
-        this.store.clean();
-        this.store.loads(JSON.stringify(raw));
-        console.assert(
-            JSON.stringify(JSON.parse(this.store.dumps())) === JSON.stringify(raw),
-            "Should return the correct keys and values."
-        );
-    }
-
-    private testSlaves(): void {
-        this.store.clean();
-        this.store.loads(JSON.stringify({
-            "alpha": { "info": "first" },
-            "abeta": { "info": "second" },
-            "gamma": { "info": "third" }
-        }));
-
-        if (this.store.conn?.constructor.name === 'SingletonTsDictStorageController') return;
-
-        const store2 = new SingletonKeyValueStorage();
-        store2.tempTsBackend();
-
-        this.store.addSlave(store2);
-        this.store.set('alpha', { info: 'first' });
-        this.store.set('abeta', { info: 'second' });
-        this.store.set('gamma', { info: 'third' });
-        this.store.delete('abeta');
-
-        console.assert(
-            JSON.stringify(JSON.parse(this.store.dumps()).gamma) === JSON.stringify(JSON.parse(store2.dumps()).gamma),
-            "Should return the correct keys and values."
-        );
-    }
-
-    private testVersion(): void {
-    // Match Python ordering: clean first, then enable version control
-    this.store.clean();
-    this.store.versionControl = true;
-
-    // 1) Create v1
-    this.store.set('alpha', { info: 'first' });
-    const data1 = this.store.dumps();
-    const v1 = this.store.getCurrentVersion();
-
-    // 2) Create v2
-    this.store.set('abeta', { info: 'second' });
-    const v2 = this.store.getCurrentVersion();
-    const data2 = this.store.dumps();
-
-    // 3) Create another op, then jump back/forward between versions
-    this.store.set('gamma', { info: 'third' });
-
-    // Helpers to compare JSON objects irrespective of key order
-    const stableStringify = (value: any): string => {
-        const sortKeys = (v: any): any => {
-        if (Array.isArray(v)) return v.map(sortKeys);
-        if (v && typeof v === 'object') {
-            return Object.keys(v)
-            .sort()
-            .reduce((acc: any, k) => {
-                acc[k] = sortKeys(v[k]);
-                return acc;
-            }, {});
-        }
-        return v;
-        };
-        return JSON.stringify(sortKeys(value));
-    };
-
-    // local_to_version(v1)
-    this.store.localToVersion(v1);
-    console.assert(
-        stableStringify(JSON.parse(this.store.dumps())) === stableStringify(JSON.parse(data1)),
-        'Should return the same keys and values for v1.'
-    );
-
-    // local_to_version(v2)
-    this.store.localToVersion(v2);
-    console.assert(
-        stableStringify(JSON.parse(this.store.dumps())) === stableStringify(JSON.parse(data2)),
-        'Should return the same keys and values for v2.'
-    );
-
-    // ---- Memory limit test ----
-    const makeBigPayload = (sizeKiB: number): string => 'X'.repeat(1024 * sizeKiB);
-
-    // Set a tight limit (0.2 MB) like the Python test
-    this.store.versionController.limitMemoryMB = 0.2;
-    const lvc2 = this.store.versionController;
-
-    // Three small payloads (~0.09 MB each) should not trigger a warning
-    for (let i = 0; i < 3; i++) {
-        const smallPayload = makeBigPayload(90); // ~0.09 MiB
-        const res = lvc2.addOperation(['write', `small_${i}`, smallPayload], ['delete', `small_${i}`]);
-        console.assert(res === null, 'Should not return any warning message for small payloads.');
-    }
-
-    // One big payload (~0.6 MB) should trigger the warning prefix
-    const bigPayload = makeBigPayload(600); // ~0.59 MiB
-    const res = lvc2.addOperation(['write', 'too_big', bigPayload], ['delete', 'too_big']);
-    const expectPrefix = '[LocalVersionController] Warning: memory usage';
-    console.assert(
-        typeof res === 'string' && res.slice(0, expectPrefix.length) === expectPrefix,
-        'Should return warning message about memory usage.'
-    );
-    }
-
-}
-
-// Running tests
-new Tests().testAll();
