@@ -40,7 +40,7 @@ export class PEMFileReader {
         return [tag, length, value, index];
     }
 
-    private parseAsn1DerInteger(data: Uint8Array, index: number): [BigInt, number] {
+    private parseAsn1DerInteger(data: Uint8Array, index: number): [bigint, number] {
         const [tag, , value, nextIndex] = this.parseAsn1DerElement(data, index);
         if (tag !== 0x02) {
             throw new Error('Expected INTEGER');
@@ -57,7 +57,7 @@ export class PEMFileReader {
         return [value, nextIndex];
     }
 
-    public loadPublicPkcs8Key(): [BigInt, BigInt] {
+    public loadPublicPkcs8Key(): [bigint, bigint] {
         const [data] = this.parseAsn1DerSequence(this.keyBytes, 0);
         let index = 0;
 
@@ -81,7 +81,7 @@ export class PEMFileReader {
         return [e, n];
     }
 
-    public loadPrivatePkcs8Key(): [BigInt, BigInt] {
+    public loadPrivatePkcs8Key(): [bigint, bigint] {
         const [data] = this.parseAsn1DerSequence(this.keyBytes, 0);
         let index = 0;
 
@@ -104,8 +104,8 @@ export class PEMFileReader {
         // Skip version INTEGER
         [, index] = this.parseAsn1DerInteger(rsaKeyData, index);
 
-        var n: BigInt;
-        var e: BigInt;
+        var n: bigint;
+        var e: bigint;
         [n, index] = this.parseAsn1DerInteger(rsaKeyData, index);
         [e, index] = this.parseAsn1DerInteger(rsaKeyData, index);
         const [d] = this.parseAsn1DerInteger(rsaKeyData, index);
@@ -116,11 +116,11 @@ export class PEMFileReader {
 
 
 export class SimpleRSAChunkEncryptor {
-    private publicKey?: [BigInt, BigInt];
-    private privateKey?: [BigInt, BigInt];
+    private publicKey?: [bigint, bigint];
+    private privateKey?: [bigint, bigint];
     private chunkSize?: number;
 
-    constructor(publicKey?: [BigInt, BigInt], privateKey?: [BigInt, BigInt]) {
+    constructor(publicKey?: [bigint, bigint], privateKey?: [bigint, bigint]) {
         this.publicKey = publicKey;
         this.privateKey = privateKey;
         if (publicKey) {
@@ -132,7 +132,7 @@ export class SimpleRSAChunkEncryptor {
         }
     }
 
-    powermod(base: BigInt, exp: BigInt | number, p: BigInt): BigInt {
+    powermod(base: bigint, exp: bigint | number, p: bigint): bigint {
         let e = typeof exp === 'number' ? BigInt(exp) : exp;
         let result = 1n;
         let b = base % p; // optional initial reduction
@@ -204,7 +204,7 @@ export class SimpleRSAChunkEncryptor {
                 // Step 5: Convert decrypted BigInts to hex strings
                 .map(chunkInt => chunkInt.toString(16))            
                 // Step 6: Verify and slice hex strings, then convert to Buffers
-                .map(hex => (hex.at(0) === '1' ? hex.slice(1) : 
+                .map(hex => (hex[0] === '1' ? hex.slice(1) : 
                         (() => { throw new Error('decryptChunkHex must start with 0x1!'); })()))
                 .map(slicedHex => Buffer.from(slicedHex, 'hex'));
     
@@ -253,4 +253,4 @@ function ex3() {
 
 
 // npx tsx RSA.ts
-// ex3()
+ex3()
