@@ -1,12 +1,9 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
-import math
-import os
 import sys
 from typing import Any, Callable, List, Optional, Tuple
 import uuid
 import fnmatch
 import json
-import unittest
 from pathlib import Path
 
 try:
@@ -14,42 +11,30 @@ try:
 except Exception as e:
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
 
-
 def get_deep_size(obj, seen=None):
-    """
-    Recursively compute the deep size of Python objects, including:
-    - dicts (keys + values)
-    - lists/tuples/sets/frozensets (all items)
-    - user-defined objects via __dict__ and __slots__
-    """
     obj_id = id(obj)
     if seen is None:
         seen = set()
     if obj_id in seen:
         return 0
     seen.add(obj_id)
-
     size = sys.getsizeof(obj)
 
     if isinstance(obj, dict):
         for k, v in obj.items():
             size += get_deep_size(k, seen) + get_deep_size(v, seen)
         return size
-
     if isinstance(obj, (list, tuple, set, frozenset)):
         size += sum(get_deep_size(i, seen) for i in obj)
         return size
-
     if hasattr(obj, "__dict__"):
         size += get_deep_size(vars(obj), seen)
-
     if hasattr(obj, "__slots__"):
         for slot in obj.__slots__:
             try:
                 size += get_deep_size(getattr(obj, slot), seen)
             except AttributeError:
                 pass
-
     return size
 
 def humanize_bytes(n):
@@ -168,7 +153,7 @@ class EventDispatcherController(PythonDictStorageController):
             self.get(event_full_uuid)(*args, **kwargs)
 
 class MessageQueueController(PythonDictStorageController):
-    ROOT_KEY = 'MessageQueue'
+    ROOT_KEY = '_MessageQueue'
     
     def __init__(self, model: PythonDictStorage):
         super().__init__(model)
@@ -530,5 +515,3 @@ class SingletonKeyValueStorage(AbstractStorageController):
     def set_event(self, event_name: str, callback, id:str=None): return self._event_dispa.set_event(event_name, callback, id)
     def dispatch_event(self, event_name, *args, **kwargs): return self._event_dispa.dispatch_event(event_name, *args, **kwargs)
     def clean_events(self): return self._event_dispa.clean()
-
-

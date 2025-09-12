@@ -389,7 +389,7 @@ class EventDispatcherController extends TsDictStorageController {
 }
 
 class MessageQueueController extends TsDictStorageController {
-  static ROOT_KEY = "MessageQueue"
+  static ROOT_KEY = "_MessageQueue"
   counters = {}
 
   constructor(model) {
