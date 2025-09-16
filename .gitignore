@@ -1,2 +1,14 @@
-ts/node_modules/
+SingletonStorage/__pycache__/*
+test.json
+/build
+/__pycache__
+/.vscode
+SingletonStorage/sqlite.db
+*.db
+/SingletonStorage/Storages/__pycache__
 tmp/private_key.pem
+/target
+/SingletonKeyValueStorage/__pycache__
+/SingletonKeyValueStorage/Storages/__pycache__
+*.pyc
+ts/node_modules/
