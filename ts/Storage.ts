@@ -184,7 +184,7 @@ export class TsDictStorage extends AbstractStorage {
     constructor(id: string | null = null, store: any = null, isSingleton: boolean | null = null) {
         super(id, store, isSingleton);
         this.store = store ?? {};
-
+        
         // Handle file path if provided as first argument
         if (id && typeof id === 'string' && !store && !isSingleton) {
             this._filePath = id;
@@ -197,7 +197,7 @@ export class TsDictStorage extends AbstractStorage {
         const size = getDeepSize(this, null, !deep);
         return humanReadable ? humanizeBytes(size) : size;
     }
-
+    
     dump(): boolean {
         if (!this._filePath) return false;
         try {
@@ -454,7 +454,7 @@ class LocalVersionController {
   static REVERT = "revert";
 
   private client: TsDictStorageController;
-    _currentVersion: string = "";
+  _currentVersion: string = "";
   limitMemoryMB: number;
 
   constructor(client: TsDictStorageController | null = null, limitMemoryMB: number = 128) {
@@ -589,7 +589,7 @@ class LocalVersionController {
     this._setVersions(ops);
 
     if (!this._currentVersion || !ops.includes(this._currentVersion)) {
-            this._currentVersion = ops.length ? ops[ops.length - 1] : null;
+      this._currentVersion = ops.length ? ops[ops.length - 1] : null;
     }
     return popped;
   }
@@ -638,22 +638,22 @@ export class SingletonKeyValueStorage {
     versionControl: boolean;
     conn: TsDictStorageController | null;
     versionController: LocalVersionController = new LocalVersionController();
-    private eventDispatcher: EventDispatcherController = new EventDispatcherController(new TsDictStorage());    
-    private messageQueue: MessageQueueController = new MessageQueueController(new TsDictStorage());
+    private eventDispatcher: EventDispatcherController = new EventDispatcherController(new TsDictStorage());
+    private messageQueue: MessageQueueController = new MessageQueueController(new TsDictStorage());    
 
     private static backends: Record<string, (...args: any[]) => TsDictStorageController> = {
-        temp_ts: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
-        ts: (...args: any[]) => {
-            const storage = new TsDictStorage(...args);
-            const singleton = storage.getSingleton() as TsDictStorage;
-            return new TsDictStorageController(singleton);
-        },
-        file: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
-        couch: (...args: any[]) => {
-            console.warn('CouchDB backend is registered but requires external implementation');
-            return new TsDictStorageController(new TsDictStorage());
-        }
-    };
+         temp_ts: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
+         ts: (...args: any[]) => {
+             const storage = new TsDictStorage(...args);
+             const singleton = storage.getSingleton() as TsDictStorage;
+             return new TsDictStorageController(singleton);
+         },
+         file: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
+         couch: (...args: any[]) => {
+             console.warn('CouchDB backend is registered but requires external implementation');
+             return new TsDictStorageController(new TsDictStorage());
+         }
+     };
 
     constructor(versionControl = false) {
         this.versionControl = versionControl;
@@ -695,7 +695,7 @@ export class SingletonKeyValueStorage {
     fileBackend(filePath: string = 'storage.json'): void {
         this.conn = this.switchBackend('file', filePath);
     }
-
+    
     sqlitePymixBackend(mode: string = 'sqlite.db'): void {
         this.conn = this.switchBackend('sqlite_pymix', { mode });
     }
@@ -749,34 +749,7 @@ export class SingletonKeyValueStorage {
         }
     }
 
-    private createRevert(
-        args: any[],
-    ) {
-        const [func, key, value] = args;
-        let revert = null;
-        if (func === 'set') {
-            if (this.exists(key)) {
-                revert = ['set', key, this.get(key)];
-            } else {
-                revert = ['delete', key];
-            }
-        } else if (func === 'delete') {
-            revert = ['set', key, this.get(key)];
-        } else if (['clean', 'load', 'loads'].includes(func)) {
-            revert = ['loads', this.dumps()];
-        }
-        return revert;
-    }
-
-    private addRevertOperation(
-        args: any[]) {
-        let revert = this.createRevert(args);
-        if (revert) {
-            this.versionController.addOperation(args, revert);
-        }
-    }
-
-    private editConn(
+    private editLocal(
         funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads',
         key?: string,
         value?: Record<string, any>
@@ -794,23 +767,44 @@ export class SingletonKeyValueStorage {
         const func = this.conn?.[funcName as keyof typeof this.conn] as Function;
         if (!func) return;
 
-        const result = func.bind(this.conn)(...args);
+        // Call the function with the provided arguments
+        return func.bind(this.conn)(...args);
+    }
 
+    private edit(
+        funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads',
+        key?: string,
+        value?: Record<string, any>
+    ): any {
+        const args = [key, value].filter((arg) => arg !== undefined);
+        const result = this.editLocal(funcName, key, value);
+        this.dispatchEvent(funcName, ...args);
         return result;
     }
 
-    private tryEditWithErrorHandling(
-        args: any[],
-        vc: boolean = true,
-        de: boolean = true,
-    ): boolean {
+    private tryEditWithErrorHandling(args: any[]): boolean {
         const [func, key, value] = args;
-        if (this.versionControl && vc) {
-            this.addRevertOperation([func, key, value]);
+        if (this.versionControl) {
+            let revert;
+            if (func === 'set') {
+                if (this.exists(key)) {
+                    revert = ['set', key, this.get(key)];
+                } else {
+                    revert = ['delete', key];
+                }
+            } else if (func === 'delete') {
+                revert = ['set', key, this.get(key)];
+            } else if (['clean', 'load', 'loads'].includes(func)) {
+                revert = ['loads', this.dumps()];
+            }
+
+            if (revert) {
+                this.versionController.addOperation(args, revert);
+            }
         }
+
         try {
-            this.editConn(func, key, value);
-            if(de)this.dispatchEvent(func, ...args);
+            this.edit(func, key, value);
             return true;
         } catch (error) {
 
@@ -826,26 +820,26 @@ export class SingletonKeyValueStorage {
 
     revertOneOperation(): void {
         this.versionController.revertOneOperation((revert) => {
-            this.tryEditWithErrorHandling(revert, false, false);
+            const [func, key, value] = revert;
+            this.editLocal(func, key, value);
         });
     }
 
     forwardOneOperation(): void {
         this.versionController.forwardOneOperation((forward) => {
-            this.tryEditWithErrorHandling(forward, false, false);
+            const [func, key, value] = forward;
+            this.editLocal(func, key, value);
         });
     }
     
-    getCurrentVersion() {
-        return this.versionController?.getCurrentVersion();
-    }
-    getVersions() {
-       return this.versionController?.getVersions();
+    getCurrentVersion(): string {
+        return this.versionController._currentVersion;
     }
 
     localToVersion(opUuid: string): void {
         this.versionController.toVersion(opUuid, (revert) => {
-            this.tryEditWithErrorHandling(revert, false, false);
+            const [func, key, value] = revert;
+            this.editLocal(func, key, value);
         });
     }
 
