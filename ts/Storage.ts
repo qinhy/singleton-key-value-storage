@@ -172,7 +172,7 @@ export class AbstractStorage {
 
     /** Subclasses must implement memory usage (deep or shallow). */
     memoryUsage(deep?: boolean, humanReadable?: boolean): number | string {
-        throw new Error("Subclasses must implement memoryUsage method");  
+        throw new Error("Subclasses must implement memoryUsage method");
     }
 }
 
@@ -184,7 +184,7 @@ export class TsDictStorage extends AbstractStorage {
     constructor(id: string | null = null, store: any = null, isSingleton: boolean | null = null) {
         super(id, store, isSingleton);
         this.store = store ?? {};
-        
+
         // Handle file path if provided as first argument
         if (id && typeof id === 'string' && !store && !isSingleton) {
             this._filePath = id;
@@ -197,7 +197,7 @@ export class TsDictStorage extends AbstractStorage {
         const size = getDeepSize(this, null, !deep);
         return humanReadable ? humanizeBytes(size) : size;
     }
-    
+
     dump(): boolean {
         if (!this._filePath) return false;
         try {
@@ -448,186 +448,186 @@ class MessageQueueController extends TsDictStorageController {
 
 
 class LocalVersionController {
-  static TABLENAME = "_Operation";
-  static KEY = "ops";
-  static FORWARD = "forward";
-  static REVERT = "revert";
+    static TABLENAME = "_Operation";
+    static KEY = "ops";
+    static FORWARD = "forward";
+    static REVERT = "revert";
 
-  private client: TsDictStorageController;
-  _currentVersion: string = "";
-  limitMemoryMB: number;
+    private client: TsDictStorageController;
+    _currentVersion: string = "";
+    limitMemoryMB: number;
 
-  constructor(client: TsDictStorageController | null = null, limitMemoryMB: number = 128) {
-    this.limitMemoryMB = limitMemoryMB;
-    this.client = client || (new TsDictStorageController(new TsDictStorage()) as TsDictStorageController);
+    constructor(client: TsDictStorageController | null = null, limitMemoryMB: number = 128) {
+        this.limitMemoryMB = limitMemoryMB;
+        this.client = client || (new TsDictStorageController(new TsDictStorage()) as TsDictStorageController);
 
-    // Ensure ops list exists without clobbering existing data
-    let table: any;
-    try {
-      table = this.client.get(LocalVersionController.TABLENAME) || {};
-    } catch {
-      table = {};
-    }
-    if (!(LocalVersionController.KEY in (table || {}))) {
-      this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [] });
-    }
-  }
-
-  /** Return the ordered list of version UUIDs (empty list if none). */
-  getVersions(): string[] {
-    try {
-      const table = this.client.get(LocalVersionController.TABLENAME) || {};
-      const ops = table?.[LocalVersionController.KEY];
-      return Array.isArray(ops) ? [...ops] : [];
-    } catch {
-      return [];
-    }
-  }
-
-  /** Persist the ordered list of version UUIDs. */
-  private _setVersions(ops: string[]) {
-    return this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [...ops] });
-  }
-
-  findVersion(
-    versionUuid: string | null
-  ): [versions: string[], currentVersionIdx: number, targetVersionIdx: number | null, op: any | null] {
-    const versions = this.getVersions();
-    const currentVersionIdx =
-      this._currentVersion && versions.includes(this._currentVersion)
-        ? versions.indexOf(this._currentVersion)
-        : -1;
-
-    const targetVersionIdx = versionUuid && versions.includes(versionUuid) ? versions.indexOf(versionUuid) : null;
-    const op =
-      targetVersionIdx !== null
-        ? (this.client.get(`${LocalVersionController.TABLENAME}:${versions[targetVersionIdx]}`) as any | null)
-        : null;
-
-    return [versions, currentVersionIdx, targetVersionIdx, op];
-  }
-
-  estimateMemoryMB(): number {
-    try {
-      const raw = this.client.model?.memoryUsage?.(true, false);
-      if (typeof raw === "number") return raw / (1024 * 1024);
-    } catch {
-      /* ignore */
-    }
-    return 0;
-  }
-
-  /**
-   * Append a new operation after the current pointer, truncating any redo tail.
-   * Returns a warning string if memory exceeds the limit, else null.
-   */
-  addOperation(operation: any, revert: any = null): string | null {
-    const opUuid = uuidv4();
-
-    const tmp = {
-      [`${LocalVersionController.TABLENAME}:${opUuid}`]: {
-        [LocalVersionController.FORWARD]: operation,
-        [LocalVersionController.REVERT]: revert,
-      },
-    };
-    const willUseMB = getDeepSize(tmp) / (1024 * 1024);
-
-    while (willUseMB + this.estimateMemoryMB() > this.limitMemoryMB) {
-      const popped = this.popOperation(1);
-      if (!popped.length) break;
+        // Ensure ops list exists without clobbering existing data
+        let table: any;
+        try {
+            table = this.client.get(LocalVersionController.TABLENAME) || {};
+        } catch {
+            table = {};
+        }
+        if (!(LocalVersionController.KEY in (table || {}))) {
+            this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [] });
+        }
     }
 
-    this.client.set(`${LocalVersionController.TABLENAME}:${opUuid}`, {
-      [LocalVersionController.FORWARD]: operation,
-      [LocalVersionController.REVERT]: revert,
-    });
-
-    let ops = this.getVersions();
-    if (this._currentVersion !== null && ops.includes(this._currentVersion)) {
-      const opIdx = ops.indexOf(this._currentVersion);
-      ops = ops.slice(0, opIdx + 1); // drop any redo branch
-    }
-    ops.push(opUuid);
-    this._setVersions(ops);
-    this._currentVersion = opUuid;
-
-    const usage = this.estimateMemoryMB();
-    if (usage > this.limitMemoryMB) {
-      const res = `[LocalVersionController] Warning: memory usage ${usage.toFixed(1)} MB exceeds limit of ${this.limitMemoryMB} MB`;
-      // mirror Python's print + return
-      // eslint-disable-next-line no-console
-      console.warn(res);
-      return res;
-    }
-    return null;
-  }
-
-  /** Pop n operations from the head (or tail if head is the current op). */
-  popOperation(n: number = 1): Array<[string, any]> {
-    if (n <= 0) return [];
-
-    let ops = this.getVersions();
-    if (!ops.length) return [];
-
-    const popped: Array<[string, any]> = [];
-    const count = Math.min(n, ops.length);
-
-    for (let i = 0; i < count; i++) {
-      const popIdx = ops[0] !== this._currentVersion ? 0 : ops.length - 1;
-      const opId = ops[popIdx];
-      const opRecord = this.client.get(`${LocalVersionController.TABLENAME}:${opId}`) as any;
-      popped.push([opId, opRecord]);
-
-      ops.splice(popIdx, 1);
-      this.client.delete(`${LocalVersionController.TABLENAME}:${opId}`);
+    /** Return the ordered list of version UUIDs (empty list if none). */
+    getVersions(): string[] {
+        try {
+            const table = this.client.get(LocalVersionController.TABLENAME) || {};
+            const ops = table?.[LocalVersionController.KEY];
+            return Array.isArray(ops) ? [...ops] : [];
+        } catch {
+            return [];
+        }
     }
 
-    this._setVersions(ops);
-
-    if (!this._currentVersion || !ops.includes(this._currentVersion)) {
-      this._currentVersion = ops.length ? ops[ops.length - 1] : null;
+    /** Persist the ordered list of version UUIDs. */
+    private _setVersions(ops: string[]) {
+        return this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [...ops] });
     }
-    return popped;
-  }
 
-  forwardOneOperation(forwardCallback: (forward: any) => void): void {
-    const [versions, currentVersionIdx] = this.findVersion(this._currentVersion);
-    const nextIdx = currentVersionIdx + 1;
-    if (nextIdx >= versions.length) return;
+    findVersion(
+        versionUuid: string | null
+    ): [versions: string[], currentVersionIdx: number, targetVersionIdx: number | null, op: any | null] {
+        const versions = this.getVersions();
+        const currentVersionIdx =
+            this._currentVersion && versions.includes(this._currentVersion)
+                ? versions.indexOf(this._currentVersion)
+                : -1;
 
-    const op = this.client.get(`${LocalVersionController.TABLENAME}:${versions[nextIdx]}`) as any | null;
-    if (!op || !(LocalVersionController.FORWARD in op)) return;
+        const targetVersionIdx = versionUuid && versions.includes(versionUuid) ? versions.indexOf(versionUuid) : null;
+        const op =
+            targetVersionIdx !== null
+                ? (this.client.get(`${LocalVersionController.TABLENAME}:${versions[targetVersionIdx]}`) as any | null)
+                : null;
 
-    // Only advance the pointer if the callback succeeds
-    forwardCallback(op[LocalVersionController.FORWARD]);
-    this._currentVersion = versions[nextIdx];
-  }
-
-  revertOneOperation(revertCallback: (revert: any) => void): void {
-    const [versions, currentVersionIdx, , op] = this.findVersion(this._currentVersion);
-    if (currentVersionIdx <= 0) return;
-    if (!op || !(LocalVersionController.REVERT in op)) return;
-
-    revertCallback(op[LocalVersionController.REVERT]);
-    this._currentVersion = versions[currentVersionIdx - 1];
-  }
-
-  toVersion(versionUuid: string, versionCallback: (opArgs: any) => void): void {
-    let [_, currentIdx, targetIdx] = this.findVersion(versionUuid);
-    if (targetIdx === null) throw new Error(`no such version of ${versionUuid}`);
-
-    if (currentIdx === null) currentIdx = -1; // normalize "no current" to -1
-
-    while (currentIdx !== targetIdx) {
-      if (currentIdx < targetIdx) {
-        this.forwardOneOperation(versionCallback);
-        currentIdx += 1;
-      } else {
-        this.revertOneOperation(versionCallback);
-        currentIdx -= 1;
-      }
+        return [versions, currentVersionIdx, targetVersionIdx, op];
     }
-  }
+
+    estimateMemoryMB(): number {
+        try {
+            const raw = this.client.model?.memoryUsage?.(true, false);
+            if (typeof raw === "number") return raw / (1024 * 1024);
+        } catch {
+            /* ignore */
+        }
+        return 0;
+    }
+
+    /**
+     * Append a new operation after the current pointer, truncating any redo tail.
+     * Returns a warning string if memory exceeds the limit, else null.
+     */
+    addOperation(operation: any, revert: any = null): string | null {
+        const opUuid = uuidv4();
+
+        const tmp = {
+            [`${LocalVersionController.TABLENAME}:${opUuid}`]: {
+                [LocalVersionController.FORWARD]: operation,
+                [LocalVersionController.REVERT]: revert,
+            },
+        };
+        const willUseMB = getDeepSize(tmp) / (1024 * 1024);
+
+        while (willUseMB + this.estimateMemoryMB() > this.limitMemoryMB) {
+            const popped = this.popOperation(1);
+            if (!popped.length) break;
+        }
+
+        this.client.set(`${LocalVersionController.TABLENAME}:${opUuid}`, {
+            [LocalVersionController.FORWARD]: operation,
+            [LocalVersionController.REVERT]: revert,
+        });
+
+        let ops = this.getVersions();
+        if (this._currentVersion !== null && ops.includes(this._currentVersion)) {
+            const opIdx = ops.indexOf(this._currentVersion);
+            ops = ops.slice(0, opIdx + 1); // drop any redo branch
+        }
+        ops.push(opUuid);
+        this._setVersions(ops);
+        this._currentVersion = opUuid;
+
+        const usage = this.estimateMemoryMB();
+        if (usage > this.limitMemoryMB) {
+            const res = `[LocalVersionController] Warning: memory usage ${usage.toFixed(1)} MB exceeds limit of ${this.limitMemoryMB} MB`;
+            // mirror Python's print + return
+            // eslint-disable-next-line no-console
+            console.warn(res);
+            return res;
+        }
+        return null;
+    }
+
+    /** Pop n operations from the head (or tail if head is the current op). */
+    popOperation(n: number = 1): Array<[string, any]> {
+        if (n <= 0) return [];
+
+        let ops = this.getVersions();
+        if (!ops.length) return [];
+
+        const popped: Array<[string, any]> = [];
+        const count = Math.min(n, ops.length);
+
+        for (let i = 0; i < count; i++) {
+            const popIdx = ops[0] !== this._currentVersion ? 0 : ops.length - 1;
+            const opId = ops[popIdx];
+            const opRecord = this.client.get(`${LocalVersionController.TABLENAME}:${opId}`) as any;
+            popped.push([opId, opRecord]);
+
+            ops.splice(popIdx, 1);
+            this.client.delete(`${LocalVersionController.TABLENAME}:${opId}`);
+        }
+
+        this._setVersions(ops);
+
+        if (!this._currentVersion || !ops.includes(this._currentVersion)) {
+            this._currentVersion = ops.length ? ops[ops.length - 1] : null;
+        }
+        return popped;
+    }
+
+    forwardOneOperation(forwardCallback: (forward: any) => void): void {
+        const [versions, currentVersionIdx] = this.findVersion(this._currentVersion);
+        const nextIdx = currentVersionIdx + 1;
+        if (nextIdx >= versions.length) return;
+
+        const op = this.client.get(`${LocalVersionController.TABLENAME}:${versions[nextIdx]}`) as any | null;
+        if (!op || !(LocalVersionController.FORWARD in op)) return;
+
+        // Only advance the pointer if the callback succeeds
+        forwardCallback(op[LocalVersionController.FORWARD]);
+        this._currentVersion = versions[nextIdx];
+    }
+
+    revertOneOperation(revertCallback: (revert: any) => void): void {
+        const [versions, currentVersionIdx, , op] = this.findVersion(this._currentVersion);
+        if (currentVersionIdx <= 0) return;
+        if (!op || !(LocalVersionController.REVERT in op)) return;
+
+        revertCallback(op[LocalVersionController.REVERT]);
+        this._currentVersion = versions[currentVersionIdx - 1];
+    }
+
+    toVersion(versionUuid: string, versionCallback: (opArgs: any) => void): void {
+        let [_, currentIdx, targetIdx] = this.findVersion(versionUuid);
+        if (targetIdx === null) throw new Error(`no such version of ${versionUuid}`);
+
+        if (currentIdx === null) currentIdx = -1; // normalize "no current" to -1
+
+        while (currentIdx !== targetIdx) {
+            if (currentIdx < targetIdx) {
+                this.forwardOneOperation(versionCallback);
+                currentIdx += 1;
+            } else {
+                this.revertOneOperation(versionCallback);
+                currentIdx -= 1;
+            }
+        }
+    }
 }
 
 export class SingletonKeyValueStorage {
@@ -635,21 +635,21 @@ export class SingletonKeyValueStorage {
     conn: TsDictStorageController | null;
     versionController: LocalVersionController = new LocalVersionController();
     private eventDispatcher: EventDispatcherController = new EventDispatcherController(new TsDictStorage());
-    private messageQueue: MessageQueueController = new MessageQueueController(new TsDictStorage());    
+    private messageQueue: MessageQueueController = new MessageQueueController(new TsDictStorage());
 
     private static backends: Record<string, (...args: any[]) => TsDictStorageController> = {
-         temp_ts: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
-         ts: (...args: any[]) => {
-             const storage = new TsDictStorage(...args);
-             const singleton = storage.getSingleton() as TsDictStorage;
-             return new TsDictStorageController(singleton);
-         },
-         file: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
-         couch: (...args: any[]) => {
-             console.warn('CouchDB backend is registered but requires external implementation');
-             return new TsDictStorageController(new TsDictStorage());
-         }
-     };
+        temp_ts: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
+        ts: (...args: any[]) => {
+            const storage = new TsDictStorage(...args);
+            const singleton = storage.getSingleton() as TsDictStorage;
+            return new TsDictStorageController(singleton);
+        },
+        file: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
+        couch: (...args: any[]) => {
+            console.warn('CouchDB backend is registered but requires external implementation');
+            return new TsDictStorageController(new TsDictStorage());
+        }
+    };
 
     constructor(versionControl = false) {
         this.versionControl = versionControl;
@@ -691,7 +691,7 @@ export class SingletonKeyValueStorage {
     fileBackend(filePath: string = 'storage.json'): void {
         this.conn = this.switchBackend('file', filePath);
     }
-    
+
     sqlitePymixBackend(mode: string = 'sqlite.db'): void {
         this.conn = this.switchBackend('sqlite_pymix', { mode });
     }
@@ -745,7 +745,34 @@ export class SingletonKeyValueStorage {
         }
     }
 
-    private editLocal(
+    private createRevert(
+        args: any[],
+    ) {
+        const [func, key, value] = args;
+        let revert = null;
+        if (func === 'set') {
+            if (this.exists(key)) {
+                revert = ['set', key, this.get(key)];
+            } else {
+                revert = ['delete', key];
+            }
+        } else if (func === 'delete') {
+            revert = ['set', key, this.get(key)];
+        } else if (['clean', 'load', 'loads'].includes(func)) {
+            revert = ['loads', this.dumps()];
+        }
+        return revert;
+    }
+
+    private addRevertOperation(
+        args: any[]) {
+        let revert = this.createRevert(args);
+        if (revert) {
+            this.versionController.addOperation(args, revert);
+        }
+    }
+
+    private editConn(
         funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads',
         key?: string,
         value?: Record<string, any>
@@ -762,45 +789,23 @@ export class SingletonKeyValueStorage {
         // Safely access the method using a type assertion
         const func = this.conn?.[funcName as keyof typeof this.conn] as Function;
         if (!func) return;
-
+        
         // Call the function with the provided arguments
         return func.bind(this.conn)(...args);
     }
 
-    private edit(
-        funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads',
-        key?: string,
-        value?: Record<string, any>
-    ): any {
-        const args = [key, value].filter((arg) => arg !== undefined);
-        const result = this.editLocal(funcName, key, value);
-        this.dispatchEvent(funcName, ...args);
-        return result;
-    }
-
-    private tryEditWithErrorHandling(args: any[]): boolean {
+    private tryEditWithErrorHandling(
+        args: any[],
+        vc: boolean = true,
+        de: boolean = true,
+    ): boolean {
         const [func, key, value] = args;
-        if (this.versionControl) {
-            let revert;
-            if (func === 'set') {
-                if (this.exists(key)) {
-                    revert = ['set', key, this.get(key)];
-                } else {
-                    revert = ['delete', key];
-                }
-            } else if (func === 'delete') {
-                revert = ['set', key, this.get(key)];
-            } else if (['clean', 'load', 'loads'].includes(func)) {
-                revert = ['loads', this.dumps()];
-            }
-
-            if (revert) {
-                this.versionController.addOperation(args, revert);
-            }
+        if (this.versionControl && vc) {
+            this.addRevertOperation([func, key, value]);
         }
-
         try {
-            this.edit(func, key, value);
+            this.editConn(func, key, value);
+            if(de)this.dispatchEvent(func, ...args);
             return true;
         } catch (error) {
 
@@ -816,26 +821,26 @@ export class SingletonKeyValueStorage {
 
     revertOneOperation(): void {
         this.versionController.revertOneOperation((revert) => {
-            const [func, key, value] = revert;
-            this.editLocal(func, key, value);
+            this.tryEditWithErrorHandling(revert, false, false);
         });
     }
 
     forwardOneOperation(): void {
         this.versionController.forwardOneOperation((forward) => {
-            const [func, key, value] = forward;
-            this.editLocal(func, key, value);
+            this.tryEditWithErrorHandling(forward, false, false);
         });
     }
     
     getCurrentVersion(): string {
-        return this.versionController._currentVersion;
+        return this.versionController?.getCurrentVersion() ?? 'null';
+    }
+    getVersions() {
+        return this.versionController?.getVersions();
     }
 
     localToVersion(opUuid: string): void {
         this.versionController.toVersion(opUuid, (revert) => {
-            const [func, key, value] = revert;
-            this.editLocal(func, key, value);
+            this.tryEditWithErrorHandling(revert, false, false);
         });
     }
 
