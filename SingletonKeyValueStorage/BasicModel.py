@@ -84,8 +84,9 @@ class Controller4Basic:
 
         def delete(self):
             parent: Model4Basic.AbstractGroup = self.storage().find(self.model.parent_id)
-            remaining_ids = [cid for cid in parent.children_id if cid != self.model.get_id()]
-            parent.controller.update(children_id=remaining_ids)
+            if parent:
+                remaining_ids = [cid for cid in parent.children_id if cid != self.model.get_id()]
+                parent.controller.update(children_id=remaining_ids)
             return super().delete()
         
         def delete_recursive(self):
@@ -195,17 +196,26 @@ class Model4Basic:
         def is_root(self) -> bool:
             return self.depth == 0
 
-        def yield_children_recursive(self, depth: int = 0):
+        def foreach_child(self):
             for child_id in self.children_id:
-                if not self.controller.storage().exists(child_id):
-                    continue
+                if not self.controller.storage().exists(child_id): continue
                 child: Model4Basic.AbstractGroup = self.controller.storage().find(child_id)
-                if hasattr(child, 'parent_id') and hasattr(child, 'children_id'):
+                yield child, hasattr(child, 'children_id')
+
+        def yield_children_recursive(self, depth: int = 0):
+            for child,has_children in self.foreach_child():
+                if has_children:
                     yield from child.yield_children_recursive(depth + 1)
                 yield child, depth
 
         def get_children_recursive(self):
-            return [cd[0] for cd in self.yield_children_recursive(self.depth)]
+            children_list = []
+            for child,has_children in self.foreach_child():
+                if has_children:
+                    children_list.append(child.get_children_recursive())
+                else:
+                    children_list.append(child)
+            return children_list
 
         def get_children(self):
             return [self.controller.storage().find(child_id) for child_id in self.children_id]
@@ -349,8 +359,6 @@ class Tests(unittest.TestCase):
                          "check get_children.")
         
         children = group.get_children_recursive()
-
-        print(children)
         
         self.assertEqual(children[0].model_dump_json_dict(exclude=['update_time']),
                          obj.model_dump_json_dict(exclude=['update_time']),
