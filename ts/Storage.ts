@@ -1,153 +1,152 @@
-// from https://github.com/qinhy/singleton-key-value-storage.git
-
-import { PEMFileReader, SimpleRSAChunkEncryptor } from './RSA';
+import * as fs from 'fs';
+import { randomBytes } from 'crypto';
 import { Buffer } from 'buffer';
+import { PEMFileReader, SimpleRSAChunkEncryptor } from './RSA';
 
-export function uuidv4() {
-    const b = new Uint8Array(16);
-    crypto.getRandomValues(b);          // 128 random bits
+type StoreValue = any;
+type StoreRecord = Record<string, StoreValue>;
+export type Operation = [string, ...any[]];
 
-    b[6] = (b[6] & 0x0f) | 0x40;        // version = 4
-    b[8] = (b[8] & 0x3f) | 0x80;        // variant = RFC 4122
+function getGlobalCrypto(): Crypto | null {
+    if (typeof globalThis === 'undefined') return null;
+    const maybeCrypto = (globalThis as any).crypto ?? (globalThis as any).webcrypto;
+    if (maybeCrypto && typeof maybeCrypto.getRandomValues === 'function') {
+        return maybeCrypto as Crypto;
+    }
+    return null;
+}
 
-    const hex = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+export function uuidv4(): string {
+    const bytes = new Uint8Array(16);
+    const globalCrypto = getGlobalCrypto();
+    if (globalCrypto) {
+        globalCrypto.getRandomValues(bytes);
+    } else {
+        bytes.set(randomBytes(16));
+    }
+
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-/**
- * Roughly estimate the deep size of a JS value, handling:
- * - primitives
- * - Array / Set / Map
- * - plain objects (own props, incl. Symbols)
- * - ArrayBuffer / TypedArray / Buffer
- * - Date / RegExp
- * Cycles are handled via a WeakSet.
- */
-export function getDeepSize(
-    obj: any,
-    seen: WeakSet<object> | null = null,
-    shallow: boolean = false
-): number {
-    const _seen = seen ?? new WeakSet<object>();
 
-    const sizeOfPrimitive = (value: any): number => {
-        switch (typeof value) {
-            case "string":
-                return value.length * 2; // UTF-16, ~2 bytes/char
-            case "number":
-                return 8; // 64-bit float
-            case "boolean":
-                return 4;
-            case "bigint":
-                // very rough: cost ~ length of decimal representation
-                return value.toString().length * 2;
-            case "symbol":
-            case "function":
-            case "undefined":
-                return 0;
-            default:
-                return 0;
-        }
-    };
+const POINTER_SIZE_BYTES = 8;
 
-    const sizeOfObject = (value: object): number => {
-        if (_seen.has(value)) return 0;
-        _seen.add(value);
-
-        // Node Buffer
-        if (typeof Buffer !== "undefined" && Buffer.isBuffer(value)) {
-            return (value as Buffer).length;
-        }
-        // ArrayBuffer / DataView / TypedArray
-        if (value instanceof ArrayBuffer) return value.byteLength;
-        if (ArrayBuffer.isView(value)) return (value as ArrayBufferView).byteLength;
-
-        // Date ~ 8 bytes
-        if (value instanceof Date) return 8;
-
-        // RegExp ~ source length
-        if (value instanceof RegExp) return value.source.length * 2;
-
-        // Map: keys + values
-        if (value instanceof Map) {
-            if (shallow) return value.size * 8; // rough pointer-only estimate
-            let s = 0;
-            for (const [k, v] of value.entries()) {
-                s += getDeepSize(k, _seen, false);
-                s += getDeepSize(v, _seen, false);
-            }
-            return s;
-        }
-
-        // Set: items
-        if (value instanceof Set) {
-            if (shallow) return value.size * 8;
-            let s = 0;
-            for (const v of value.values()) {
-                s += getDeepSize(v, _seen, false);
-            }
-            return s;
-        }
-
-        // Array
-        if (Array.isArray(value)) {
-            if (shallow) return value.length * 8;
-            let s = 0;
-            for (const item of value) {
-                s += getDeepSize(item, _seen, false);
-            }
-            return s;
-        }
-
-        // Plain object and class instances: own props (including Symbols)
-        const propNames = Object.getOwnPropertyNames(value);
-        const propSymbols = Object.getOwnPropertySymbols(value);
-        let s = 0;
-
-        // If shallow, only account for immediate (rough) pointer cost / primitive bytes
-        const visit = (desc: PropertyDescriptor | undefined, val: any) => {
-            if (!desc) return;
-            // Accessor getters might throw—guard.
-            try {
-                const cell = desc.get ? desc.get.call(value) : val;
-                if (shallow) {
-                    s += typeof cell === "object" && cell !== null ? 8 : sizeOfPrimitive(cell);
-                } else {
-                    s += getDeepSize(cell, _seen, false);
-                }
-            } catch {
-                /* ignore unreadable getter */
-            }
-        };
-
-        for (const k of propNames) {
-            const desc = Object.getOwnPropertyDescriptor(value, k);
-            // Pass the current value if it's a data descriptor
-            visit(desc, (value as any)[k]);
-        }
-        for (const sym of propSymbols) {
-            const desc = Object.getOwnPropertyDescriptor(value, sym);
-            visit(desc, (value as any)[sym as any]);
-        }
-        return s;
-    };
-
-    // primitives/null
-    if (obj === null) return 0;
-    const t = typeof obj;
-    if (t !== "object") return sizeOfPrimitive(obj);
-
-    return sizeOfObject(obj);
+function sizeOfPrimitive(value: any): number {
+    switch (typeof value) {
+        case 'string':
+            return Buffer.byteLength(value, 'utf8');
+        case 'number':
+            return 8;
+        case 'boolean':
+            return 4;
+        case 'bigint':
+            return Buffer.byteLength(value.toString(), 'utf8');
+        default:
+            return 0;
+    }
 }
 
-/** Humanize byte counts like Python's humanize_bytes. */
+function getDeepBytesSize(obj: any, seen: WeakSet<object> = new WeakSet(), shallow = false): number {
+    if (obj === null || obj === undefined) return 0;
+
+    if (typeof obj !== 'object') {
+        return sizeOfPrimitive(obj);
+    }
+
+    if (seen.has(obj)) return 0;
+    seen.add(obj);
+
+    if (Buffer.isBuffer(obj)) return obj.length;
+    if (obj instanceof ArrayBuffer) return obj.byteLength;
+    if (ArrayBuffer.isView(obj)) return (obj as ArrayBufferView).byteLength;
+    if (obj instanceof Date) return 8;
+    if (obj instanceof RegExp) return Buffer.byteLength(obj.source, 'utf8');
+
+    if (obj instanceof Map) {
+        if (shallow) return obj.size * POINTER_SIZE_BYTES;
+        let total = 0;
+        for (const [k, v] of obj.entries()) {
+            total += getDeepBytesSize(k, seen, false);
+            total += getDeepBytesSize(v, seen, false);
+        }
+        return total;
+    }
+
+    if (obj instanceof Set) {
+        if (shallow) return obj.size * POINTER_SIZE_BYTES;
+        let total = 0;
+        for (const v of obj.values()) {
+            total += getDeepBytesSize(v, seen, false);
+        }
+        return total;
+    }
+
+    if (Array.isArray(obj)) {
+        if (shallow) return obj.length * POINTER_SIZE_BYTES;
+        let total = 0;
+        for (const item of obj) {
+            total += getDeepBytesSize(item, seen, false);
+        }
+        return total;
+    }
+
+    let total = 0;
+    const props = Object.getOwnPropertyNames(obj);
+    const symbols = Object.getOwnPropertySymbols(obj);
+
+    const visit = (descriptor: PropertyDescriptor | undefined, currentValue: any) => {
+        if (!descriptor) return;
+        try {
+            let value: any;
+            if (descriptor.get && !descriptor.set) {
+                value = descriptor.get.call(obj);
+            } else if ('value' in descriptor) {
+                value = currentValue;
+            } else {
+                value = undefined;
+            }
+
+            if (shallow) {
+                total += typeof value === 'object' && value !== null ? POINTER_SIZE_BYTES : sizeOfPrimitive(value);
+            } else {
+                total += getDeepBytesSize(value, seen, false);
+            }
+        } catch {
+            /* ignore accessor errors */
+        }
+    };
+
+    for (const key of props) {
+        const descriptor = Object.getOwnPropertyDescriptor(obj, key);
+        visit(descriptor, (obj as any)[key]);
+    }
+
+    for (const sym of symbols) {
+        const descriptor = Object.getOwnPropertyDescriptor(obj, sym);
+        visit(descriptor, (obj as any)[sym as any]);
+    }
+
+    return total;
+}
+
+const getShallowBytesSize = (obj: any): number => getDeepBytesSize(obj, new WeakSet(), true);
+
 export function humanizeBytes(n: number): string {
     let size = Number(n);
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    for (const u of units) {
-        if (size < 1024) return `${size.toFixed(1)} ${u}`;
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    for (const unit of units) {
+        if (size < 1024) return `${size.toFixed(1)} ${unit}`;
         size /= 1024;
     }
     return `${size.toFixed(1)} PB`;
+}
+
+function globToRegExp(pattern: string): RegExp {
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('^' + escaped.replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
 }
 
 export class AbstractStorage {
@@ -170,746 +169,778 @@ export class AbstractStorage {
         return new AbstractStorage(AbstractStorage._uuid, AbstractStorage._store, AbstractStorage._is_singleton);
     }
 
-    /** Subclasses must implement memory usage (deep or shallow). */
-    memoryUsage(deep?: boolean, humanReadable?: boolean): number | string {
+    bytesUsed(deep?: boolean, humanReadable?: boolean): number | string {        
         throw new Error("Subclasses must implement memoryUsage method");  
     }
 }
 
-export class TsDictStorage extends AbstractStorage {
-    static _uuid: string = uuidv4();
-    static _store: Record<string, any> = {};
-    private _filePath: string | null = null;
+export class DictStorage extends AbstractStorage {
+    static override _uuid: string = uuidv4();
+    static override _store: StoreRecord = {};
 
-    constructor(id: string | null = null, store: any = null, isSingleton: boolean | null = null) {
+    constructor(id: string | null = null, store: StoreRecord | null = null, isSingleton: boolean | null = null) {
         super(id, store, isSingleton);
         this.store = store ?? {};
-        
-        // Handle file path if provided as first argument
-        if (id && typeof id === 'string' && !store && !isSingleton) {
-            this._filePath = id;
-            this.load();
-        }
     }
 
-    memoryUsage(deep: boolean = true, humanReadable: boolean = true): number | string {
-        // deep -> full traversal; shallow -> top-level estimate only
-        const size = getDeepSize(this, null, !deep);
+    override bytesUsed(deep: boolean = true, humanReadable: boolean = true): number | string {
+        const size = deep ? getDeepBytesSize(this) : getShallowBytesSize(this);
         return humanReadable ? humanizeBytes(size) : size;
     }
-    
-    dump(): boolean {
-        if (!this._filePath) return false;
-        try {
-            const fs = require('fs');
-            fs.writeFileSync(this._filePath, JSON.stringify(this.store), 'utf8');
-            return true;
-        } catch (error) {
-            console.error(`Error writing to file ${this._filePath}:`, error);
-            return false;
-        }
+
+    static buildTmp(): DictStorageController {
+        return new DictStorageController(new DictStorage());
     }
 
-    load(): boolean {
-        if (!this._filePath) return false;
-        try {
-            const fs = require('fs');
-            if (fs.existsSync(this._filePath)) {
-                const data = fs.readFileSync(this._filePath, 'utf8');
-                this.store = JSON.parse(data);
-                return true;
-            }
-            return false;
-        } catch (error) {
-            console.error(`Error reading from file ${this._filePath}:`, error);
-            return false;
-        }
+    static build(): DictStorageController {
+        return new DictStorageController(new DictStorage().getSingleton());
     }
 }
 
-abstract class AbstractStorageController {
-    model: AbstractStorage;
+export abstract class AbstractStorageController {
+    protected model: AbstractStorage;
 
     constructor(model: AbstractStorage) {
         this.model = model;
     }
 
     isSingleton(): boolean {
-        return this.model.isSingleton;
+        return Boolean(this.model.isSingleton);
     }
 
-    exists(key: string): boolean {
-        console.error(`[${this.constructor.name}]: not implemented`);
-        return false;
+    bytesUsed(deep: boolean = true, humanReadable: boolean = true): number | string {
+        return this.model.bytesUsed(deep, humanReadable);
     }
 
-    set(key: string, value: Record<string, any>): void {
-        console.error(`[${this.constructor.name}]: not implemented`);
+    exists(_key: string): boolean {
+        throw new Error(`[${this.constructor.name}]: not implemented`);
     }
 
-    get(key: string): Record<string, any> | null {
-        console.error(`[${this.constructor.name}]: not implemented`);
-        return null;
+    set(_key: string, _value: StoreValue): void {
+        throw new Error(`[${this.constructor.name}]: not implemented`);
     }
 
-    delete(key: string): void {
-        console.error(`[${this.constructor.name}]: not implemented`);
+    get(_key: string): StoreValue | null {
+        throw new Error(`[${this.constructor.name}]: not implemented`);
     }
 
-    keys(pattern: string = '*'): string[] {
-        console.error(`[${this.constructor.name}]: not implemented`);
-        return [];
+    delete(_key: string): void {
+        throw new Error(`[${this.constructor.name}]: not implemented`);
+    }
+
+    keys(_pattern: string = '*'): string[] {
+        throw new Error(`[${this.constructor.name}]: not implemented`);
     }
 
     clean(): void {
-        this.keys('*').forEach((key) => this.delete(key));
+        for (const key of this.keys('*')) {
+            this.delete(key);
+        }
     }
 
     dumps(): string {
-        const data: Record<string, any> = {};
-        this.keys('*').forEach((key) => {
-            data[key] = this.get(key);
-        });
-        return JSON.stringify(data);
+        const snapshot: StoreRecord = {};
+        for (const key of this.keys('*')) {
+            snapshot[key] = this.get(key);
+        }
+        return JSON.stringify(snapshot);
     }
 
     loads(jsonString: string = '{}'): void {
-        const data = JSON.parse(jsonString);
-        Object.entries(data).forEach(([key, value]) => {
-            const val = value ? value : {}
-            this.set(key, val);
-        });
+        const data = JSON.parse(jsonString) as StoreRecord;
+        for (const [key, value] of Object.entries(data)) {
+            this.set(key, value as StoreValue);
+        }
     }
 
-    // dump(path: string): string {
-    //     const data = this.dumps();
-    //     fs.writeFileSync(path, data);
-    //     return data;
-    // }
-
-    // load(path: string): void {
-    //     const data = fs.readFileSync(path, 'utf8');
-    //     this.loads(data);
-    // }
-
-    // Placeholder methods for RSA encryption and decryption
-    dumpRSAs(publicKeyPath: string, compress: boolean = false): string {
-        const publicKey = new PEMFileReader(publicKeyPath).loadPublicPkcs8Key();
-        const encryptor = new SimpleRSAChunkEncryptor(publicKey, null);
-        return encryptor.encryptString(this.dumps(), compress);
+    dump(path: string): void {
+        fs.writeFileSync(path, this.dumps(), 'utf8');
     }
 
-    loadRSAs(content: string, privateKeyPath: string): void {
-        const privateKey = new PEMFileReader(privateKeyPath).loadPrivatePkcs8Key();
-        const encryptor = new SimpleRSAChunkEncryptor(null, privateKey);
-        const decryptedText = encryptor.decryptString(content);
-        this.loads(decryptedText);
+    load(path: string): void {
+        const text = fs.readFileSync(path, 'utf8');
+        this.loads(text);
+    }
+
+    dumpRSA(path: string, publicPkcs8KeyPath: string): void {
+        const encryptor = new SimpleRSAChunkEncryptor(
+            new PEMFileReader(publicPkcs8KeyPath).loadPublicPkcs8Key(),
+            undefined
+        );
+        fs.writeFileSync(path, encryptor.encryptString(this.dumps()), 'utf8');
+    }
+
+    loadRSA(path: string, privatePkcs8KeyPath: string): void {
+        const encryptor = new SimpleRSAChunkEncryptor(
+            undefined,
+            new PEMFileReader(privatePkcs8KeyPath).loadPrivatePkcs8Key()
+        );
+        const decrypted = encryptor.decryptString(fs.readFileSync(path, 'utf8'));
+        this.loads(decrypted);
     }
 }
 
+export class DictStorageController extends AbstractStorageController {
+    protected store: StoreRecord;
 
-class TsDictStorageController extends AbstractStorageController {
-    store: Record<string, any>;
-
-    constructor(model: TsDictStorage) {
+    constructor(model: DictStorage) {
         super(model);
-        this.store = model.store;
+        this.store = model.store ?? {};
+        model.store = this.store;
     }
 
-    exists(key: string): boolean {
-        return key in this.store;
+    override exists(key: string): boolean {
+        return Object.prototype.hasOwnProperty.call(this.store, key);
     }
 
-    set(key: string, value: Record<string, any>): void {
+    override set(key: string, value: StoreValue): void {
         this.store[key] = value;
     }
 
-    get(key: string): Record<string, any> | null {
-        return this.store[key] || null;
+    override get(key: string): StoreValue | null {
+        return this.exists(key) ? this.store[key] : null;
     }
 
-    delete(key: string): void {
+    override delete(key: string): void {
         delete this.store[key];
     }
 
-    keys(pattern = '*') {
-        const regex = new RegExp('^' + pattern.replace(/\*/g, '.*'));
-        return Object.keys(this.model.store).filter(key => key.match(regex));
+    override keys(pattern: string = '*'): string[] {
+        const matcher = globToRegExp(pattern);
+        return Object.keys(this.store).filter(key => matcher.test(key));
     }
 }
 
-class EventDispatcherController extends TsDictStorageController {
+export class EventDispatcherController extends DictStorageController {
     static ROOT_KEY = 'Event';
 
-    private _findEvent(uuid: string): string[] {
-        const keys = this.keys(`*:${uuid}`);
-        return keys.length === 0 ? [] : keys;
+    private findEvent(uuid: string): string[] {
+        const matches = this.keys(`*:${uuid}`);
+        return matches.length ? matches : [];
     }
 
-    set(key: string, value: CallableFunction): void {
-        this.store[key] = value;
+    events(): Array<[string, StoreValue | null]> {
+        return this.keys('*').map(key => [key, this.get(key)]);
     }
 
-    get(key: string): CallableFunction | null {
-        return this.store[key] || null;
-    }
-
-    events(): [string, any][] {
-        return this.keys('*').map((key) => [key, this.get(key)]);
-    }
-
-    getEvent(uuid: string): any[] {
-        return this._findEvent(uuid).map((key) => (key ? this.get(key) : null));
+    getEvent(uuid: string): Array<StoreValue | null> {
+        return this.findEvent(uuid).map(key => this.get(key));
     }
 
     deleteEvent(uuid: string): void {
-        this._findEvent(uuid).forEach((key) => {
-            if (key) this.delete(key);
-        });
+        for (const key of this.findEvent(uuid)) {
+            this.delete(key);
+        }
     }
 
-    setEvent(eventName: string, callback: Function, id: string): string {
-        if (!id) id = uuidv4();
-        this.set(`${EventDispatcherController.ROOT_KEY}:${eventName}:${id}`, callback);
-        return id;
+    setEvent(eventName: string, callback: Function, id?: string): string {
+        const eventId = id ?? uuidv4();
+        this.set(`${EventDispatcherController.ROOT_KEY}:${eventName}:${eventId}`, callback);
+        return eventId;
     }
 
     dispatchEvent(eventName: string, ...args: any[]): void {
-        this.keys(`${EventDispatcherController.ROOT_KEY}:${eventName}:*`).forEach((key) => {
-            const callback = this.get(key);
-            if (callback) callback(...args);
-        });
-    }
-
-    clean(): void {
-        super.clean();
+        for (const key of this.keys(`${EventDispatcherController.ROOT_KEY}:${eventName}:*`)) {
+            const entry = this.get(key);
+            if (typeof entry === 'function') {
+                entry(...args);
+            }
+        }
     }
 }
 
-class MessageQueueController extends TsDictStorageController {
+export class MessageQueueController extends DictStorageController {
     static ROOT_KEY = '_MessageQueue';
-    private counters: Record<string, number> = {};
+    private counters: Map<string, number> = new Map();
 
-    constructor(model: TsDictStorage) {
-        super(model);
-    }
-
-    private _getQueueKey(queueName: string, index: number): string {
+    private getQueueKey(queueName: string, index: number): string {
         return `${MessageQueueController.ROOT_KEY}:${queueName}:${index}`;
     }
 
-    private _getQueueCounter(queueName: string): number {
-        if (!(queueName in this.counters)) {
-            this.counters[queueName] = 0;
-        }
-        return this.counters[queueName];
+    private getQueueCounter(queueName: string): number {
+        const current = this.counters.get(queueName) ?? 0;
+        this.counters.set(queueName, current);
+        return current;
     }
 
-    private _incrementQueueCounter(queueName: string): void {
-        this.counters[queueName] = this._getQueueCounter(queueName) + 1;
+    private incrementQueueCounter(queueName: string): void {
+        this.counters.set(queueName, this.getQueueCounter(queueName) + 1);
     }
 
-    push(message: Record<string, any>, queueName: string = 'default'): string {
-        const counter = this._getQueueCounter(queueName);
-        const key = this._getQueueKey(queueName, counter);
+    private listQueueKeys(queueName: string): string[] {
+        const pattern = `${MessageQueueController.ROOT_KEY}:${queueName}:*`;
+        const parseIndex = (key: string): number => {
+            const parts = key.split(':');
+            return Number(parts[parts.length - 1]) || 0;
+        };
+        return this.keys(pattern).sort((a, b) => parseIndex(a) - parseIndex(b));
+    }
+
+    push(message: StoreValue, queueName: string = 'default'): string {
+        const counter = this.getQueueCounter(queueName);
+        const key = this.getQueueKey(queueName, counter);
         this.set(key, message);
-        this._incrementQueueCounter(queueName);
+        this.incrementQueueCounter(queueName);
         return key;
     }
 
-    pop(queueName: string = 'default'): Record<string, any> | null {
-        const keys = this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`);
-        if (!keys.length) return null; // Queue is empty
+    pop(queueName: string = 'default'): StoreValue | null {
+        const keys = this.listQueueKeys(queueName);
+        if (!keys.length) return null;
         const earliestKey = keys[0];
         const message = this.get(earliestKey);
-        this.delete(earliestKey);
+        if (message !== null) {
+            this.delete(earliestKey);
+        }
         return message;
     }
 
-    peek(queueName: string = 'default'): Record<string, any> | null {
-        const keys = this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`);
-        if (!keys.length) return null; // Queue is empty
+    peek(queueName: string = 'default'): StoreValue | null {
+        const keys = this.listQueueKeys(queueName);
+        if (!keys.length) return null;
         return this.get(keys[0]);
     }
 
     size(queueName: string = 'default'): number {
-        return this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`).length;
+        return this.listQueueKeys(queueName).length;
     }
 
     clear(queueName: string = 'default'): void {
-        this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`).forEach(key => {
+        for (const key of this.listQueueKeys(queueName)) {
             this.delete(key);
-        });
-        if (queueName in this.counters) {
-            delete this.counters[queueName];
+        }
+        this.counters.delete(queueName);
+    }
+}
+
+export class MemoryLimitedDictStorageController extends DictStorageController {
+    private maxBytes: number;
+    private policy: 'lru' | 'fifo';
+    private onEvict?: (key: string, value: StoreValue | null) => void;
+    private pinned: Set<string>;
+    private sizes: Map<string, number>;
+    private order: Map<string, null>;
+    private currentBytes: number;
+
+    constructor(
+        model: DictStorage,
+        maxMemoryMb: number = 1024,
+        policy: 'lru' | 'fifo' = 'lru',
+        onEvict?: (key: string, value: StoreValue | null) => void,
+        pinned: Set<string> = new Set(),
+    ) {
+        super(model);
+        this.maxBytes = Math.max(0, maxMemoryMb) * 1024 * 1024;
+        this.policy = policy;
+        if (!['lru', 'fifo'].includes(this.policy)) {
+            throw new Error("policy must be 'lru' or 'fifo'");
+        }
+        this.onEvict = onEvict;
+        this.pinned = new Set(pinned);
+        this.sizes = new Map();
+        this.order = new Map();
+        this.currentBytes = 0;
+    }
+
+    private entrySize(key: string, value: StoreValue): number {
+        return getDeepBytesSize(key) + getDeepBytesSize(value);
+    }
+
+    override bytesUsed(_deep: boolean = true, humanReadable: boolean = false): number | string {
+        return humanReadable ? humanizeBytes(this.currentBytes) : this.currentBytes;
+    }
+
+    private reduce(key: string): void {
+        if (this.order.has(key)) {
+            this.order.delete(key);
+        }
+        const tracked = this.sizes.get(key) ?? 0;
+        this.sizes.delete(key);
+        this.currentBytes = Math.max(0, this.currentBytes - tracked);
+    }
+
+    private pickVictim(): string | null {
+        for (const key of this.order.keys()) {
+            if (!this.pinned.has(key)) {
+                return key;
+            }
+        }
+        return null;
+    }
+
+    private maybeEvict(): void {
+        if (this.maxBytes <= 0) return;
+        while (this.currentBytes > this.maxBytes && this.order.size > 0) {
+            const victim = this.pickVictim();
+            if (!victim) break;
+            const value = super.get(victim);
+            this.reduce(victim);
+            super.delete(victim);
+            if (this.onEvict) {
+                this.onEvict(victim, value);
+            }
         }
     }
+
+    override set(key: string, value: StoreValue): void {
+        if (this.exists(key)) {
+            this.reduce(key);
+        }
+        super.set(key, value);
+
+        const size = this.entrySize(key, value);
+        this.sizes.set(key, size);
+        this.currentBytes += size;
+
+        this.order.delete(key);
+        this.order.set(key, null);
+        this.maybeEvict();
+    }
+
+    override get(key: string): StoreValue | null {
+        const value = super.get(key);
+        if (value !== null && this.policy === 'lru' && this.order.has(key)) {
+            this.order.delete(key);
+            this.order.set(key, null);
+        }
+        return value;
+    }
+
+    override delete(key: string): void {
+        if (this.exists(key)) {
+            this.reduce(key);
+        }
+        super.delete(key);
+    }
+
+    override clean(): void {
+        for (const key of Array.from(this.order.keys())) {
+            super.delete(key);
+        }
+        this.sizes.clear();
+        this.order.clear();
+        this.currentBytes = 0;
+    }
 }
 
+export class LocalVersionController {
+    static TABLENAME = '_Operation';
+    static KEY = 'ops';
+    static FORWARD = 'forward';
+    static REVERT = 'revert';
 
-class LocalVersionController {
-  static TABLENAME = "_Operation";
-  static KEY = "ops";
-  static FORWARD = "forward";
-  static REVERT = "revert";
+    public limitMemoryMB: number;
+    readonly client: AbstractStorageController;
+    private evictionPolicy: 'fifo' | 'lru';
+    private _currentVersion: string | null = null;
 
-  private client: TsDictStorageController;
-  _currentVersion: string = "";
-  limitMemoryMB: number;
+    constructor(
+        client: AbstractStorageController | null = null,
+        limitMemoryMB: number = 128,
+        evictionPolicy: 'fifo' | 'lru' = 'fifo',
+    ) {
+        this.limitMemoryMB = limitMemoryMB;
+        this.evictionPolicy = evictionPolicy;
+        if (client) {
+            this.client = client;
+        } else {
+            const model = new DictStorage();
+            this.client = new MemoryLimitedDictStorageController(
+                model,
+                this.limitMemoryMB,
+                this.evictionPolicy,
+                this.onEvict.bind(this),
+                new Set([LocalVersionController.TABLENAME]),
+            );
+        }
 
-  constructor(client: TsDictStorageController | null = null, limitMemoryMB: number = 128) {
-    this.limitMemoryMB = limitMemoryMB;
-    this.client = client || (new TsDictStorageController(new TsDictStorage()) as TsDictStorageController);
-
-    // Ensure ops list exists without clobbering existing data
-    let table: any;
-    try {
-      table = this.client.get(LocalVersionController.TABLENAME) || {};
-    } catch {
-      table = {};
-    }
-    if (!(LocalVersionController.KEY in (table || {}))) {
-      this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [] });
-    }
-  }
-
-  getCurrentVersion(): string {
-    return this._currentVersion;
-}
-
-  /** Return the ordered list of version UUIDs (empty list if none). */
-  getVersions(): string[] {
-    try {
-      const table = this.client.get(LocalVersionController.TABLENAME) || {};
-      const ops = table?.[LocalVersionController.KEY];
-      return Array.isArray(ops) ? [...ops] : [];
-    } catch {
-      return [];
-    }
-  }
-
-  /** Persist the ordered list of version UUIDs. */
-  private _setVersions(ops: string[]) {
-    return this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [...ops] });
-  }
-
-  findVersion(
-    versionUuid: string | null
-  ): [versions: string[], currentVersionIdx: number, targetVersionIdx: number | null, op: any | null] {
-    const versions = this.getVersions();
-    const currentVersionIdx =
-      this._currentVersion && versions.includes(this._currentVersion)
-        ? versions.indexOf(this._currentVersion)
-        : -1;
-
-    const targetVersionIdx = versionUuid && versions.includes(versionUuid) ? versions.indexOf(versionUuid) : null;
-    const op =
-      targetVersionIdx !== null
-        ? (this.client.get(`${LocalVersionController.TABLENAME}:${versions[targetVersionIdx]}`) as any | null)
-        : null;
-
-    return [versions, currentVersionIdx, targetVersionIdx, op];
-  }
-
-  estimateMemoryMB(): number {
-    try {
-      const raw = this.client.model?.memoryUsage?.(true, false);
-      if (typeof raw === "number") return raw / (1024 * 1024);
-    } catch {
-      /* ignore */
-    }
-    return 0;
-  }
-
-  /**
-   * Append a new operation after the current pointer, truncating any redo tail.
-   * Returns a warning string if memory exceeds the limit, else null.
-   */
-  addOperation(operation: any, revert: any = null): string | null {
-    const opUuid = uuidv4();
-
-    const tmp = {
-      [`${LocalVersionController.TABLENAME}:${opUuid}`]: {
-        [LocalVersionController.FORWARD]: operation,
-        [LocalVersionController.REVERT]: revert,
-      },
-    };
-    const willUseMB = getDeepSize(tmp) / (1024 * 1024);
-
-    while (willUseMB + this.estimateMemoryMB() > this.limitMemoryMB) {
-      const popped = this.popOperation(1);
-      if (!popped.length) break;
+        const table = this.client.get(LocalVersionController.TABLENAME) ?? {};
+        if (!Array.isArray((table ?? {})[LocalVersionController.KEY])) {
+            this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [] });
+        }
     }
 
-    this.client.set(`${LocalVersionController.TABLENAME}:${opUuid}`, {
-      [LocalVersionController.FORWARD]: operation,
-      [LocalVersionController.REVERT]: revert,
-    });
+    private onEvict(key: string, _value: StoreValue | null): void {
+        const prefix = `${LocalVersionController.TABLENAME}:`;
+        if (!key.startsWith(prefix)) return;
 
-    let ops = this.getVersions();
-    if (this._currentVersion !== null && ops.includes(this._currentVersion)) {
-      const opIdx = ops.indexOf(this._currentVersion);
-      ops = ops.slice(0, opIdx + 1); // drop any redo branch
-    }
-    ops.push(opUuid);
-    this._setVersions(ops);
-    this._currentVersion = opUuid;
+        const opId = key.slice(prefix.length);
+        const versions = this.getVersions();
+        if (versions.includes(opId)) {
+            const updated = versions.filter(v => v !== opId);
+            this.setVersions(updated);
+        }
 
-    const usage = this.estimateMemoryMB();
-    if (usage > this.limitMemoryMB) {
-      const res = `[LocalVersionController] Warning: memory usage ${usage.toFixed(1)} MB exceeds limit of ${this.limitMemoryMB} MB`;
-      // mirror Python's print + return
-      // eslint-disable-next-line no-console
-      console.warn(res);
-      return res;
-    }
-    return null;
-  }
-
-  /** Pop n operations from the head (or tail if head is the current op). */
-  popOperation(n: number = 1): Array<[string, any]> {
-    if (n <= 0) return [];
-
-    let ops = this.getVersions();
-    if (!ops.length) return [];
-
-    const popped: Array<[string, any]> = [];
-    const count = Math.min(n, ops.length);
-
-    for (let i = 0; i < count; i++) {
-      const popIdx = ops[0] !== this._currentVersion ? 0 : ops.length - 1;
-      const opId = ops[popIdx];
-      const opRecord = this.client.get(`${LocalVersionController.TABLENAME}:${opId}`) as any;
-      popped.push([opId, opRecord]);
-
-      ops.splice(popIdx, 1);
-      this.client.delete(`${LocalVersionController.TABLENAME}:${opId}`);
+        if (this._currentVersion === opId) {
+            throw new Error('auto removed current_version');
+        }
     }
 
-    this._setVersions(ops);
-
-    if (!this._currentVersion || !ops.includes(this._currentVersion)) {
-      this._currentVersion = ops.length ? ops[ops.length - 1] : null;
+    getCurrentVersion(): string | null {
+        return this._currentVersion;
     }
-    return popped;
-  }
 
-  forwardOneOperation(forwardCallback: (forward: any) => void): void {
-    const [versions, currentVersionIdx] = this.findVersion(this._currentVersion);
-    const nextIdx = currentVersionIdx + 1;
-    if (nextIdx >= versions.length) return;
-
-    const op = this.client.get(`${LocalVersionController.TABLENAME}:${versions[nextIdx]}`) as any | null;
-    if (!op || !(LocalVersionController.FORWARD in op)) return;
-
-    // Only advance the pointer if the callback succeeds
-    forwardCallback(op[LocalVersionController.FORWARD]);
-    this._currentVersion = versions[nextIdx];
-  }
-
-  revertOneOperation(revertCallback: (revert: any) => void): void {
-    const [versions, currentVersionIdx, , op] = this.findVersion(this._currentVersion);
-    if (currentVersionIdx <= 0) return;
-    if (!op || !(LocalVersionController.REVERT in op)) return;
-
-    revertCallback(op[LocalVersionController.REVERT]);
-    this._currentVersion = versions[currentVersionIdx - 1];
-  }
-
-  toVersion(versionUuid: string, versionCallback: (opArgs: any) => void): void {
-    let [_, currentIdx, targetIdx] = this.findVersion(versionUuid);
-    if (targetIdx === null) throw new Error(`no such version of ${versionUuid}`);
-
-    if (currentIdx === null) currentIdx = -1; // normalize "no current" to -1
-
-    while (currentIdx !== targetIdx) {
-      if (currentIdx < targetIdx) {
-        this.forwardOneOperation(versionCallback);
-        currentIdx += 1;
-      } else {
-        this.revertOneOperation(versionCallback);
-        currentIdx -= 1;
-      }
+    getVersions(): string[] {
+        try {
+            const table = this.client.get(LocalVersionController.TABLENAME) ?? {};
+            const ops = table?.[LocalVersionController.KEY];
+            return Array.isArray(ops) ? [...ops] : [];
+        } catch {
+            return [];
+        }
     }
-  }
+
+    private setVersions(ops: string[]): void {
+        this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [...ops] });
+    }
+
+    findVersion(
+        versionUuid: string | null
+    ): [versions: string[], currentVersionIdx: number, targetVersionIdx: number | null, op: StoreValue | null] {
+        const versions = this.getVersions();
+        const currentIdx = this._currentVersion && versions.includes(this._currentVersion)
+            ? versions.indexOf(this._currentVersion)
+            : -1;
+        const targetIdx = versionUuid && versions.includes(versionUuid)
+            ? versions.indexOf(versionUuid)
+            : null;
+        const op = targetIdx !== null ? this.client.get(`${LocalVersionController.TABLENAME}:${versions[targetIdx]}`) : null;
+        return [versions, currentIdx, targetIdx, op];
+    }
+
+    estimateMemoryMB(): number {
+        const raw = this.client.bytesUsed(true, false);
+        if (typeof raw === 'number') {
+            return raw / (1024 * 1024);
+        }
+        return 0;
+    }
+
+    addOperation(operation: Operation, revert: Operation | null = null): string | null {
+        const opUuid = uuidv4();
+        this.client.set(`${LocalVersionController.TABLENAME}:${opUuid}`, {
+            [LocalVersionController.FORWARD]: operation,
+            [LocalVersionController.REVERT]: revert,
+        });
+
+        let ops = this.getVersions();
+        if (this._currentVersion && ops.includes(this._currentVersion)) {
+            const idx = ops.indexOf(this._currentVersion);
+            ops = ops.slice(0, idx + 1);
+        }
+        ops.push(opUuid);
+        this.setVersions(ops);
+        this._currentVersion = opUuid;
+
+        const usage = this.estimateMemoryMB();
+        if (usage > this.limitMemoryMB) {
+            const message = `[LocalVersionController] Warning: memory usage ${usage.toFixed(1)} MB exceeds limit of ${this.limitMemoryMB} MB`;
+            console.log(message);
+            return message;
+        }
+        return null;
+    }
+
+    popOperation(n: number = 1): Array<[string, StoreValue | null]> {
+        if (n <= 0) return [];
+
+        const ops = this.getVersions();
+        if (!ops.length) return [];
+
+        const popped: Array<[string, StoreValue | null]> = [];
+        for (let i = 0; i < Math.min(n, ops.length); i += 1) {
+            const popIdx = ops.length && ops[0] !== this._currentVersion ? 0 : ops.length - 1;
+            const opId = ops[popIdx];
+            const opKey = `${LocalVersionController.TABLENAME}:${opId}`;
+            const opRecord = this.client.get(opKey);
+            popped.push([opId, opRecord]);
+
+            ops.splice(popIdx, 1);
+            this.client.delete(opKey);
+        }
+
+        this.setVersions(ops);
+        if (!ops.includes(this._currentVersion ?? '')) {
+            this._currentVersion = ops.length ? ops[ops.length - 1] : null;
+        }
+        return popped;
+    }
+
+    forwardOneOperation(forwardCallback: (operation: Operation) => void): void {
+        const [versions, currentIdx] = this.findVersion(this._currentVersion);
+        const nextIdx = currentIdx + 1;
+        if (nextIdx >= versions.length) return;
+
+        const op = this.client.get(`${LocalVersionController.TABLENAME}:${versions[nextIdx]}`);
+        if (!op || !(LocalVersionController.FORWARD in op)) return;
+
+        forwardCallback(op[LocalVersionController.FORWARD] as Operation);
+        this._currentVersion = versions[nextIdx];
+    }
+
+    revertOneOperation(revertCallback: (operation: Operation | null) => void): void {
+        const [versions, currentIdx, , op] = this.findVersion(this._currentVersion);
+        if (currentIdx <= 0) return;
+        if (!op || !(LocalVersionController.REVERT in op)) return;
+
+        revertCallback(op[LocalVersionController.REVERT] as Operation | null);
+        this._currentVersion = versions[currentIdx - 1];
+    }
+
+    toVersion(versionUuid: string, versionCallback: (operation: Operation) => void): void {
+        let [versions, currentIdx, targetIdx] = this.findVersion(versionUuid);
+        if (targetIdx === null) {
+            throw new Error(`no such version of ${versionUuid}`);
+        }
+
+        while (currentIdx !== targetIdx) {
+            if (currentIdx < targetIdx) {
+                this.forwardOneOperation(versionCallback);
+                currentIdx += 1;
+            } else {
+                this.revertOneOperation(op => {
+                    if (op) versionCallback(op);
+                });
+                currentIdx -= 1;
+                versions = this.getVersions();
+                targetIdx = versions.indexOf(versionUuid);
+            }
+        }
+    }
 }
 
 export class SingletonKeyValueStorage {
     versionControl: boolean;
-    conn: TsDictStorageController | null;
-    versionController: LocalVersionController = new LocalVersionController();
-    private eventDispatcher: EventDispatcherController = new EventDispatcherController(new TsDictStorage());
-    private messageQueue: MessageQueueController = new MessageQueueController(new TsDictStorage());    
+    encryptor?: SimpleRSAChunkEncryptor;
+    conn: AbstractStorageController;
+    versionController: LocalVersionController;
+    private eventDispatcher: EventDispatcherController;
+    private messageQueue: MessageQueueController;
 
-    private static backends: Record<string, (...args: any[]) => TsDictStorageController> = {
-         temp_ts: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
-         ts: (...args: any[]) => {
-             const storage = new TsDictStorage(...args);
-             const singleton = storage.getSingleton() as TsDictStorage;
-             return new TsDictStorageController(singleton);
-         },
-         file: (...args: any[]) => new TsDictStorageController(new TsDictStorage(...args)),
-         couch: (...args: any[]) => {
-             console.warn('CouchDB backend is registered but requires external implementation');
-             return new TsDictStorageController(new TsDictStorage());
-         }
-     };
-
-    constructor(versionControl = false) {
+    constructor(versionControl: boolean = false, encryptor?: SimpleRSAChunkEncryptor) {
         this.versionControl = versionControl;
-        this.conn = null;
-        this.tsBackend();
-    }
-
-    private switchBackend(name: string = 'ts', ...args: any[]): TsDictStorageController {
-        this.eventDispatcher = new EventDispatcherController(new TsDictStorage());
+        this.encryptor = encryptor;
+        this.conn = DictStorage.buildTmp();
+        this.eventDispatcher = new EventDispatcherController(new DictStorage());
+        this.messageQueue = new MessageQueueController(new DictStorage());
         this.versionController = new LocalVersionController();
-        this.messageQueue = new MessageQueueController(new TsDictStorage());
-
-        const backend = SingletonKeyValueStorage.backends[name.toLowerCase()];
-        if (!backend) {
-            throw new Error(`No backend named ${name}, available backends are: ${Object.keys(SingletonKeyValueStorage.backends).join(', ')}`);
-        }
-
-        return backend(...args);
+        this.switchBackend(DictStorage.build());
     }
 
-    s3Backend(
-        bucketName: string,
-        awsAccessKeyId: string,
-        awsSecretAccessKey: string,
-        regionName: string,
-        s3StoragePrefixPath: string = '/SingletonS3Storage'
-    ): void {
-        this.conn = this.switchBackend('s3', bucketName, awsAccessKeyId, awsSecretAccessKey, regionName, s3StoragePrefixPath);
+    switchBackend(controller: AbstractStorageController): this {
+        this.eventDispatcher = new EventDispatcherController(new DictStorage());
+        this.messageQueue = new MessageQueueController(new DictStorage());
+        this.versionController = new LocalVersionController();
+        this.conn = controller;
+        return this;
     }
 
     tempTsBackend(): void {
-        this.conn = this.switchBackend('temp_ts');
+        this.switchBackend(DictStorage.buildTmp());
     }
 
     tsBackend(): void {
-        this.conn = this.switchBackend('ts');
+        this.switchBackend(DictStorage.build());
     }
 
     fileBackend(filePath: string = 'storage.json'): void {
-        this.conn = this.switchBackend('file', filePath);
+        const controller = DictStorage.buildTmp();
+        if (fs.existsSync(filePath)) {
+            try {
+                controller.load(filePath);
+            } catch (error) {
+                this.log(error);
+            }
+        }
+        this.switchBackend(controller);
     }
-    
-    sqlitePymixBackend(mode: string = 'sqlite.db'): void {
-        this.conn = this.switchBackend('sqlite_pymix', { mode });
+
+    s3Backend(): void {
+        throw new Error('S3 backend is not implemented in this TypeScript port.');
     }
 
     sqliteBackend(): void {
-        this.conn = this.switchBackend('sqlite');
+        throw new Error('SQLite backend is not implemented in this TypeScript port.');
     }
 
-    firestoreBackend(googleProjectId: string, googleFirestoreCollection: string): void {
-        this.conn = this.switchBackend('firestore', googleProjectId, googleFirestoreCollection);
+    redisBackend(): void {
+        throw new Error('Redis backend is not implemented in this TypeScript port.');
     }
 
-    redisBackend(redisUrl: string = 'redis://127.0.0.1:6379'): void {
-        this.conn = this.switchBackend('redis', redisUrl);
-    }
-
-    couchBackend(url: string = 'http://localhost:5984', dbName: string = 'test', username: string = '', password: string = ''): void {
-        this.conn = this.switchBackend('couch', url, dbName, username, password);
-    }
-
-    mongoBackend(mongoUrl: string = 'mongodb://127.0.0.1:27017/', dbName: string = 'SingletonDB', collectionName: string = 'store'): void {
-        this.conn = this.switchBackend('mongodb', mongoUrl, dbName, collectionName);
-    }
-
-    private logMessage(message: string): void {
-        console.log(`[SingletonKeyValueStorage]: ${message}`);
-    }
-
-    addSlave(slave: any, eventNames: string[] = ['set', 'delete']): void {
-        if (!slave.uuid) {
-            try {
-                slave.uuid = uuidv4();
-            } catch (error) {
-                this.logMessage(`Cannot set UUID for ${slave}. Skipping this slave.`);
-                return;
-            }
-        }
-
-        eventNames.forEach((event) => {
-            if (slave[event]) {
-                this.setEvent(event, slave[event].bind(slave), slave.uuid);
-            } else {
-                this.logMessage(`No method "${event}" in ${slave}. Skipping it.`);
-            }
-        });
-    }
-
-    deleteSlave(slave: any): void {
-        if (slave.uuid) {
-            this.deleteEvent(slave.uuid);
-        }
+    private log(message: unknown): void {
+        console.log(`[SingletonKeyValueStorage]: ${message instanceof Error ? message.message : message}`);
     }
 
     private editLocal(
         funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads',
         key?: string,
-        value?: Record<string, any>
+        value?: any
     ): any {
-        // Validate that funcName is one of the allowed methods
         if (!['set', 'delete', 'clean', 'load', 'loads'].includes(funcName)) {
-            this.logMessage(`No method "${funcName}". Returning.`);
-            return;
+            throw new Error(`no func of "${funcName}". return.`);
         }
-
-        // Filter out undefined arguments
-        const args = [key, value].filter((arg) => arg !== undefined);
-
-        // Safely access the method using a type assertion
-        const func = this.conn?.[funcName as keyof typeof this.conn] as Function;
-        if (!func) return;
-
-        // Call the function with the provided arguments
-        return func.bind(this.conn)(...args);
+        const fn = (this.conn as any)[funcName];
+        if (typeof fn !== 'function') {
+            throw new Error(`no func of "${funcName}"`);
+        }
+        const args = [key, value].filter(arg => arg !== undefined);
+        return fn.apply(this.conn, args);
     }
 
     private edit(
         funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads',
         key?: string,
-        value?: Record<string, any>
+        value?: StoreValue
     ): any {
-        const args = [key, value].filter((arg) => arg !== undefined);
-        const result = this.editLocal(funcName, key, value);
-        this.dispatchEvent(funcName, ...args);
+        const argsForEvent = [key, value].filter(arg => arg !== undefined);
+        let payload = value;
+        if (this.encryptor && funcName === 'set' && value !== undefined) {
+            payload = { rjson: this.encryptor.encryptString(JSON.stringify(value)) };
+        }
+        const result = this.editLocal(funcName, key, payload);
+        this.dispatchEvent(funcName, ...argsForEvent);
         return result;
     }
 
-    private tryEditWithErrorHandling(args: any[]): boolean {
-        const [func, key, value] = args;
+    private tryEdit(operation: Operation): boolean {
         if (this.versionControl) {
-            let revert;
-            if (func === 'set') {
+            const [func, key] = operation;
+            let revert: Operation | null = null;
+
+            if (func === 'set' && typeof key === 'string') {
                 if (this.exists(key)) {
                     revert = ['set', key, this.get(key)];
                 } else {
                     revert = ['delete', key];
                 }
-            } else if (func === 'delete') {
+            } else if (func === 'delete' && typeof key === 'string') {
                 revert = ['set', key, this.get(key)];
-            } else if (['clean', 'load', 'loads'].includes(func)) {
+            } else if (func === 'clean' || func === 'load' || func === 'loads') {
                 revert = ['loads', this.dumps()];
             }
 
             if (revert) {
-                this.versionController.addOperation(args, revert);
+                this.versionController.addOperation(operation, revert);
             }
         }
 
         try {
-            this.edit(func, key, value);
+            this.edit(operation[0] as any, operation[1] as string | undefined, operation[2] as StoreValue);
             return true;
         } catch (error) {
-
-            if (error instanceof Error) {
-                this.logMessage(error.message);
-            } else {
-                this.logMessage('An unknown error occurred.');
-            }
-
+            this.log(error);
             return false;
         }
     }
 
-    revertOneOperation(): void {
-        this.versionController.revertOneOperation((revert) => {
-            const [func, key, value] = revert;
-            this.editLocal(func, key, value);
-        });
-    }
-
-    forwardOneOperation(): void {
-        this.versionController.forwardOneOperation((forward) => {
-            const [func, key, value] = forward;
-            this.editLocal(func, key, value);
-        });
-    }
-    
-    getCurrentVersion(): string {
-        return this.versionController._currentVersion;
-    }
-
-    localToVersion(opUuid: string): void {
-        this.versionController.toVersion(opUuid, (revert) => {
-            const [func, key, value] = revert;
-            this.editLocal(func, key, value);
-        });
-    }
-
-    set(key: string, value: Record<string, any>): boolean {
-        return this.tryEditWithErrorHandling(['set', key, value]);
-    }
-
-    delete(key: string): boolean {
-        return this.tryEditWithErrorHandling(['delete', key]);
-    }
-
-    clean(): boolean {
-        return this.tryEditWithErrorHandling(['clean']);
-    }
-
-    load(jsonPath: string): boolean {
-        return this.tryEditWithErrorHandling(['load', jsonPath]);
-    }
-
-    loads(jsonStr: string): boolean {
-        return this.tryEditWithErrorHandling(['loads', jsonStr]);
-    }
-
-    private tryLoadWithErrorHandling(func: () => any): any {
+    private tryLoad<T>(fn: () => T): T | null {
         try {
-            return func();
+            return fn();
         } catch (error) {
-
-            if (error instanceof Error) {
-                this.logMessage(error.message);
-            } else {
-                this.logMessage('An unknown error occurred.');
-            }
-
+            this.log(error);
             return null;
         }
     }
 
+    revertOneOperation(): void {
+        this.versionController.revertOneOperation(revert => {
+            if (!revert) return;
+            const [func, key, value] = revert;
+            this.editLocal(func as any, key as string | undefined, value);
+        });
+    }
+
+    forwardOneOperation(): void {
+        this.versionController.forwardOneOperation(forward => {
+            const [func, key, value] = forward;
+            this.editLocal(func as any, key as string | undefined, value);
+        });
+    }
+
+    getCurrentVersion(): string | null {
+        return this.versionController.getCurrentVersion();
+    }
+
+    localToVersion(opUuid: string): void {
+        this.versionController.toVersion(opUuid, op => {
+            const [func, key, value] = op;
+            this.editLocal(func as any, key as string | undefined, value);
+        });
+    }
+
+    set(key: string, value: StoreValue): boolean {
+        return this.tryEdit(['set', key, value]);
+    }
+
+    delete(key: string): boolean {
+        return this.tryEdit(['delete', key]);
+    }
+
+    clean(): boolean {
+        return this.tryEdit(['clean']);
+    }
+
+    load(jsonPath: string): boolean {
+        return this.tryEdit(['load', jsonPath]);
+    }
+
+    loads(jsonStr: string): boolean {
+        return this.tryEdit(['loads', jsonStr]);
+    }
+
     exists(key: string): boolean {
-        return this.tryLoadWithErrorHandling(() => this.conn?.exists(key));
+        const result = this.tryLoad(() => this.conn.exists(key));
+        return Boolean(result);
     }
 
-    keys(regex: string = '*'): string[] {
-        return this.tryLoadWithErrorHandling(() => this.conn?.keys(regex)) || [];
+    keys(pattern: string = '*'): string[] {
+        return this.tryLoad(() => this.conn.keys(pattern)) ?? [];
     }
 
-    get(key: string): Record<string, any> | null {
-        return this.tryLoadWithErrorHandling(() => this.conn?.get(key));
+    get(key: string): StoreValue | null {
+        const value = this.tryLoad(() => this.conn.get(key));
+        if (!value) return null;
+
+        if (this.encryptor && typeof value === 'object' && 'rjson' in value) {
+            try {
+                const decrypted = this.encryptor.decryptString((value as any).rjson);
+                return JSON.parse(decrypted);
+            } catch (error) {
+                this.log(error);
+                return null;
+            }
+        }
+
+        return value;
     }
 
     dumps(): string {
-        return this.tryLoadWithErrorHandling(() => this.conn?.dumps()) || '';
+        return this.tryLoad(() => {
+            const snapshot: StoreRecord = {};
+            for (const key of this.conn.keys('*')) {
+                snapshot[key] = this.get(key);
+            }
+            return JSON.stringify(snapshot);
+        }) ?? '{}';
     }
 
-    dumpRSAs(publicKeyPath: string, compress: boolean = false): string {
-        return this.tryLoadWithErrorHandling(() => this.conn?.dumpRSAs(publicKeyPath, compress)) || '';
+    dump(jsonPath: string): void {
+        this.tryLoad(() => this.conn.dump(jsonPath));
     }
 
-    loadRSAs(content: string, privateKeyPath: string): void {
-        return this.tryLoadWithErrorHandling(() => this.conn?.loadRSAs(content, privateKeyPath)) || '';
+    dumpRSA(path: string, publicPkcs8KeyPath: string): void {
+        this.tryLoad(() => this.conn.dumpRSA(path, publicPkcs8KeyPath));
     }
-    // dump(jsonPath: string): string {
-    //     return this.tryLoadWithErrorHandling(() => this.conn?.dump(jsonPath)) || '';
-    // }
 
-    events(): any[] {
+    loadRSA(path: string, privatePkcs8KeyPath: string): void {
+        this.tryLoad(() => this.conn.loadRSA(path, privatePkcs8KeyPath));
+    }
+
+    events(): Array<[string, StoreValue | null]> {
         return this.eventDispatcher.events();
     }
 
-    getEvent(uuid: string): any {
+    getEvent(uuid: string): Array<StoreValue | null> {
         return this.eventDispatcher.getEvent(uuid);
     }
 
@@ -917,7 +948,7 @@ export class SingletonKeyValueStorage {
         this.eventDispatcher.deleteEvent(uuid);
     }
 
-    setEvent(eventName: string, callback: Function, id: string): string {
+    setEvent(eventName: string, callback: Function, id?: string): string {
         return this.eventDispatcher.setEvent(eventName, callback, id);
     }
 
@@ -929,16 +960,41 @@ export class SingletonKeyValueStorage {
         this.eventDispatcher.clean();
     }
 
-    // Message Queue methods
-    pushMessage(message: Record<string, any>, queueName: string = 'default'): string {
+    addSlave(slave: any, eventNames: string[] = ['set', 'delete']): void {
+        if (!slave) return;
+        if (!slave.uuid) {
+            try {
+                slave.uuid = uuidv4();
+            } catch (error) {
+                this.log(`can not set uuid to ${slave}. Skip this slave.`);
+                return;
+            }
+        }
+
+        for (const event of eventNames) {
+            if (typeof slave[event] === 'function') {
+                this.setEvent(event, slave[event].bind(slave), slave.uuid);
+            } else {
+                this.log(`no func of "${event}" in ${slave}. Skip it.`);
+            }
+        }
+    }
+
+    deleteSlave(slave: any): void {
+        if (slave?.uuid) {
+            this.deleteEvent(slave.uuid);
+        }
+    }
+
+    pushMessage(message: StoreValue, queueName: string = 'default'): string {
         return this.messageQueue.push(message, queueName);
     }
 
-    popMessage(queueName: string = 'default'): Record<string, any> | null {
+    popMessage(queueName: string = 'default'): StoreValue | null {
         return this.messageQueue.pop(queueName);
     }
 
-    peekMessage(queueName: string = 'default'): Record<string, any> | null {
+    peekMessage(queueName: string = 'default'): StoreValue | null {
         return this.messageQueue.peek(queueName);
     }
 

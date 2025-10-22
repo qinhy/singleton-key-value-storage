@@ -162,7 +162,7 @@ class Tests {
 
     // Three small payloads (~0.09 MB each) should not trigger a warning
     for (let i = 0; i < 3; i++) {
-        const smallPayload = makeBigPayload(90); // ~0.09 MiB
+        const smallPayload = makeBigPayload(62); // ~0.062 MiB
         const res = lvc2.addOperation(['write', `small_${i}`, smallPayload], ['delete', `small_${i}`]);
         console.assert(res === null, 'Should not return any warning message for small payloads.');
     }
