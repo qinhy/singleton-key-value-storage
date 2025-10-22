@@ -167,6 +167,14 @@ if sqlite_back:
                 time.sleep(0.1)
             self.should_stop.set()  # Signal the thread to stop
             self.worker_thread.join()  # Wait for the thread to finish
+        
+        @staticmethod
+        def build(sqlite_URL='sqlite.db'):
+            return SingletonSqlitePythonMixStorageController(SingletonSqliteStorage(sqlite_URL))
+
+        @staticmethod
+        def build_pure(sqlite_URL='sqlite.db'):
+            return SingletonSqliteStorageController(SingletonSqliteStorage(sqlite_URL))
 
     class SingletonSqliteStorageController(AbstractStorageController):
         def __init__(self, model: SingletonSqliteStorage):
@@ -242,7 +250,3 @@ if sqlite_back:
             return self.memory.keys(pattern)
         
         def is_working(self): return self.disk.is_working()
-
-SingletonKeyValueStorage.backs['sqlite']=lambda *args,**kwargs:SingletonSqliteStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None
-SingletonKeyValueStorage.backs['sqlite_pymix']=lambda *args,**kwargs:SingletonSqlitePythonMixStorageController(SingletonSqliteStorage(*args,**kwargs)) if sqlite_back else None
-

@@ -52,6 +52,10 @@ if aws_dynamo:
             self.client = self.client
             self.table = self.table
 
+        @staticmethod
+        def build(your_table_name):
+            return SingletonDynamoDBStorageController(SingletonDynamoDBStorage(your_table_name))
+
     class SingletonDynamoDBStorageController(AbstractStorageController):
         def __init__(self, model:SingletonDynamoDBStorage):
             self.model:SingletonDynamoDBStorage = model
@@ -157,6 +161,15 @@ if aws_s3:
             self.s3:S3Client = self.s3
             self.bucket_name = self.bucket_name
             self.s3_storage_prefix_path = '/SingletonS3Storage'
+            
+        @staticmethod
+        def build(bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path = '/SingletonS3Storage'):
+            return SingletonS3StorageController(SingletonS3Storage(bucket_name,
+                    aws_access_key_id,aws_secret_access_key,region_name,
+                    s3_storage_prefix_path))
+
     class SingletonS3StorageController(AbstractStorageController):
         def __init__(self, model:SingletonS3Storage):
             self.model:SingletonS3Storage = model
@@ -198,5 +211,3 @@ if aws_s3:
                     keys.append(self._de_s3_path(obj['Key']))
                     
             return fnmatch.filter(keys, pattern)
-
-SingletonKeyValueStorage.backs['s3']=lambda *args,**kwargs:SingletonS3StorageController(SingletonS3Storage(*args,**kwargs)) if aws_s3 else None

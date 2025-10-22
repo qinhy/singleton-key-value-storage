@@ -87,6 +87,10 @@ class SingletonCouchDBStorage:
             raise Exception(f"Mango query failed: {resp.text}")
         return resp.json().get("docs", [])
     
+    @staticmethod
+    def build(couchdb_URL=None, username=None, password=None, dbname="singleton_db"):
+        return SingletonCouchDBStorageController(SingletonCouchDBStorage(couchdb_URL, username, password, dbname))
+        
 class SingletonCouchDBStorageController(AbstractStorageController):
     def __init__(self, model: SingletonCouchDBStorage):
         self.model: SingletonCouchDBStorage = model
@@ -131,7 +135,3 @@ class SingletonCouchDBStorageController(AbstractStorageController):
         selector = {"_id": {"$regex": regex}}
         docs = self.model.find(selector, fields=["_id"], limit=limit)
         return [doc['_id'] for doc in docs]
-
-SingletonKeyValueStorage.backs['couch'] = lambda *args, **kwargs: SingletonCouchDBStorageController(
-    SingletonCouchDBStorage(*args, **kwargs)
-)

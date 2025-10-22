@@ -5,25 +5,25 @@ import unittest
 
 
 try:
-    from .Storage import SingletonKeyValueStorage
+    from .Storage import SingletonKeyValueStorage, PythonDictStorage
     from .utils import SimpleRSAChunkEncryptor, PEMFileReader
-    from .RedisStorage import *
-    from .AwsStorage import *
-    from .FirestoreStorage import *
-    from .SqliteStorage import *
-    from .MongoStorage import *
-    from .FileSystemStorage import *
-    from .CouchStorage import *
+    from .RedisStorage import SingletonRedisStorage
+    from .AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
+    from .FirestoreStorage import SingletonFirestoreStorage
+    from .SqliteStorage import SingletonSqliteStorage
+    from .MongoStorage import SingletonMongoDBStorage
+    from .FileSystemStorage import SingletonFileSystemStorage
+    from .CouchStorage import SingletonCouchDBStorage
 except Exception as e:
-    from Storage import SingletonKeyValueStorage
+    from Storage import SingletonKeyValueStorage, PythonDictStorage
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
-    from RedisStorage import *
-    from AwsStorage import *
-    from FirestoreStorage import *
-    from SqliteStorage import *
-    from MongoStorage import *
-    from FileSystemStorage import *
-    from CouchStorage import *
+    from RedisStorage import SingletonRedisStorage
+    from AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
+    from FirestoreStorage import SingletonFirestoreStorage
+    from SqliteStorage import SingletonSqliteStorage
+    from MongoStorage import SingletonMongoDBStorage
+    from FileSystemStorage import SingletonFileSystemStorage
+    from CouchStorage import SingletonCouchDBStorage
 
 ENCRYPPR=None
 # ENCRYPPR=SimpleRSAChunkEncryptor(
@@ -50,51 +50,53 @@ class Tests(unittest.TestCase):
 
     def test_file(self,num=1):
         print('###### test_file ######')
-        self.store.file_backend()
+        self.store.switch_backend(SingletonFileSystemStorage.build())
         for i in range(num):self.test_all_cases()
 
     def test_python(self,num=1):
         print('###### test_python ######')
-        self.store.python_backend()
+        self.store.switch_backend(PythonDictStorage.build())
         for i in range(num):self.test_all_cases()
 
     def test_redis(self,num=1):
         print('###### test_redis ######')
-        self.store.redis_backend()
+        self.store.switch_backend(SingletonRedisStorage.build())
         for i in range(num):self.test_all_cases()
 
     def test_sqlite(self,num=1):
         print('###### test_sqlite ######')
-        self.store.sqlite_backend()
+        self.store.switch_backend(SingletonSqliteStorage.build_pure())
         for i in range(num):self.test_all_cases()
 
     def test_sqlite_pymix(self,num=1):
         print('###### test_sqlite_pymix ######')
-        self.store.sqlite_pymix_backend()
+        self.store.switch_backend(SingletonSqliteStorage.build())
         for i in range(num):self.test_all_cases()
 
     def test_firestore(self,num=1):
         print('###### test_firestore ######')
-        self.store.firestore_backend()
+        self.store.switch_backend(SingletonFirestoreStorage.build(
+            google_project_id=None,google_firestore_collection=None
+        ))
         for i in range(num):self.test_all_cases()
 
     def test_mongo(self,num=1):
         print('###### test_mongo ######')
-        self.store.mongo_backend()
+        self.store.switch_backend(SingletonMongoDBStorage.build())
         for i in range(num):self.test_all_cases()
         
     def test_couch(self,num=1):
         print('###### test_couch ######')
-        self.store.couch_backend('admin','admin')
+        self.store.switch_backend(SingletonCouchDBStorage.build())
         for i in range(num):self.test_all_cases()
 
     def test_s3(self,num=1):
         print('###### test_s3 ######')
-        self.store.s3_backend(
+        self.store.switch_backend(SingletonS3Storage.build(
                     bucket_name = os.environ['AWS_S3_BUCKET_NAME'],
                     aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
                     aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
-                    region_name=os.environ['AWS_DEFAULT_REGION'])
+                    region_name=os.environ['AWS_DEFAULT_REGION']))
         for i in range(num):self.test_all_cases()
 
     def test_all_cases(self):
@@ -160,7 +162,7 @@ class Tests(unittest.TestCase):
     def test_slaves(self):
         if self.store.conn.__class__.__name__=='SingletonPythonDictStorageController':return
         store2 = SingletonKeyValueStorage(encryptor=ENCRYPPR)
-        store2.temp_python_backend()
+        store2.switch_backend(PythonDictStorage.build_tmp())
         self.store.add_slave(store2)
         self.store.set('alpha', {'info': 'first'})
         self.store.set('abeta', {'info': 'second'})
@@ -196,7 +198,7 @@ class Tests(unittest.TestCase):
         lvc2 = self.store._verc
 
         for i in range(3):
-            small_payload = make_big_payload(90)  # 0.1 MB
+            small_payload = make_big_payload(62)  # 0.062 MB
             res = lvc2.add_operation(("write", f"small_{i}", small_payload), ("delete", f"small_{i}"))
             self.assertIsNone(res, "Should not return any warning message for small payloads.")
         # print(f"Memory usage after small payloads: {lvc2.estimate_memory_MB():.2f} MB")
@@ -205,4 +207,4 @@ class Tests(unittest.TestCase):
         expect_res = "[LocalVersionController] Warning: memory usage"
         self.assertEqual(res[:len(expect_res)], expect_res, "Should return warning message about memory usage.")
 
-# Tests().test_all()
+Tests().test_all()

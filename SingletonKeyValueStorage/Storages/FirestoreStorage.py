@@ -66,6 +66,11 @@ if firestore_back:
             self.uuid:str = self.uuid
             self.model:firestore.Client = self.model    
             self.collection:firestore.CollectionReference = self.collection
+        
+        @staticmethod
+        def build(google_project_id:str=None,google_firestore_collection:str=None):
+            return SingletonFirestoreStorageController(SingletonFirestoreStorage(google_project_id,google_firestore_collection))
+
     class SingletonFirestoreStorageController(AbstractStorageController):
         def __init__(self, model: SingletonFirestoreStorage):
             self.model:SingletonFirestoreStorage = model
@@ -88,5 +93,3 @@ if firestore_back:
             docs = self.model.collection.stream()
             keys = [doc.id for doc in docs]
             return fnmatch.filter(keys, pattern)      
-
-SingletonKeyValueStorage.backs['firestore']=lambda *args,**kwargs:SingletonFirestoreStorageController(SingletonFirestoreStorage(*args,**kwargs)) if firestore_back else None

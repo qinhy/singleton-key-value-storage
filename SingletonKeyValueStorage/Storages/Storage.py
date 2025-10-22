@@ -5,13 +5,14 @@ import uuid
 import fnmatch
 import json
 from pathlib import Path
+from collections import OrderedDict
 
 try:
     from .utils import SimpleRSAChunkEncryptor, PEMFileReader
 except Exception as e:
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
 
-def get_deep_size(obj, seen=None):
+def get_deep_bytes_size(obj, seen=None):
     obj_id = id(obj)
     if seen is None:
         seen = set()
@@ -22,17 +23,17 @@ def get_deep_size(obj, seen=None):
 
     if isinstance(obj, dict):
         for k, v in obj.items():
-            size += get_deep_size(k, seen) + get_deep_size(v, seen)
+            size += get_deep_bytes_size(k, seen) + get_deep_bytes_size(v, seen)
         return size
     if isinstance(obj, (list, tuple, set, frozenset)):
-        size += sum(get_deep_size(i, seen) for i in obj)
+        size += sum(get_deep_bytes_size(i, seen) for i in obj)
         return size
     if hasattr(obj, "__dict__"):
-        size += get_deep_size(vars(obj), seen)
+        size += get_deep_bytes_size(vars(obj), seen)
     if hasattr(obj, "__slots__"):
         for slot in obj.__slots__:
             try:
-                size += get_deep_size(getattr(obj, slot), seen)
+                size += get_deep_bytes_size(getattr(obj, slot), seen)
             except AttributeError:
                 pass
     return size
@@ -59,7 +60,7 @@ class AbstractStorage:
     def get_singleton(self):
         return self.__class__(self._uuid,self._store,self._is_singleton)    
     
-    def memory_usage(self, deep=True):
+    def bytes_used(self, deep=True, human_readable=True):
         raise NotImplementedError("Subclasses must implement memory_usage method")
     
 class PythonDictStorage(AbstractStorage):
@@ -70,12 +71,19 @@ class PythonDictStorage(AbstractStorage):
         super().__init__(id,store,is_singleton)
         self.store = {} if store is None else store
 
-    def memory_usage(self, deep=True, human_readable=True):
+    def bytes_used(self, deep=True, human_readable=True):
         """Return memory usage (deep or shallow)."""
-        size = get_deep_size(self) if deep else sys.getsizeof(self)
+        size = get_deep_bytes_size(self) if deep else sys.getsizeof(self)
         return humanize_bytes(size) if human_readable else size
     
+    @staticmethod
+    def build_tmp():
+        return PythonDictStorageController(PythonDictStorage())
 
+    @staticmethod
+    def build():
+        return PythonDictStorageController(PythonDictStorage().get_singleton())
+    
 class AbstractStorageController:
     def __init__(self, model): self.model:AbstractStorage = model
     
@@ -110,7 +118,6 @@ class AbstractStorageController:
         encryptor = SimpleRSAChunkEncryptor(
             None, PEMFileReader(private_pkcs8_key_path).load_private_pkcs8_key())
         return self.loads(encryptor.decrypt_string(Path(path).read_text()))
-
 
 class PythonDictStorageController(AbstractStorageController):
     def __init__(self, model:PythonDictStorage):
@@ -198,40 +205,139 @@ class MessageQueueController(PythonDictStorageController):
             self.delete(key)
         if queue_name in self.counters:
             del self.counters[queue_name]
-            
+     
+class PythonMemoryLimitedDictStorageController(PythonDictStorageController):
+    def __init__(self,model: PythonDictStorage, 
+                 max_memory_mb: float = 1024.0, policy: str = 'lru',
+                on_evict: Optional[Callable[[str, dict], None]] = None,
+                pinned: Optional[set[str]] = None,):
+        super().__init__(model)
+        self.max_bytes = int(max(0, max_memory_mb) * 1024 * 1024)
+        self.policy = policy.lower().strip()
+        if self.policy not in ('lru', 'fifo'):
+            raise ValueError("policy must be 'lru' or 'fifo'")
+        self.on_evict = on_evict
+        self.pinned = pinned or set()
+        self.init_size_manage()
+
+    def init_size_manage(self):
+        self._sizes: dict[str, int] = {}                     # key -> bytes (approx)
+        self._order: OrderedDict[str, None] = OrderedDict()  # access/insertion order
+        self._current_bytes: int = 0
+
+    def _entry_size(self, key: str, value: dict) -> int:
+        return get_deep_bytes_size(key) + get_deep_bytes_size(value)
+
+    def bytes_used(self, deep=True, human_readable=False):
+        size = self._current_bytes
+        return humanize_bytes(size) if human_readable else size
+
+    def _reduce(self,key):
+        self._order.pop(key, None)
+        self._current_bytes -= self._sizes.pop(key, 0)
+
+    def _maybe_evict(self):
+        if self.max_bytes <= 0: return []
+        evicted = []
+        def pick_victim():
+            return next((k for k in self._order if k not in self.pinned), None)
+
+        while self._current_bytes > self.max_bytes and self._order:
+            victim = pick_victim()
+            if victim is None: break   # only pinned keys remain
+            val = super().get(victim)  # avoid LRU touch
+            self._reduce(victim)
+            super().delete(victim)
+            evicted.append(victim)
+            if self.on_evict:
+                self.on_evict(victim, val)
+        return evicted
+
+    def set(self, key: str, value: dict):
+        # If replacing existing key: remove its size first
+        if self.exists(key): self._reduce(key)
+
+        super().set(key, value)
+
+        # Track size and order
+        sz = self._entry_size(key, value)
+        self._sizes[key] = sz
+        self._current_bytes += sz
+
+        # Order update
+        self._order[key] = None
+        if self.policy == 'lru':
+            # For LRU we always treat 'set' as most recent use
+            self._order.move_to_end(key, last=True)
+
+        # Enforce limit
+        self._maybe_evict()
+
+    def get(self, key: str) -> dict:
+        val = super().get(key)
+        if val is not None and self.policy == 'lru' and key in self._order:
+            # Mark as most recently used
+            self._order.move_to_end(key, last=True)
+        return val
+
+    def delete(self, key: str):
+        if self.exists(key): self._reduce(key)
+        return super().delete(key)
+
+    def clean(self):
+        [super().delete(k) for k in list(self._order.keys())]
+        self.init_size_manage()
+
 class LocalVersionController:
     TABLENAME = '_Operation'
     KEY = 'ops'
     FORWARD = 'forward'
     REVERT = 'revert'
 
-    def __init__(self, client=None, limit_memory_MB: float = 128):
-        self.limit_memory_MB = limit_memory_MB
+    def __init__(
+        self,
+        client: Optional[AbstractStorageController] = None,
+        limit_memory_MB: float = 128.0,
+        eviction_policy: str = 'fifo',  # FIFO fits "oldest ops fall off" best; 'lru' also works
+    ):
+        self.limit_memory_MB = float(limit_memory_MB)
+        self.client = client
         if client is None:
-            client = PythonDictStorageController(PythonDictStorage())
-        self.client: AbstractStorageController = client
-
-        # Ensure the ops list exists without clobbering existing data
-        try:
-            table = self.client.get(LocalVersionController.TABLENAME) or {}
-        except Exception:
-            table = {}
+            # Build a private, memory-capped op-log store
+            model = PythonDictStorage()
+            self.client = PythonMemoryLimitedDictStorageController(
+                model,
+                max_memory_mb=self.limit_memory_MB,
+                policy=eviction_policy,
+                on_evict=self._on_evict,
+                pinned={LocalVersionController.TABLENAME},  # never evict the index row
+            )
+            
+        table = self.client.get(LocalVersionController.TABLENAME) or {}
         if LocalVersionController.KEY not in table:
             self.client.set(LocalVersionController.TABLENAME, {LocalVersionController.KEY: []})
+        self._current_version: Optional[str] = None        
 
-        self._current_version: Optional[str] = None
+    def _on_evict(self, key: str, value: dict) -> None:
+        # We only care about per-op rows like "_Operation:<uuid>"
+        prefix = f'{LocalVersionController.TABLENAME}:'
+        if not key.startswith(prefix): return
+
+        op_id = key[len(prefix):]
+        ops = self.get_versions()
+        if op_id in ops:
+            ops.remove(op_id)
+            self._set_versions(ops)
+
+        # If we evicted the current pointer, move it to the tail (latest) or None
+        if self._current_version == op_id:raise ValueError('auto removed current_version')
 
     def get_versions(self) -> List[str]:
-        """Return the ordered list of version UUIDs (empty list if none)."""
-        try:
-            table = self.client.get(LocalVersionController.TABLENAME) or {}
-        except Exception:
-            table = {}
-        return list(table.get(LocalVersionController.KEY, []))
+        return list(self.client.get(self.TABLENAME).get(self.KEY, []))
 
     def _set_versions(self, ops: List[str]) -> Any:
         """Persist the ordered list of version UUIDs."""
-        return self.client.set(LocalVersionController.TABLENAME, {LocalVersionController.KEY: list(ops)})
+        return self.client.set( self.TABLENAME, {self.KEY: list(ops)})
 
     def find_version(self, version_uuid: Optional[str]):
         versions = self.get_versions()
@@ -241,38 +347,32 @@ class LocalVersionController:
         op = None
         if target_version_idx is not None:
             op_id = versions[target_version_idx]
-            op = self.client.get(f'{LocalVersionController.TABLENAME}:{op_id}')
+            op = self.client.get(f'{self.TABLENAME}:{op_id}')
 
         return versions, current_version_idx, target_version_idx, op
 
-    def estimate_memory_MB(self):
-        return self.client.model.memory_usage(deep=True, human_readable=False) / (1024 * 1024)
-    
+    # Prefer the backend’s byte counter if available; otherwise fall back to deep measurement.
+    def estimate_memory_MB(self) -> float:
+        return float(self.client.bytes_used(True,False)) / (1024 * 1024)
+
     def add_operation(self, operation: Tuple[Any, ...], revert: Optional[Tuple[Any, ...]] = None):
-        """Append a new operation after the current pointer, truncating any redo tail."""
         opuuid = str(uuid.uuid4())
 
-        tmp = {f'{LocalVersionController.TABLENAME}:{opuuid}':
-                 {LocalVersionController.FORWARD: operation, LocalVersionController.REVERT: revert}}        
-        will_use_MB = get_deep_size(tmp) / (1024 * 1024)
+        # Store op payload (may trigger eviction of oldest ops in the backend)
+        self.client.set( f'{self.TABLENAME}:{opuuid}',
+                           {self.FORWARD: operation, self.REVERT: revert},)
 
-        while will_use_MB+self.estimate_memory_MB() > self.limit_memory_MB:
-            popped = self.pop_operation(1)
-            if not popped: break
-
-        self.client.set(
-            f'{LocalVersionController.TABLENAME}:{opuuid}',
-            {LocalVersionController.FORWARD: operation, LocalVersionController.REVERT: revert},
-        )
-
+        # Update ordered index (append)
         ops = self.get_versions()
+        # If we are in the middle (after a manual revert), drop redo tail
         if self._current_version is not None and self._current_version in ops:
             opidx = ops.index(self._current_version)
-            ops = ops[: opidx + 1]  # drop any redo branch
+            ops = ops[: opidx + 1]
         ops.append(opuuid)
         self._set_versions(ops)
         self._current_version = opuuid
 
+        # Optional: warn if we still exceed cap (can happen if only pinned keys remain)
         if self.estimate_memory_MB() > self.limit_memory_MB:
             res = f"[LocalVersionController] Warning: memory usage {self.estimate_memory_MB():.1f} MB exceeds limit of {self.limit_memory_MB} MB"
             print(res)
@@ -282,128 +382,76 @@ class LocalVersionController:
     def pop_operation(self, n: int = 1) -> List[Tuple[str, dict]]:
         if n <= 0: return []
 
-        # Load current list
         ops = self.get_versions()
         if not ops: return []
 
-        popped = []
+        popped: List[Tuple[str, dict]] = []
         for _ in range(min(n, len(ops))):
-            pop_idx = 0 if ops[0] != self._current_version else -1
+            pop_idx = 0 if ops and ops[0] != self._current_version else -1
             op_id = ops[pop_idx]
-            op_record = self.client.get(f"{self.TABLENAME}:{op_id}")
+            op_key = f"{self.TABLENAME}:{op_id}"
+            op_record = self.client.get(op_key)
             popped.append((op_id, op_record))
-            
-            # Remove from list
-            ops.pop(pop_idx)
-            self.client.delete(f"{self.TABLENAME}:{op_id}")
 
-        # Persist trimmed list
+            # Remove from index and store
+            ops.pop(pop_idx)
+            self.client.delete(op_key)
+
         self._set_versions(ops)
 
-        # Fix current pointer if it pointed to a removed op (or now out-of-range)
+        # Fix current pointer if it pointed to a removed op (or list is now empty)
         if self._current_version not in ops:
             self._current_version = ops[-1] if ops else None
 
         return popped
-    
+
     def forward_one_operation(self, forward_callback: Callable[[Tuple[Any, ...]], None]) -> None:
         versions, current_version_idx, _, _ = self.find_version(self._current_version)
         next_idx = current_version_idx + 1
-        if next_idx >= len(versions):
-            return
+        if next_idx >= len(versions): return
 
-        op = self.client.get(f'{LocalVersionController.TABLENAME}:{versions[next_idx]}')
-        if not op or LocalVersionController.FORWARD not in op:
-            return
+        op = self.client.get(f'{self.TABLENAME}:{versions[next_idx]}')
+        if not op or self.FORWARD not in op: return
 
-        # Only advance the pointer if the callback succeeds
-        forward_callback(op[LocalVersionController.FORWARD])
+        forward_callback(op[self.FORWARD])
         self._current_version = versions[next_idx]
 
     def revert_one_operation(self, revert_callback: Callable[[Optional[Tuple[Any, ...]]], None]) -> None:
         versions, current_version_idx, _, op = self.find_version(self._current_version)
-        if current_version_idx is None or current_version_idx <= 0:
-            return
-        if not op or LocalVersionController.REVERT not in op:
-            return
+        if current_version_idx is None or current_version_idx <= 0: return
+        if not op or self.REVERT not in op: return
 
-        revert_callback(op[LocalVersionController.REVERT])
+        revert_callback(op[self.REVERT])
         self._current_version = versions[current_version_idx - 1]
 
     def to_version(self, version_uuid: str, version_callback: Callable[[Tuple[Any, ...]], None]) -> None:
-        versions, current_idx, target_idx, _ = self.find_version(version_uuid)
+        _, current_idx, target_idx, _ = self.find_version(version_uuid)
         if target_idx is None:
             raise ValueError(f'no such version of {version_uuid}')
 
-        # Normalize 'no current' to -1 so we can walk forward cleanly
-        if current_idx is None:
-            current_idx = -1
+        if current_idx is None: current_idx = -1
 
         while current_idx != target_idx:
             if current_idx < target_idx:
-                # move forward by one
                 self.forward_one_operation(version_callback)
                 current_idx += 1
             else:
-                # move backward by one
                 self.revert_one_operation(version_callback)
                 current_idx -= 1
 
-class SingletonKeyValueStorage(AbstractStorageController):    
-    backs={
-        'temp_python':lambda *args,**kwargs:PythonDictStorageController(PythonDictStorage(*args,**kwargs)),
-        'python':lambda *args,**kwargs:PythonDictStorageController(PythonDictStorage(*args,**kwargs).get_singleton()),
-    }
-
+class SingletonKeyValueStorage(AbstractStorageController):
     def __init__(self,version_controll=False,
                  encryptor:SimpleRSAChunkEncryptor=None)->None:
         self.version_controll = version_controll
         self.encryptor = encryptor
         self.conn:AbstractStorageController = None
-        self.python_backend()
+        self.switch_backend(PythonDictStorage.build())
     
-    def _switch_backend(self,name:str='python',*args,**kwargs):
+    def switch_backend(self,controller:AbstractStorageController):
         self._event_dispa = EventDispatcherController(PythonDictStorage())
         self._verc = LocalVersionController()
-        back=self.backs.get(name.lower(),None)
-        if back is None:raise ValueError(f'no back end of {name}, has {list(self.backs.items())}')
-        return back
-    
-    def s3_backend(self,bucket_name,
-                    aws_access_key_id,aws_secret_access_key,region_name,
-                    s3_storage_prefix_path = '/SingletonS3Storage'):
-        self.conn = self._switch_backend('s3',bucket_name,
-                    aws_access_key_id,aws_secret_access_key,region_name,
-                    s3_storage_prefix_path = s3_storage_prefix_path)
-        
-    def file_backend(self,storage_dir='./SingletonKeyValueStorage', ext='.json'):
-        self.conn = self._switch_backend('file')(storage_dir=storage_dir,ext=ext)
-
-    def temp_python_backend(self):
-        self.conn = self._switch_backend('temp_python')()
-    
-    def python_backend(self):
-        self.conn = self._switch_backend('python')()
-    
-    def sqlite_pymix_backend(self,mode='sqlite.db'):
-        self.conn = self._switch_backend('sqlite_pymix')(mode=mode)
-    
-    def sqlite_backend(self):             
-        self.conn = self._switch_backend('sqlite')()
-
-    def firestore_backend(self,google_project_id:str=None,google_firestore_collection:str=None):
-        self.conn = self._switch_backend('firestore')(google_project_id,google_firestore_collection)
-
-    def redis_backend(self,redis_URL:str='redis://127.0.0.1:6379'):
-        self.conn = self._switch_backend('redis')(redis_URL)
-
-    def mongo_backend(self,mongo_URL:str="mongodb://127.0.0.1:27017/",
-                        db_name:str="SingletonDB", collection_name:str="store"):
-        self.conn = self._switch_backend('mongodb')(mongo_URL,db_name,collection_name)
-
-    def couch_backend(self,username:str, password:str,
-                      couchdb_URL:str="couchdb://localhost:5984/", dbname="singleton_db"):
-        self.conn = self._switch_backend('couch')(couchdb_URL, username, password, dbname)
+        self.conn = controller
+        return self
 
     def _print(self,msg): print(f'[{self.__class__.__name__}]: {msg}')
        
