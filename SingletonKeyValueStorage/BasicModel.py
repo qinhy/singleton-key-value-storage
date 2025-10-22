@@ -83,8 +83,8 @@ class Controller4Basic:
             self._store: BasicStore = store
 
         def delete(self):
-            parent: Model4Basic.AbstractGroup = self.storage().find(self.model.parent_id)
-            if parent:
+            if not self.model.is_root():
+                parent: Model4Basic.AbstractGroup = self.storage().find(self.model.parent_id)
                 remaining_ids = [cid for cid in parent.children_id if cid != self.model.get_id()]
                 parent.controller.update(children_id=remaining_ids)
             return super().delete()
@@ -95,6 +95,8 @@ class Controller4Basic:
             self.delete()
             
         def add_child(self, child_id: str):
+            if hasattr(child_id,'get_id'):
+                child_id = child_id.get_id()
             child = self.storage().find(child_id)
             if child:
                 self.update(children_id= self.model.children_id + [child_id])
@@ -193,6 +195,12 @@ class Model4Basic:
         # auto exclude when model dump
         controller: Optional[Controller4Basic.AbstractGroupController] = None
 
+        def get_own(self):
+            return self.controller.storage().find(self.owner_id)
+        
+        def get_parent(self):
+            return self.controller.storage().find(self.parent_id)
+        
         def is_root(self) -> bool:
             return self.depth == 0
 
