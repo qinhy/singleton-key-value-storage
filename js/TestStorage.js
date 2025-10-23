@@ -1,5 +1,5 @@
 // from https://github.com/qinhy/singleton-key-value-storage.git
-import { SingletonKeyValueStorage } from "./Storage.js"
+import { DictStorage, SingletonKeyValueStorage } from "./Storage.js"
 class Tests {
   constructor() {
     this.store = new SingletonKeyValueStorage()
@@ -10,11 +10,12 @@ class Tests {
   }
 
   testLocalStorage(num = 1) {
-    this.store.tempTsBackend()
+    this.store.switchBackend(DictStorage.buildTmp())
     for (let i = 0; i < num; i++) this.testAllCases()
   }
 
   testAllCases() {
+    this.testMsg()
     this.testSetAndGet()
     this.testExists()
     this.testDelete()
@@ -25,6 +26,146 @@ class Tests {
     this.testSlaves()
     this.store.clean()
     console.log("All tests end.")
+  }
+  // Inside the same class where `this.store` is available
+  // (no `private` in JS; keep as regular methods)
+
+  testMsg() {
+    // Enqueue a few messages
+    this.store.messageQueue.push({ n: 1 });
+    this.store.messageQueue.push({ n: 2 });
+    this.store.messageQueue.push({ n: 3 });
+
+    console.assert(
+      this.store.messageQueue.queueSize() === 3,
+      "Size should reflect number of enqueued items."
+    );
+
+    // FIFO pops
+    const p1 = this.store.messageQueue.pop();
+    console.assert(
+      JSON.stringify(p1) === JSON.stringify({ n: 1 }),
+      "Queue must be FIFO: first pop returns first pushed."
+    );
+
+    const p2 = this.store.messageQueue.pop();
+    console.assert(
+      JSON.stringify(p2) === JSON.stringify({ n: 2 }),
+      "Second pop should return second item."
+    );
+
+    const p3 = this.store.messageQueue.pop();
+    console.assert(
+      JSON.stringify(p3) === JSON.stringify({ n: 3 }),
+      "Third pop should return third item."
+    );
+
+    const pEmpty = this.store.messageQueue.pop();
+    console.assert(
+      pEmpty == null,
+      "Popping an empty queue should return null/undefined."
+    );
+
+    console.assert(
+      this.store.messageQueue.queueSize() === 0,
+      "Size should be zero after popping all items."
+    );
+
+    // Peek does not remove
+    this.store.messageQueue.push({ a: 1 });
+    const peeked = this.store.messageQueue.peek();
+    console.assert(
+      JSON.stringify(peeked) === JSON.stringify({ a: 1 }),
+      "Peek should return earliest message without removing it."
+    );
+    console.assert(
+      this.store.messageQueue.queueSize() === 1,
+      "Peek should not change the queue size."
+    );
+    const poppedAfterPeek = this.store.messageQueue.pop();
+    console.assert(
+      JSON.stringify(poppedAfterPeek) === JSON.stringify({ a: 1 }),
+      "Pop should still return the same earliest message after peek."
+    );
+
+    // Clear resets
+    this.store.messageQueue.push({ x: 1 });
+    this.store.messageQueue.push({ y: 2 });
+    this.store.messageQueue.clear();
+    console.assert(
+      this.store.messageQueue.queueSize() === 0,
+      "Clear should remove all items from the queue."
+    );
+    console.assert(
+      this.store.messageQueue.pop() == null,
+      "After clear, popping should return null/undefined."
+    );
+
+    // Capture normal event flow on default queue
+    const events = [];
+    const capture = (evt) => events.push(evt);
+
+    this.store.messageQueue.addListener('default', capture, 'pushed' );
+    this.store.messageQueue.addListener('default', capture, 'popped' );
+    this.store.messageQueue.addListener('default', capture, 'empty' );
+    this.store.messageQueue.addListener('default', capture, 'cleared' );
+
+    this.store.messageQueue.push({ m: 1 });
+    this.store.messageQueue.push({ m: 2 });
+    const a = this.store.messageQueue.pop();
+    const b = this.store.messageQueue.pop();
+    this.store.messageQueue.clear();
+
+    const kinds = events.map(e => e.op);
+    const expected = ['push', 'push', 'pop', 'pop', 'empty', 'clear'];
+    console.assert(
+      JSON.stringify(kinds) === JSON.stringify(expected),
+      "Should dispatch pushed, popped (twice), empty, then cleared in order."
+    );
+    console.assert(
+      JSON.stringify(a) === JSON.stringify({ m: 1 }),
+      "First popped message should equal the first pushed."
+    );
+    console.assert(
+      JSON.stringify(b) === JSON.stringify({ m: 2 }),
+      "Second popped message should equal the second pushed."
+    );
+
+    // Listener failure should not break queue ops (use isolated queue)
+    const queue = `t_listener_fail_${Date.now()}`;
+    const bad = (_evt) => { throw new Error("boom"); };
+
+    this.store.messageQueue.addListener(queue, bad, 'pushed' );
+
+    // Should not throw even though the listener throws
+    this.store.messageQueue.push({ ok: true }, queue);
+    console.assert(
+      this.store.messageQueue.queueSize(queue) === 1,
+      "Ops should succeed even if a listener fails."
+    );
+    console.assert(
+      JSON.stringify(this.store.messageQueue.pop(queue)) === JSON.stringify({ ok: true }),
+      "Pop should return the pushed item from the isolated queue."
+    );
+    this.store.messageQueue.push({ a: 1 }, 'q1');
+    this.store.messageQueue.push({ b: 2 }, 'q2');
+
+    console.assert(
+      this.store.messageQueue.queueSize('q1') === 1,
+      "q1 should have one item."
+    );
+    console.assert(
+      this.store.messageQueue.queueSize('q2') === 1,
+      "q2 should have one item."
+    );
+    console.assert(
+      JSON.stringify(this.store.messageQueue.pop('q1')) === JSON.stringify({ a: 1 }),
+      "Popping q1 should return its own item."
+    );
+    console.assert(
+      this.store.messageQueue.queueSize('q2') === 1,
+      "Popping q1 should not affect q2."
+    );
   }
 
   testSetAndGet() {
@@ -59,7 +200,7 @@ class Tests {
     const expectedKeys = ["alpha", "abeta"]
     console.assert(
       JSON.stringify(this.store.keys("a*").sort()) ===
-        JSON.stringify(expectedKeys.sort()),
+      JSON.stringify(expectedKeys.sort()),
       "Should return the correct keys matching the pattern."
     )
   }
@@ -76,10 +217,10 @@ class Tests {
       test1: { data: 123 }
     }
 
-    this.store.clean()
+    this.store.clean()    
     console.assert(
       this.store.dumps() === "{}",
-      "Should return the correct keys and values."
+      "Should return empty."
     )
 
     this.store.clean()
@@ -106,18 +247,17 @@ class Tests {
       return
 
     const store2 = new SingletonKeyValueStorage()
-    store2.tempTsBackend()
+    store2.switchBackend(DictStorage.buildTmp())
 
-    this.store.addSlave(store2)
+    this.store.addSlave(store2)    
     this.store.set("alpha", { info: "first" })
     this.store.set("abeta", { info: "second" })
     this.store.set("gamma", { info: "third" })
     this.store.delete("abeta")
-
     console.assert(
       JSON.stringify(JSON.parse(this.store.dumps()).gamma) ===
-        JSON.stringify(JSON.parse(store2.dumps()).gamma),
-      "Should return the correct keys and values."
+      JSON.stringify(JSON.parse(store2.dumps()).gamma),
+      "test slaves, Should return the correct keys and values."
     )
   }
 
@@ -160,7 +300,7 @@ class Tests {
     this.store.localToVersion(v1)
     console.assert(
       stableStringify(JSON.parse(this.store.dumps())) ===
-        stableStringify(JSON.parse(data1)),
+      stableStringify(JSON.parse(data1)),
       "Should return the same keys and values for v1."
     )
 
@@ -168,7 +308,7 @@ class Tests {
     this.store.localToVersion(v2)
     console.assert(
       stableStringify(JSON.parse(this.store.dumps())) ===
-        stableStringify(JSON.parse(data2)),
+      stableStringify(JSON.parse(data2)),
       "Should return the same keys and values for v2."
     )
 
@@ -201,7 +341,7 @@ class Tests {
     const expectPrefix = "[LocalVersionController] Warning: memory usage"
     console.assert(
       typeof res === "string" &&
-        res.slice(0, expectPrefix.length) === expectPrefix,
+      res.slice(0, expectPrefix.length) === expectPrefix,
       "Should return warning message about memory usage."
     )
   }

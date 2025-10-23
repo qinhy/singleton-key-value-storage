@@ -1,5 +1,5 @@
 // from https://github.com/qinhy/singleton-key-value-storage.git
-import { SingletonKeyValueStorage } from './Storage';
+import { SingletonKeyValueStorage, DictStorage } from './Storage';
 class Tests {
     private store: SingletonKeyValueStorage;
 
@@ -12,11 +12,12 @@ class Tests {
     }
 
     private testLocalStorage(num: number = 1): void {
-        this.store.tempTsBackend();
+        this.store.switchBackend(DictStorage.buildTmp());
         for (let i = 0; i < num; i++) this.testAllCases();
     }
 
     private testAllCases(): void {
+        this.testMsg();
         this.testSetAndGet();
         this.testExists();
         this.testDelete();
@@ -27,6 +28,147 @@ class Tests {
         this.testSlaves();
         this.store.clean();
         console.log('All tests end.');
+    }
+
+    private testMsg(): void {
+        // Enqueue a few messages
+        this.store.messageQueue.push({ n: 1 });
+        this.store.messageQueue.push({ n: 2 });
+        this.store.messageQueue.push({ n: 3 });
+
+        console.assert(
+            this.store.messageQueue.queueSize() === 3,
+            "Size should reflect number of enqueued items."
+        );
+
+        // FIFO pops
+        const p1 = this.store.messageQueue.pop();
+        console.assert(
+            JSON.stringify(p1) === JSON.stringify({ n: 1 }),
+            "Queue must be FIFO: first pop returns first pushed."
+        );
+
+        const p2 = this.store.messageQueue.pop();
+        console.assert(
+            JSON.stringify(p2) === JSON.stringify({ n: 2 }),
+            "Second pop should return second item."
+        );
+
+        const p3 = this.store.messageQueue.pop();
+        console.assert(
+            JSON.stringify(p3) === JSON.stringify({ n: 3 }),
+            "Third pop should return third item."
+        );
+
+        const pEmpty = this.store.messageQueue.pop();
+        console.assert(
+            pEmpty === null || pEmpty === undefined,
+            "Popping an empty queue should return null/undefined."
+        );
+
+        console.assert(
+            this.store.messageQueue.queueSize() === 0,
+            "Size should be zero after popping all items."
+        );
+
+        // Peek does not remove
+        this.store.messageQueue.push({ a: 1 });
+        const peeked = this.store.messageQueue.peek();
+        console.assert(
+            JSON.stringify(peeked) === JSON.stringify({ a: 1 }),
+            "Peek should return earliest message without removing it."
+        );
+        console.assert(
+            this.store.messageQueue.queueSize() === 1,
+            "Peek should not change the queue size."
+        );
+        const poppedAfterPeek = this.store.messageQueue.pop();
+        console.assert(
+            JSON.stringify(poppedAfterPeek) === JSON.stringify({ a: 1 }),
+            "Pop should still return the same earliest message after peek."
+        );
+
+        // Clear resets
+        this.store.messageQueue.push({ x: 1 });
+        this.store.messageQueue.push({ y: 2 });
+        this.store.messageQueue.clear();
+        console.assert(
+            this.store.messageQueue.queueSize() === 0,
+            "Clear should remove all items from the queue."
+        );
+        console.assert(
+            this.store.messageQueue.pop() == null,
+            "After clear, popping should return null/undefined."
+        );
+
+        // Capture normal event flow on default queue
+        const events: Array<Record<string, any>> = [];
+        const capture = (evt: Record<string, any>) => events.push(evt);
+
+        // Assuming TS version uses camelCase addListener with an options bag
+        this.store.messageQueue.addListener('default', capture, 'pushed' );
+        this.store.messageQueue.addListener('default', capture, 'popped' );
+        this.store.messageQueue.addListener('default', capture, 'empty' );
+        this.store.messageQueue.addListener('default', capture, 'cleared' );
+
+        this.store.messageQueue.push({ m: 1 });
+        this.store.messageQueue.push({ m: 2 });
+        const a = this.store.messageQueue.pop();
+        const b = this.store.messageQueue.pop();
+        this.store.messageQueue.clear();
+
+        const kinds = events.map(e => e.op);
+        const expected = ['push', 'push', 'pop', 'pop', 'empty', 'clear'];
+        
+        console.assert(
+            JSON.stringify(kinds) === JSON.stringify(expected),
+            "Should dispatch pushed, popped (twice), empty, then cleared in order."
+        );
+        console.assert(
+            JSON.stringify(a) === JSON.stringify({ m: 1 }),
+            "First popped message should equal the first pushed."
+        );
+        console.assert(
+            JSON.stringify(b) === JSON.stringify({ m: 2 }),
+            "Second popped message should equal the second pushed."
+        );
+
+        // Listener failure should not break queue ops (use isolated queue)
+        const queue = `t_listener_fail_${Date.now()}`;
+        const bad = (_evt: Record<string, any>) => { throw new Error("boom"); };
+
+        this.store.messageQueue.addListener(queue, bad, 'pushed' );
+
+        // Should not throw even though the listener throws
+        this.store.messageQueue.push({ ok: true }, queue);
+        console.assert(
+            this.store.messageQueue.queueSize(queue) === 1,
+            "Ops should succeed even if a listener fails."
+        );
+        console.assert(
+            JSON.stringify(this.store.messageQueue.pop(queue)) === JSON.stringify({ ok: true }),
+            "Pop should return the pushed item from the isolated queue."
+        );
+        
+        this.store.messageQueue.push({ a: 1 }, 'q1');
+        this.store.messageQueue.push({ b: 2 }, 'q2');
+
+        console.assert(
+            this.store.messageQueue.queueSize('q1') === 1,
+            "q1 should have one item."
+        );
+        console.assert(
+            this.store.messageQueue.queueSize('q2') === 1,
+            "q2 should have one item."
+        );
+        console.assert(
+            JSON.stringify(this.store.messageQueue.pop('q1')) === JSON.stringify({ a: 1 }),
+            "Popping q1 should return its own item."
+        );
+        console.assert(
+            this.store.messageQueue.queueSize('q2') === 1,
+            "Popping q1 should not affect q2."
+        );
     }
 
     private testSetAndGet(): void {
@@ -90,8 +232,7 @@ class Tests {
         if (this.store.conn?.constructor.name === 'SingletonTsDictStorageController') return;
 
         const store2 = new SingletonKeyValueStorage();
-        store2.tempTsBackend();
-
+        store2.switchBackend(DictStorage.buildTmp());
         this.store.addSlave(store2);
         this.store.set('alpha', { info: 'first' });
         this.store.set('abeta', { info: 'second' });

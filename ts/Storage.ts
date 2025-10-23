@@ -1,11 +1,14 @@
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
-import { Buffer } from 'buffer';
 import { PEMFileReader, SimpleRSAChunkEncryptor } from './RSA';
 
-type StoreValue = any;
-type StoreRecord = Record<string, StoreValue>;
+export type StoreValue = any;
+export type StoreRecord = Record<string, StoreValue>;
 export type Operation = [string, ...any[]];
+
+type EventCallback = (...args: any[]) => unknown;
+
+type EvictHandler = (key: string, value: StoreValue | null) => void;
 
 function getGlobalCrypto(): Crypto | null {
     if (typeof globalThis === 'undefined') return null;
@@ -24,17 +27,15 @@ export function uuidv4(): string {
     } else {
         bytes.set(randomBytes(16));
     }
-
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 const POINTER_SIZE_BYTES = 8;
 
-function sizeOfPrimitive(value: any): number {
+function sizeOfPrimitive(value: unknown): number {
     switch (typeof value) {
         case 'string':
             return Buffer.byteLength(value, 'utf8');
@@ -44,6 +45,10 @@ function sizeOfPrimitive(value: any): number {
             return 4;
         case 'bigint':
             return Buffer.byteLength(value.toString(), 'utf8');
+        case 'symbol':
+            return 0;
+        case 'function':
+            return POINTER_SIZE_BYTES;
         default:
             return 0;
     }
@@ -51,11 +56,7 @@ function sizeOfPrimitive(value: any): number {
 
 function getDeepBytesSize(obj: any, seen: WeakSet<object> = new WeakSet(), shallow = false): number {
     if (obj === null || obj === undefined) return 0;
-
-    if (typeof obj !== 'object') {
-        return sizeOfPrimitive(obj);
-    }
-
+    if (typeof obj !== 'object') return sizeOfPrimitive(obj);
     if (seen.has(obj)) return 0;
     seen.add(obj);
 
@@ -64,6 +65,11 @@ function getDeepBytesSize(obj: any, seen: WeakSet<object> = new WeakSet(), shall
     if (ArrayBuffer.isView(obj)) return (obj as ArrayBufferView).byteLength;
     if (obj instanceof Date) return 8;
     if (obj instanceof RegExp) return Buffer.byteLength(obj.source, 'utf8');
+
+    if (Array.isArray(obj)) {
+        if (shallow) return obj.length * POINTER_SIZE_BYTES;
+        return obj.reduce((acc, item) => acc + getDeepBytesSize(item, seen, false), 0);
+    }
 
     if (obj instanceof Map) {
         if (shallow) return obj.size * POINTER_SIZE_BYTES;
@@ -84,38 +90,26 @@ function getDeepBytesSize(obj: any, seen: WeakSet<object> = new WeakSet(), shall
         return total;
     }
 
-    if (Array.isArray(obj)) {
-        if (shallow) return obj.length * POINTER_SIZE_BYTES;
-        let total = 0;
-        for (const item of obj) {
-            total += getDeepBytesSize(item, seen, false);
-        }
-        return total;
-    }
-
     let total = 0;
     const props = Object.getOwnPropertyNames(obj);
     const symbols = Object.getOwnPropertySymbols(obj);
 
-    const visit = (descriptor: PropertyDescriptor | undefined, currentValue: any) => {
+    const visit = (descriptor: PropertyDescriptor | undefined, value: any) => {
         if (!descriptor) return;
         try {
-            let value: any;
+            let resolved: any;
             if (descriptor.get && !descriptor.set) {
-                value = descriptor.get.call(obj);
+                resolved = descriptor.get.call(obj);
             } else if ('value' in descriptor) {
-                value = currentValue;
-            } else {
-                value = undefined;
+                resolved = value;
             }
-
             if (shallow) {
-                total += typeof value === 'object' && value !== null ? POINTER_SIZE_BYTES : sizeOfPrimitive(value);
+                total += typeof resolved === 'object' && resolved !== null ? POINTER_SIZE_BYTES : sizeOfPrimitive(resolved);
             } else {
-                total += getDeepBytesSize(value, seen, false);
+                total += getDeepBytesSize(resolved, seen, false);
             }
         } catch {
-            /* ignore accessor errors */
+            // ignore accessor errors
         }
     };
 
@@ -149,10 +143,18 @@ function globToRegExp(pattern: string): RegExp {
     return new RegExp('^' + escaped.replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
 }
 
-export class AbstractStorage {
+interface AbstractStorageStatic<T extends AbstractStorage> {
+    new (id?: string | null, store?: any, isSingleton?: boolean | null): T;
+    _uuid: string;
+    _store: any;
+    _is_singleton: boolean;
+    _meta: Record<string, any>;
+}
+
+export abstract class AbstractStorage {
     static _uuid: string = uuidv4();
     static _store: any = null;
-    static _is_singleton: boolean = true;
+    static _is_singleton = true;
     static _meta: Record<string, any> = {};
 
     uuid: string;
@@ -165,13 +167,12 @@ export class AbstractStorage {
         this.isSingleton = isSingleton ?? false;
     }
 
-    getSingleton(): AbstractStorage {
-        return new AbstractStorage(AbstractStorage._uuid, AbstractStorage._store, AbstractStorage._is_singleton);
+    getSingleton<T extends AbstractStorage>(this: T): T {
+        const ctor = this.constructor as AbstractStorageStatic<T>;
+        return new ctor(ctor._uuid, ctor._store, ctor._is_singleton);
     }
 
-    bytesUsed(deep?: boolean, humanReadable?: boolean): number | string {        
-        throw new Error("Subclasses must implement memoryUsage method");  
-    }
+    abstract bytesUsed(deep?: boolean, humanReadable?: boolean): number | string;
 }
 
 export class DictStorage extends AbstractStorage {
@@ -179,12 +180,12 @@ export class DictStorage extends AbstractStorage {
     static override _store: StoreRecord = {};
 
     constructor(id: string | null = null, store: StoreRecord | null = null, isSingleton: boolean | null = null) {
-        super(id, store, isSingleton);
+        super(id, store ?? {}, isSingleton);
         this.store = store ?? {};
     }
 
     override bytesUsed(deep: boolean = true, humanReadable: boolean = true): number | string {
-        const size = deep ? getDeepBytesSize(this) : getShallowBytesSize(this);
+        const size = deep ? getDeepBytesSize(this.store) : getShallowBytesSize(this.store);
         return humanReadable ? humanizeBytes(size) : size;
     }
 
@@ -205,11 +206,14 @@ export abstract class AbstractStorageController {
     }
 
     isSingleton(): boolean {
-        return Boolean(this.model.isSingleton);
+        return Boolean(this.model?.isSingleton);
     }
 
     bytesUsed(deep: boolean = true, humanReadable: boolean = true): number | string {
-        return this.model.bytesUsed(deep, humanReadable);
+        if (typeof this.model.bytesUsed === 'function') {
+            return this.model.bytesUsed(deep, humanReadable);
+        }
+        return humanReadable ? humanizeBytes(0) : 0;
     }
 
     exists(_key: string): boolean {
@@ -249,7 +253,7 @@ export abstract class AbstractStorageController {
     loads(jsonString: string = '{}'): void {
         const data = JSON.parse(jsonString) as StoreRecord;
         for (const [key, value] of Object.entries(data)) {
-            this.set(key, value as StoreValue);
+            this.set(key, value);
         }
     }
 
@@ -285,7 +289,7 @@ export class DictStorageController extends AbstractStorageController {
 
     constructor(model: DictStorage) {
         super(model);
-        this.store = model.store ?? {};
+        this.store = (model.store ?? {}) as StoreRecord;
         model.store = this.store;
     }
 
@@ -311,112 +315,10 @@ export class DictStorageController extends AbstractStorageController {
     }
 }
 
-export class EventDispatcherController extends DictStorageController {
-    static ROOT_KEY = 'Event';
-
-    private findEvent(uuid: string): string[] {
-        const matches = this.keys(`*:${uuid}`);
-        return matches.length ? matches : [];
-    }
-
-    events(): Array<[string, StoreValue | null]> {
-        return this.keys('*').map(key => [key, this.get(key)]);
-    }
-
-    getEvent(uuid: string): Array<StoreValue | null> {
-        return this.findEvent(uuid).map(key => this.get(key));
-    }
-
-    deleteEvent(uuid: string): void {
-        for (const key of this.findEvent(uuid)) {
-            this.delete(key);
-        }
-    }
-
-    setEvent(eventName: string, callback: Function, id?: string): string {
-        const eventId = id ?? uuidv4();
-        this.set(`${EventDispatcherController.ROOT_KEY}:${eventName}:${eventId}`, callback);
-        return eventId;
-    }
-
-    dispatchEvent(eventName: string, ...args: any[]): void {
-        for (const key of this.keys(`${EventDispatcherController.ROOT_KEY}:${eventName}:*`)) {
-            const entry = this.get(key);
-            if (typeof entry === 'function') {
-                entry(...args);
-            }
-        }
-    }
-}
-
-export class MessageQueueController extends DictStorageController {
-    static ROOT_KEY = '_MessageQueue';
-    private counters: Map<string, number> = new Map();
-
-    private getQueueKey(queueName: string, index: number): string {
-        return `${MessageQueueController.ROOT_KEY}:${queueName}:${index}`;
-    }
-
-    private getQueueCounter(queueName: string): number {
-        const current = this.counters.get(queueName) ?? 0;
-        this.counters.set(queueName, current);
-        return current;
-    }
-
-    private incrementQueueCounter(queueName: string): void {
-        this.counters.set(queueName, this.getQueueCounter(queueName) + 1);
-    }
-
-    private listQueueKeys(queueName: string): string[] {
-        const pattern = `${MessageQueueController.ROOT_KEY}:${queueName}:*`;
-        const parseIndex = (key: string): number => {
-            const parts = key.split(':');
-            return Number(parts[parts.length - 1]) || 0;
-        };
-        return this.keys(pattern).sort((a, b) => parseIndex(a) - parseIndex(b));
-    }
-
-    push(message: StoreValue, queueName: string = 'default'): string {
-        const counter = this.getQueueCounter(queueName);
-        const key = this.getQueueKey(queueName, counter);
-        this.set(key, message);
-        this.incrementQueueCounter(queueName);
-        return key;
-    }
-
-    pop(queueName: string = 'default'): StoreValue | null {
-        const keys = this.listQueueKeys(queueName);
-        if (!keys.length) return null;
-        const earliestKey = keys[0];
-        const message = this.get(earliestKey);
-        if (message !== null) {
-            this.delete(earliestKey);
-        }
-        return message;
-    }
-
-    peek(queueName: string = 'default'): StoreValue | null {
-        const keys = this.listQueueKeys(queueName);
-        if (!keys.length) return null;
-        return this.get(keys[0]);
-    }
-
-    size(queueName: string = 'default'): number {
-        return this.listQueueKeys(queueName).length;
-    }
-
-    clear(queueName: string = 'default'): void {
-        for (const key of this.listQueueKeys(queueName)) {
-            this.delete(key);
-        }
-        this.counters.delete(queueName);
-    }
-}
-
 export class MemoryLimitedDictStorageController extends DictStorageController {
     private maxBytes: number;
     private policy: 'lru' | 'fifo';
-    private onEvict?: (key: string, value: StoreValue | null) => void;
+    private onEvict: EvictHandler;
     private pinned: Set<string>;
     private sizes: Map<string, number>;
     private order: Map<string, null>;
@@ -426,8 +328,8 @@ export class MemoryLimitedDictStorageController extends DictStorageController {
         model: DictStorage,
         maxMemoryMb: number = 1024,
         policy: 'lru' | 'fifo' = 'lru',
-        onEvict?: (key: string, value: StoreValue | null) => void,
-        pinned: Set<string> = new Set(),
+        onEvict: EvictHandler = () => undefined,
+        pinned: Iterable<string> = []
     ) {
         super(model);
         this.maxBytes = Math.max(0, maxMemoryMb) * 1024 * 1024;
@@ -455,8 +357,10 @@ export class MemoryLimitedDictStorageController extends DictStorageController {
             this.order.delete(key);
         }
         const tracked = this.sizes.get(key) ?? 0;
+        if (tracked) {
+            this.currentBytes = Math.max(0, this.currentBytes - tracked);
+        }
         this.sizes.delete(key);
-        this.currentBytes = Math.max(0, this.currentBytes - tracked);
     }
 
     private pickVictim(): string | null {
@@ -473,17 +377,16 @@ export class MemoryLimitedDictStorageController extends DictStorageController {
         while (this.currentBytes > this.maxBytes && this.order.size > 0) {
             const victim = this.pickVictim();
             if (!victim) break;
-            const value = super.get(victim);
+            const value = DictStorageController.prototype.get.call(this, victim);
             this.reduce(victim);
-            super.delete(victim);
-            if (this.onEvict) {
-                this.onEvict(victim, value);
-            }
+            DictStorageController.prototype.delete.call(this, victim);
+            this.onEvict(victim, value);
         }
     }
 
     override set(key: string, value: StoreValue): void {
-        if (this.exists(key)) {
+        const existed = this.exists(key);
+        if (existed) {
             this.reduce(key);
         }
         super.set(key, value);
@@ -492,8 +395,16 @@ export class MemoryLimitedDictStorageController extends DictStorageController {
         this.sizes.set(key, size);
         this.currentBytes += size;
 
-        this.order.delete(key);
+        if (this.policy === 'lru') {
+        if (this.order.has(key)) {
+            this.order.delete(key);
+        }
         this.order.set(key, null);
+        } else {
+            if (this.order.has(key)) this.order.delete(key);
+            this.order.set(key, null);
+        }
+
         this.maybeEvict();
     }
 
@@ -514,12 +425,221 @@ export class MemoryLimitedDictStorageController extends DictStorageController {
     }
 
     override clean(): void {
-        for (const key of Array.from(this.order.keys())) {
-            super.delete(key);
-        }
+        super.clean();
         this.sizes.clear();
         this.order.clear();
         this.currentBytes = 0;
+    }
+}
+
+export class EventDispatcherController extends DictStorageController {
+    static ROOT_KEY = '_Event';
+
+    private eventKey(eventName: string, eventId: string): string {
+        return `${EventDispatcherController.ROOT_KEY}:${eventName}:${eventId}`;
+    }
+
+    private eventPattern(eventName: string = '*', eventId: string = '*'): string {
+        return this.eventKey(eventName, eventId);
+    }
+
+    private findEventKeys(eventId: string): string[] {
+        return this.keys(this.eventPattern('*', eventId));
+    }
+
+    events(): Array<[string, EventCallback | null]> {
+        return this.keys(this.eventPattern()).map(key => [key, this.get(key) as EventCallback | null]);
+    }
+
+    getEvent(eventId: string): Array<EventCallback | null> {
+        return this.findEventKeys(eventId).map(key => this.get(key) as EventCallback | null);
+    }
+
+    deleteEvent(eventId: string): number {
+        const keys = this.findEventKeys(eventId);
+        for (const key of keys) {
+            this.delete(key);
+        }
+        return keys.length;
+    }
+
+    setEvent(eventName: string, callback: EventCallback, id?: string): string {
+        const eventId = id ?? uuidv4();
+        this.set(this.eventKey(eventName, eventId), callback);
+        return eventId;
+    }
+
+    dispatchEvent(eventName: string, ...args: any[]): void {
+        for (const key of this.keys(this.eventPattern(eventName, '*'))) {
+            const entry = this.get(key);
+            if (typeof entry === 'function') {
+                try {
+                    (entry as EventCallback)(...args);
+                } catch {
+                    // swallow callback errors
+                }
+            }
+        }
+    }
+}
+
+export class MessageQueueController extends MemoryLimitedDictStorageController {
+    static ROOT_KEY = '_MessageQueue';
+    static ROOT_KEY_EVENT = 'MQE';
+
+    private counters: Map<string, number>;
+    private dispatcher: EventDispatcherController;
+
+    constructor(
+        model: DictStorage,
+        maxMemoryMb: number = 1024,
+        policy: 'lru' | 'fifo' = 'lru',
+        onEvict: EvictHandler = () => undefined,
+        pinned: Iterable<string> = [],
+        dispatcher?: EventDispatcherController
+    ) {
+        super(model, maxMemoryMb, policy, onEvict, pinned);
+        this.counters = new Map();
+        this.dispatcher = dispatcher ?? new EventDispatcherController(model);
+    }
+
+    private queueKey(queue: string, index: number): string {
+        return `${MessageQueueController.ROOT_KEY}:${queue}:${index}`;
+    }
+
+    private static extractIndex(key: string): number {
+        const part = key.split(':').pop();
+        const idx = part ? Number(part) : NaN;
+        return Number.isFinite(idx) ? idx : NaN;
+    }
+
+    private ensureCounter(queue: string): void {
+        if (this.counters.has(queue)) return;
+        const keys = this.keys(`${MessageQueueController.ROOT_KEY}:${queue}:*`);
+        let maxIdx = -1;
+        for (const key of keys) {
+            const idx = MessageQueueController.extractIndex(key);
+            if (!Number.isNaN(idx)) {
+                maxIdx = Math.max(maxIdx, idx);
+            }
+        }
+        this.counters.set(queue, maxIdx < 0 ? 0 : maxIdx + 1);
+    }
+
+    private nextIndex(queue: string): number {
+        this.ensureCounter(queue);
+        const idx = this.counters.get(queue) ?? 0;
+        this.counters.set(queue, idx + 1);
+        return idx;
+    }
+
+    private eventName(queueName: string, kind: string): string {
+        return `${MessageQueueController.ROOT_KEY_EVENT}:${queueName}:${kind}`;
+    }
+
+    addListener(queueName: string, callback: EventCallback, event_name: string = 'pushed', listenerId?: string): string {
+        return this.dispatcher.setEvent(this.eventName(queueName, event_name), callback, listenerId);
+    }
+
+    private tryDispatchEvent(queueName: string, kind: 'pushed' | 'popped' | 'empty' | 'cleared', 
+                            key: string | null, message: StoreValue | null): void {
+        try {
+            const opMap: Record<'pushed' | 'popped' | 'empty' | 'cleared', string> = { 
+                pushed: 'push', popped: 'pop', empty: 'empty', cleared: 'clear'
+            };
+            this.dispatcher.dispatchEvent(
+                this.eventName(queueName, kind),
+                { queue: queueName, key, message, op: opMap[kind] }
+            );
+        } catch {
+            // ignore listener failures
+        }
+    }
+
+    removeListener(listenerId: string): number {
+        return this.dispatcher.deleteEvent(listenerId);
+    }
+
+    listListeners(queueName?: string, event?: string): Array<[string, EventCallback]> {
+        const events = this.dispatcher.events();
+        if (!queueName && !event) {
+            return events.filter(([, cb]) => typeof cb === 'function') as Array<[string, EventCallback]>;
+        }
+        const out: Array<[string, EventCallback]> = [];
+        for (const [key, cb] of events) {
+            if (typeof cb !== 'function') continue;
+            const parts = key.split(':');
+            if (parts.length !== 5) continue;
+            const [, root, qn, kind] = parts;
+            if (root !== MessageQueueController.ROOT_KEY_EVENT) continue;
+            if (queueName && qn !== queueName) continue;
+            if (event && kind !== event) continue;
+            out.push([key, cb]);
+        }
+        return out;
+    }
+
+    push(message: StoreValue, queueName: string = 'default'): string {
+        const key = this.queueKey(queueName, this.nextIndex(queueName));
+        this.set(key, message);
+        this.tryDispatchEvent(queueName, 'pushed', key, message);
+        return key;
+    }
+
+    private earliestKey(queueName: string): string | null {
+        const keys = this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`);
+        const candidates = keys
+            .map(key => ({ key, idx: MessageQueueController.extractIndex(key) }))
+            .filter(item => !Number.isNaN(item.idx));
+        if (!candidates.length) return null;
+        candidates.sort((a, b) => a.idx - b.idx);
+        return candidates[0].key;
+    }
+
+    pop(queueName: string = 'default'): StoreValue | null {
+        const [, message] = this.popItem(queueName);
+        return message;
+    }
+
+    peek(queueName: string = 'default'): StoreValue | null {
+        const [, message] = this.popItem(queueName, true);
+        return message;
+    }
+
+    popItem(queueName: string = 'default', peek: boolean = false): [string | null, StoreValue | null] {
+        const key = this.earliestKey(queueName);
+        if (!key) return [null, null];
+        const message = this.get(key);
+        if (peek) return [key, message];
+        this.delete(key);
+        this.tryDispatchEvent(queueName, 'popped', key, message);
+        if (this.queueSize(queueName) === 0) {
+            this.tryDispatchEvent(queueName, 'empty', null, null);
+        }
+        return [key, message];
+    }
+
+    queueSize(queueName: string = 'default'): number {
+        return this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`).length;
+    }
+
+    clear(queueName: string = 'default'): void {
+        for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`)) {
+            this.delete(key);
+        }
+        this.counters.delete(queueName);
+        this.tryDispatchEvent(queueName, 'cleared', null, null);
+    }
+
+    listQueues(): string[] {
+        const queues = new Set<string>();
+        for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:*`)) {
+            const parts = key.split(':');
+            if (parts.length !== 3) continue;
+            const [root, queue] = parts;
+            queues.add(`${root}:${queue}`);
+        }
+        return Array.from(queues).sort();
     }
 }
 
@@ -529,18 +649,16 @@ export class LocalVersionController {
     static FORWARD = 'forward';
     static REVERT = 'revert';
 
-    public limitMemoryMB: number;
+    readonly limitMemoryMB: number;
     readonly client: AbstractStorageController;
-    private evictionPolicy: 'fifo' | 'lru';
-    private _currentVersion: string | null = null;
+    private _currentVersion: string | null;
 
     constructor(
         client: AbstractStorageController | null = null,
         limitMemoryMB: number = 128,
-        evictionPolicy: 'fifo' | 'lru' = 'fifo',
+        evictionPolicy: 'fifo' | 'lru' = 'fifo'
     ) {
-        this.limitMemoryMB = limitMemoryMB;
-        this.evictionPolicy = evictionPolicy;
+        this.limitMemoryMB = Number(limitMemoryMB);
         if (client) {
             this.client = client;
         } else {
@@ -548,119 +666,101 @@ export class LocalVersionController {
             this.client = new MemoryLimitedDictStorageController(
                 model,
                 this.limitMemoryMB,
-                this.evictionPolicy,
-                this.onEvict.bind(this),
-                new Set([LocalVersionController.TABLENAME]),
+                evictionPolicy,
+                this._onEvict.bind(this),
+                [LocalVersionController.TABLENAME]
             );
         }
-
-        const table = this.client.get(LocalVersionController.TABLENAME) ?? {};
-        if (!Array.isArray((table ?? {})[LocalVersionController.KEY])) {
+        const table = this.client.get(LocalVersionController.TABLENAME) as StoreRecord | null;
+        if (!table || !(LocalVersionController.KEY in table)) {
             this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [] });
         }
+        this._currentVersion = null;
     }
 
-    private onEvict(key: string, _value: StoreValue | null): void {
+    private _onEvict(key: string, _value: StoreValue | null): void {
         const prefix = `${LocalVersionController.TABLENAME}:`;
         if (!key.startsWith(prefix)) return;
-
         const opId = key.slice(prefix.length);
-        const versions = this.getVersions();
-        if (versions.includes(opId)) {
-            const updated = versions.filter(v => v !== opId);
-            this.setVersions(updated);
+        const ops = this.getVersions();
+        const idx = ops.indexOf(opId);
+        if (idx >= 0) {
+            ops.splice(idx, 1);
+            this._setVersions(ops);
         }
-
         if (this._currentVersion === opId) {
             throw new Error('auto removed current_version');
         }
     }
 
-    getCurrentVersion(): string | null {
-        return this._currentVersion;
-    }
-
     getVersions(): string[] {
-        try {
-            const table = this.client.get(LocalVersionController.TABLENAME) ?? {};
-            const ops = table?.[LocalVersionController.KEY];
-            return Array.isArray(ops) ? [...ops] : [];
-        } catch {
-            return [];
-        }
+        const table = this.client.get(LocalVersionController.TABLENAME) as StoreRecord | null;
+        const ops = table?.[LocalVersionController.KEY];
+        return Array.isArray(ops) ? [...ops] : [];
     }
 
-    private setVersions(ops: string[]): void {
+    private _setVersions(ops: string[]): void {
         this.client.set(LocalVersionController.TABLENAME, { [LocalVersionController.KEY]: [...ops] });
     }
 
-    findVersion(
-        versionUuid: string | null
-    ): [versions: string[], currentVersionIdx: number, targetVersionIdx: number | null, op: StoreValue | null] {
+    findVersion(versionUuid: string | null): [string[], number, number | null, StoreRecord | null] {
         const versions = this.getVersions();
-        const currentIdx = this._currentVersion && versions.includes(this._currentVersion)
-            ? versions.indexOf(this._currentVersion)
-            : -1;
-        const targetIdx = versionUuid && versions.includes(versionUuid)
-            ? versions.indexOf(versionUuid)
-            : null;
-        const op = targetIdx !== null ? this.client.get(`${LocalVersionController.TABLENAME}:${versions[targetIdx]}`) : null;
+        const currentIdx = this._currentVersion ? versions.indexOf(this._currentVersion) : -1;
+        const targetIdx = versionUuid && versions.includes(versionUuid) ? versions.indexOf(versionUuid) : null;
+        let op: StoreRecord | null = null;
+        if (targetIdx !== null) {
+            const opId = versions[targetIdx];
+            op = this.client.get(`${LocalVersionController.TABLENAME}:${opId}`) as StoreRecord | null;
+        }
         return [versions, currentIdx, targetIdx, op];
     }
 
     estimateMemoryMB(): number {
-        const raw = this.client.bytesUsed(true, false);
-        if (typeof raw === 'number') {
-            return raw / (1024 * 1024);
-        }
-        return 0;
+        const bytes = Number(this.client.bytesUsed(true, false));
+        return bytes / (1024 * 1024);
     }
 
-    addOperation(operation: Operation, revert: Operation | null = null): string | null {
-        const opUuid = uuidv4();
-        this.client.set(`${LocalVersionController.TABLENAME}:${opUuid}`, {
-            [LocalVersionController.FORWARD]: operation,
-            [LocalVersionController.REVERT]: revert,
-        });
+    addOperation(operation: Operation, revert: Operation | null = null, verbose=false): string | null {
+        const opuuid = uuidv4();
+        this.client.set(
+            `${LocalVersionController.TABLENAME}:${opuuid}`,
+            { [LocalVersionController.FORWARD]: operation, [LocalVersionController.REVERT]: revert }
+        );
 
         let ops = this.getVersions();
         if (this._currentVersion && ops.includes(this._currentVersion)) {
             const idx = ops.indexOf(this._currentVersion);
             ops = ops.slice(0, idx + 1);
         }
-        ops.push(opUuid);
-        this.setVersions(ops);
-        this._currentVersion = opUuid;
+        ops.push(opuuid);
+        this._setVersions(ops);
+        this._currentVersion = opuuid;
 
-        const usage = this.estimateMemoryMB();
-        if (usage > this.limitMemoryMB) {
-            const message = `[LocalVersionController] Warning: memory usage ${usage.toFixed(1)} MB exceeds limit of ${this.limitMemoryMB} MB`;
-            console.log(message);
-            return message;
+        if (this.estimateMemoryMB() > this.limitMemoryMB) {
+            const warning = `[LocalVersionController] Warning: memory usage ${this.estimateMemoryMB().toFixed(1)} MB exceeds limit of ${this.limitMemoryMB} MB`;
+            verbose??console.warn(warning);
+            return warning;
         }
         return null;
     }
 
-    popOperation(n: number = 1): Array<[string, StoreValue | null]> {
+    popOperation(n: number = 1): Array<[string, StoreRecord | null]> {
         if (n <= 0) return [];
-
         const ops = this.getVersions();
         if (!ops.length) return [];
-
-        const popped: Array<[string, StoreValue | null]> = [];
-        for (let i = 0; i < Math.min(n, ops.length); i += 1) {
+        const popped: Array<[string, StoreRecord | null]> = [];
+        const count = Math.min(n, ops.length);
+        for (let i = 0; i < count; i += 1) {
             const popIdx = ops.length && ops[0] !== this._currentVersion ? 0 : ops.length - 1;
             const opId = ops[popIdx];
             const opKey = `${LocalVersionController.TABLENAME}:${opId}`;
-            const opRecord = this.client.get(opKey);
+            const opRecord = this.client.get(opKey) as StoreRecord | null;
             popped.push([opId, opRecord]);
-
             ops.splice(popIdx, 1);
             this.client.delete(opKey);
         }
-
-        this.setVersions(ops);
-        if (!ops.includes(this._currentVersion ?? '')) {
+        this._setVersions(ops);
+        if (!this._currentVersion || !ops.includes(this._currentVersion)) {
             this._currentVersion = ops.length ? ops[ops.length - 1] : null;
         }
         return popped;
@@ -670,10 +770,8 @@ export class LocalVersionController {
         const [versions, currentIdx] = this.findVersion(this._currentVersion);
         const nextIdx = currentIdx + 1;
         if (nextIdx >= versions.length) return;
-
-        const op = this.client.get(`${LocalVersionController.TABLENAME}:${versions[nextIdx]}`);
+        const op = this.client.get(`${LocalVersionController.TABLENAME}:${versions[nextIdx]}`) as StoreRecord | null;
         if (!op || !(LocalVersionController.FORWARD in op)) return;
-
         forwardCallback(op[LocalVersionController.FORWARD] as Operation);
         this._currentVersion = versions[nextIdx];
     }
@@ -682,9 +780,8 @@ export class LocalVersionController {
         const [versions, currentIdx, , op] = this.findVersion(this._currentVersion);
         if (currentIdx <= 0) return;
         if (!op || !(LocalVersionController.REVERT in op)) return;
-
         revertCallback(op[LocalVersionController.REVERT] as Operation | null);
-        this._currentVersion = versions[currentIdx - 1];
+        this._currentVersion = currentIdx > 0 ? versions[currentIdx - 1] : null;
     }
 
     toVersion(versionUuid: string, versionCallback: (operation: Operation) => void): void {
@@ -692,7 +789,6 @@ export class LocalVersionController {
         if (targetIdx === null) {
             throw new Error(`no such version of ${versionUuid}`);
         }
-
         while (currentIdx !== targetIdx) {
             if (currentIdx < targetIdx) {
                 this.forwardOneOperation(versionCallback);
@@ -707,15 +803,20 @@ export class LocalVersionController {
             }
         }
     }
+
+    getCurrentVersion(): string | null {
+        return this._currentVersion;
+    }
 }
 
 export class SingletonKeyValueStorage {
-    versionControl: boolean;
-    encryptor?: SimpleRSAChunkEncryptor;
+    readonly versionControl: boolean;
+    readonly encryptor?: SimpleRSAChunkEncryptor;
+
     conn: AbstractStorageController;
-    versionController: LocalVersionController;
+    messageQueue: MessageQueueController;
+    private versionController: LocalVersionController;
     private eventDispatcher: EventDispatcherController;
-    private messageQueue: MessageQueueController;
 
     constructor(versionControl: boolean = false, encryptor?: SimpleRSAChunkEncryptor) {
         this.versionControl = versionControl;
@@ -725,8 +826,8 @@ export class SingletonKeyValueStorage {
 
     switchBackend(controller: AbstractStorageController): this {
         this.eventDispatcher = new EventDispatcherController(new DictStorage());
-        this.messageQueue = new MessageQueueController(new DictStorage());
         this.versionController = new LocalVersionController();
+        this.messageQueue = new MessageQueueController(new DictStorage());
         this.conn = controller;
         return this;
     }
@@ -735,11 +836,33 @@ export class SingletonKeyValueStorage {
         console.log(`[SingletonKeyValueStorage]: ${message instanceof Error ? message.message : message}`);
     }
 
-    private editLocal(
-        funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads',
-        key?: string,
-        value?: any
-    ): any {
+    deleteSlave(slave: { uuid?: string } | null): number {
+        const id = slave?.uuid ?? null;
+        return id ? this.deleteEvent(id) : 0;
+    }
+
+    addSlave(slave: Record<string, any>, eventNames: string[] = ['set', 'delete']): boolean {
+        if (!slave) return false;
+        if (!slave.uuid) {
+            try {
+                slave.uuid = uuidv4();
+            } catch (error) {
+                this.log(`can not set uuid to ${slave}. Skip this slave.`);
+                return false;
+            }
+        }
+        for (const name of eventNames) {            
+            const fn = (...args: any[])=>slave[name](...args);
+            if (typeof fn === 'function') {
+                this.setEvent(name, fn, slave.uuid);
+            } else {
+                this.log(`no func of "${name}" in ${slave}. Skip it.`);
+            }
+        }
+        return true;
+    }
+
+    private editLocal(funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads', key?: string, value?: StoreValue): any {
         if (!['set', 'delete', 'clean', 'load', 'loads'].includes(funcName)) {
             throw new Error(`no func of "${funcName}". return.`);
         }
@@ -751,11 +874,7 @@ export class SingletonKeyValueStorage {
         return fn.apply(this.conn, args);
     }
 
-    private edit(
-        funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads',
-        key?: string,
-        value?: StoreValue
-    ): any {
+    private edit(funcName: 'set' | 'delete' | 'clean' | 'load' | 'loads', key?: string, value?: StoreValue): any {
         const argsForEvent = [key, value].filter(arg => arg !== undefined);
         let payload = value;
         if (this.encryptor && funcName === 'set' && value !== undefined) {
@@ -770,7 +889,6 @@ export class SingletonKeyValueStorage {
         if (this.versionControl) {
             const [func, key] = operation;
             let revert: Operation | null = null;
-
             if (func === 'set' && typeof key === 'string') {
                 if (this.exists(key)) {
                     revert = ['set', key, this.get(key)];
@@ -782,14 +900,12 @@ export class SingletonKeyValueStorage {
             } else if (func === 'clean' || func === 'load' || func === 'loads') {
                 revert = ['loads', this.dumps()];
             }
-
             if (revert) {
                 this.versionController.addOperation(operation, revert);
             }
         }
-
         try {
-            this.edit(operation[0] as any, operation[1] as string | undefined, operation[2] as StoreValue);
+            this.edit(operation[0] as any, operation[1] as string | undefined, operation[2]);
             return true;
         } catch (error) {
             this.log(error);
@@ -807,16 +923,16 @@ export class SingletonKeyValueStorage {
     }
 
     revertOneOperation(): void {
-        this.versionController.revertOneOperation(revert => {
-            if (!revert) return;
-            const [func, key, value] = revert;
+        this.versionController.revertOneOperation(op => {
+            if (!op) return;
+            const [func, key, value] = op;
             this.editLocal(func as any, key as string | undefined, value);
         });
     }
 
     forwardOneOperation(): void {
-        this.versionController.forwardOneOperation(forward => {
-            const [func, key, value] = forward;
+        this.versionController.forwardOneOperation(op => {
+            const [func, key, value] = op;
             this.editLocal(func as any, key as string | undefined, value);
         });
     }
@@ -825,8 +941,8 @@ export class SingletonKeyValueStorage {
         return this.versionController.getCurrentVersion();
     }
 
-    localToVersion(opUuid: string): void {
-        this.versionController.toVersion(opUuid, op => {
+    localToVersion(opuuid: string): void {
+        this.versionController.toVersion(opuuid, op => {
             const [func, key, value] = op;
             this.editLocal(func as any, key as string | undefined, value);
         });
@@ -848,71 +964,53 @@ export class SingletonKeyValueStorage {
         return this.tryEdit(['load', jsonPath]);
     }
 
-    loads(jsonStr: string): boolean {
-        return this.tryEdit(['loads', jsonStr]);
+    loads(jsonString: string): boolean {
+        return this.tryEdit(['loads', jsonString]);
     }
 
-    exists(key: string): boolean {
-        const result = this.tryLoad(() => this.conn.exists(key));
-        return Boolean(result);
+    exists(key: string): boolean | null {
+        return this.tryLoad(() => this.conn.exists(key));
     }
 
-    keys(pattern: string = '*'): string[] {
-        return this.tryLoad(() => this.conn.keys(pattern)) ?? [];
+    keys(pattern: string = '*'): string[] | null {
+        return this.tryLoad(() => this.conn.keys(pattern));
     }
 
     get(key: string): StoreValue | null {
         const value = this.tryLoad(() => this.conn.get(key));
-        if (!value) return null;
-
-        if (this.encryptor && typeof value === 'object' && 'rjson' in value) {
-            try {
-                const decrypted = this.encryptor.decryptString((value as any).rjson);
-                return JSON.parse(decrypted);
-            } catch (error) {
-                this.log(error);
-                return null;
-            }
+        if (value && this.encryptor && typeof value === 'object' && 'rjson' in value) {
+            return this.tryLoad(() => JSON.parse(this.encryptor.decryptString((value as any).rjson)));
         }
-
         return value;
     }
 
-    dumps(): string {
+    dumps(): string | null {
         return this.tryLoad(() => {
-            const snapshot: StoreRecord = {};
+            const output: StoreRecord = {};
             for (const key of this.conn.keys('*')) {
-                snapshot[key] = this.get(key);
+                output[key] = this.get(key);
             }
-            return JSON.stringify(snapshot);
-        }) ?? '{}';
+            return JSON.stringify(output);
+        });
     }
 
-    dump(jsonPath: string): void {
-        this.tryLoad(() => this.conn.dump(jsonPath));
+    dump(jsonPath: string): void | null {
+        return this.tryLoad(() => this.conn.dump(jsonPath));
     }
 
-    dumpRSA(path: string, publicPkcs8KeyPath: string): void {
-        this.tryLoad(() => this.conn.dumpRSA(path, publicPkcs8KeyPath));
-    }
-
-    loadRSA(path: string, privatePkcs8KeyPath: string): void {
-        this.tryLoad(() => this.conn.loadRSA(path, privatePkcs8KeyPath));
-    }
-
-    events(): Array<[string, StoreValue | null]> {
+    events(): Array<[string, EventCallback | null]> {
         return this.eventDispatcher.events();
     }
 
-    getEvent(uuid: string): Array<StoreValue | null> {
+    getEvent(uuid: string): Array<EventCallback | null> {
         return this.eventDispatcher.getEvent(uuid);
     }
 
-    deleteEvent(uuid: string): void {
-        this.eventDispatcher.deleteEvent(uuid);
+    deleteEvent(uuid: string): number {
+        return this.eventDispatcher.deleteEvent(uuid);
     }
 
-    setEvent(eventName: string, callback: Function, id?: string): string {
+    setEvent(eventName: string, callback: EventCallback, id?: string): string {
         return this.eventDispatcher.setEvent(eventName, callback, id);
     }
 
@@ -922,31 +1020,5 @@ export class SingletonKeyValueStorage {
 
     cleanEvents(): void {
         this.eventDispatcher.clean();
-    }
-
-    addSlave(slave: any, eventNames: string[] = ['set', 'delete']): void {
-        if (!slave) return;
-        if (!slave.uuid) {
-            try {
-                slave.uuid = uuidv4();
-            } catch (error) {
-                this.log(`can not set uuid to ${slave}. Skip this slave.`);
-                return;
-            }
-        }
-
-        for (const event of eventNames) {
-            if (typeof slave[event] === 'function') {
-                this.setEvent(event, slave[event].bind(slave), slave.uuid);
-            } else {
-                this.log(`no func of "${event}" in ${slave}. Skip it.`);
-            }
-        }
-    }
-
-    deleteSlave(slave: any): void {
-        if (slave?.uuid) {
-            this.deleteEvent(slave.uuid);
-        }
     }
 }

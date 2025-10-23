@@ -3,9 +3,8 @@ import os
 import json
 import unittest
 
-
 try:
-    from .Storage import SingletonKeyValueStorage, PythonDictStorage
+    from .Storage import SingletonKeyValueStorage, PythonDictStorage, MessageQueueController
     from .utils import SimpleRSAChunkEncryptor, PEMFileReader
     from .RedisStorage import SingletonRedisStorage
     from .AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
@@ -15,7 +14,7 @@ try:
     from .FileSystemStorage import SingletonFileSystemStorage
     from .CouchStorage import SingletonCouchDBStorage
 except Exception as e:
-    from Storage import SingletonKeyValueStorage, PythonDictStorage
+    from Storage import SingletonKeyValueStorage, PythonDictStorage, MessageQueueController
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
     from RedisStorage import SingletonRedisStorage
     from AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
@@ -40,7 +39,7 @@ class Tests(unittest.TestCase):
 
     def test_all(self,num=1):
         self.test_python(num)
-        self.test_sqlite_pymix(num)
+        # self.test_sqlite_pymix(num)
         # self.test_file(num)
         # self.test_sqlite(num)
         # self.test_couch(num)
@@ -56,7 +55,75 @@ class Tests(unittest.TestCase):
     def test_python(self,num=1):
         print('###### test_python ######')
         self.store.switch_backend(PythonDictStorage.build())
+        self.test_msg()
         for i in range(num):self.test_all_cases()
+    
+    def test_msg(self):
+        print('start : self.test_msg()')
+    # def test_fifo_and_size(self):
+        self.store.message_queue.push({'n': 1})
+        self.store.message_queue.push({'n': 2})
+        self.store.message_queue.push({'n': 3})
+
+        self.assertEqual(self.store.message_queue.queue_size(), 3, "Size should reflect number of enqueued items.")
+        self.assertEqual(self.store.message_queue.pop(), {'n': 1}, "Queue must be FIFO: first pop returns first pushed.")
+        self.assertEqual(self.store.message_queue.pop(), {'n': 2}, "Second pop should return second item.")
+        self.assertEqual(self.store.message_queue.pop(), {'n': 3}, "Third pop should return third item.")
+        self.assertIsNone(self.store.message_queue.pop(), "Popping an empty queue should return None.")
+        self.assertEqual(self.store.message_queue.queue_size(), 0, "Size should be zero after popping all items.")
+
+        # Peek does not remove
+        self.store.message_queue.push({'a': 1})
+        self.assertEqual(self.store.message_queue.peek(), {'a': 1}, "Peek should return earliest message without removing it.")
+        self.assertEqual(self.store.message_queue.queue_size(), 1, "Peek should not change the queue size.")
+        self.assertEqual(self.store.message_queue.pop(), {'a': 1}, "Pop should still return the same earliest message after peek.")
+
+        # Clear resets
+        self.store.message_queue.push({'x': 1})
+        self.store.message_queue.push({'y': 2})
+        self.store.message_queue.clear()
+        self.assertEqual(self.store.message_queue.queue_size(), 0, "Clear should remove all items from the queue.")
+        self.assertIsNone(self.store.message_queue.pop(), "After clear, popping should return None.")
+
+        # Capture normal event flow on default queue
+        events = []
+        def _capture(**evt): events.append(evt)
+        self.store.message_queue.add_listener('default', _capture, event_name='pushed')
+        self.store.message_queue.add_listener('default', _capture, event_name='popped')
+        self.store.message_queue.add_listener('default', _capture, event_name='empty')
+        self.store.message_queue.add_listener('default', _capture, event_name='cleared')
+
+        self.store.message_queue.push({'m': 1})
+        self.store.message_queue.push({'m': 2})
+        a = self.store.message_queue.pop()
+        b = self.store.message_queue.pop()
+        self.store.message_queue.clear()
+
+        kinds = [e['op'] for e in events]
+        expected = ['push', 'push', 'pop', 'pop', 'empty', 'clear']
+        self.assertEqual(kinds, expected, "Should dispatch pushed, popped (twice), empty, then cleared in order.")        
+        self.assertEqual(a, {'m': 1}, "First popped message should equal the first pushed.")
+        self.assertEqual(b, {'m': 2}, "Second popped message should equal the second pushed.")
+
+        # Listener failure should not break queue ops (use isolated queue)
+        queue = f"t_listener_fail_{self._testMethodName}"
+        def bad(**evt): raise RuntimeError("boom")
+        self.store.message_queue.add_listener(queue, bad, event_name='pushed')
+
+        # Should not raise even though the listener raises
+        self.store.message_queue.push({'ok': True}, queue_name=queue)
+        self.assertEqual(self.store.message_queue.queue_size(queue), 1,"ops should succeed even if a listener fails.")
+        self.assertEqual(self.store.message_queue.pop(queue), {'ok': True})
+
+
+    # def test_multiple_queues_are_isolated(self):
+        self.store.message_queue.push({'a': 1}, queue_name='q1')
+        self.store.message_queue.push({'b': 2}, queue_name='q2')
+
+        self.assertEqual(self.store.message_queue.queue_size('q1'), 1, "q1 should have one item.")
+        self.assertEqual(self.store.message_queue.queue_size('q2'), 1, "q2 should have one item.")
+        self.assertEqual(self.store.message_queue.pop('q1'), {'a': 1}, "Popping q1 should return its own item.")
+        self.assertEqual(self.store.message_queue.queue_size('q2'), 1, "Popping q1 should not affect q2.")
 
     def test_redis(self,num=1):
         print('###### test_redis ######')
