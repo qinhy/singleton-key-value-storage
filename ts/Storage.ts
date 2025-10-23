@@ -720,10 +720,6 @@ export class SingletonKeyValueStorage {
     constructor(versionControl: boolean = false, encryptor?: SimpleRSAChunkEncryptor) {
         this.versionControl = versionControl;
         this.encryptor = encryptor;
-        this.conn = DictStorage.buildTmp();
-        this.eventDispatcher = new EventDispatcherController(new DictStorage());
-        this.messageQueue = new MessageQueueController(new DictStorage());
-        this.versionController = new LocalVersionController();
         this.switchBackend(DictStorage.build());
     }
 
@@ -733,38 +729,6 @@ export class SingletonKeyValueStorage {
         this.versionController = new LocalVersionController();
         this.conn = controller;
         return this;
-    }
-
-    tempTsBackend(): void {
-        this.switchBackend(DictStorage.buildTmp());
-    }
-
-    tsBackend(): void {
-        this.switchBackend(DictStorage.build());
-    }
-
-    fileBackend(filePath: string = 'storage.json'): void {
-        const controller = DictStorage.buildTmp();
-        if (fs.existsSync(filePath)) {
-            try {
-                controller.load(filePath);
-            } catch (error) {
-                this.log(error);
-            }
-        }
-        this.switchBackend(controller);
-    }
-
-    s3Backend(): void {
-        throw new Error('S3 backend is not implemented in this TypeScript port.');
-    }
-
-    sqliteBackend(): void {
-        throw new Error('SQLite backend is not implemented in this TypeScript port.');
-    }
-
-    redisBackend(): void {
-        throw new Error('Redis backend is not implemented in this TypeScript port.');
     }
 
     private log(message: unknown): void {
@@ -984,25 +948,5 @@ export class SingletonKeyValueStorage {
         if (slave?.uuid) {
             this.deleteEvent(slave.uuid);
         }
-    }
-
-    pushMessage(message: StoreValue, queueName: string = 'default'): string {
-        return this.messageQueue.push(message, queueName);
-    }
-
-    popMessage(queueName: string = 'default'): StoreValue | null {
-        return this.messageQueue.pop(queueName);
-    }
-
-    peekMessage(queueName: string = 'default'): StoreValue | null {
-        return this.messageQueue.peek(queueName);
-    }
-
-    queueSize(queueName: string = 'default'): number {
-        return this.messageQueue.size(queueName);
-    }
-
-    clearQueue(queueName: string = 'default'): void {
-        this.messageQueue.clear(queueName);
     }
 }
