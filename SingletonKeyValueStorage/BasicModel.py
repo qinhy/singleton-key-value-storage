@@ -269,10 +269,7 @@ class BasicStore(SingletonKeyValueStorage):
     def add_new_class(self,obj_class_type:Type[MODEL_CLASS_GROUP.AbstractObj]):
         if not hasattr(self.MODEL_CLASS_GROUP,obj_class_type.__name__):
             setattr(self.MODEL_CLASS_GROUP,obj_class_type.__name__,obj_class_type)
-    
-    @overload
-    def add_new(self, cls: Type[T]) -> Callable[P, T]: ...
-    
+            
     def add_new(self, obj_class_type:Type[T],id:str=None):
         self.add_new_class(obj_class_type)
         def add_obj(*args: P.args, **kwargs: P.kwargs)->T:
