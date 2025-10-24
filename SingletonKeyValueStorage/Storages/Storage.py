@@ -1,6 +1,6 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 import uuid
 import fnmatch
 import json
@@ -72,41 +72,27 @@ class PythonDictStorage(AbstractStorage):
         self.store = {} if store is None else store
 
     def bytes_used(self, deep=True, human_readable=True):
-        """Return memory usage (deep or shallow)."""
         size = get_deep_bytes_size(self) if deep else sys.getsizeof(self)
         return humanize_bytes(size) if human_readable else size
     
     @staticmethod
-    def build_tmp():
-        return PythonDictStorageController(PythonDictStorage())
+    def build_tmp(): return PythonDictStorageController(PythonDictStorage())
 
     @staticmethod
-    def build():
-        return PythonDictStorageController(PythonDictStorage().get_singleton())
+    def build(): return PythonDictStorageController(PythonDictStorage().get_singleton())
     
 class AbstractStorageController:
     def __init__(self, model): self.model:AbstractStorage = model
-    
     def is_singleton(self)->bool: return self.model.is_singleton if 'is_singleton' in self.model else False
-
     def exists(self, key: str)->bool: print(f'[{self.__class__.__name__}]: not implement')
-
     def set(self, key: str, value: dict): print(f'[{self.__class__.__name__}]: not implement')
-
     def get(self, key: str)->dict: print(f'[{self.__class__.__name__}]: not implement')
-
     def delete(self, key: str): print(f'[{self.__class__.__name__}]: not implement')
-
     def keys(self, pattern: str='*')->list[str]: print(f'[{self.__class__.__name__}]: not implement')
-    
     def clean(self): [self.delete(k) for k in self.keys('*')]
-
     def dumps(self): return json.dumps({k:self.get(k) for k in self.keys('*')})
-    
     def loads(self, json_string=r'{}'): [ self.set(k,v) for k,v in json.loads(json_string).items()]
-
     def dump(self, path: str):return Path(path).write_text(self.dumps())
-
     def load(self, path: str):return self.loads(Path(path).read_text())
 
     def dump_RSA(self,path,public_pkcs8_key_path):
@@ -123,15 +109,10 @@ class PythonDictStorageController(AbstractStorageController):
     def __init__(self, model:PythonDictStorage):
         self.model:PythonDictStorage = model
         self.store = self.model.store
-
     def exists(self, key: str)->bool: return key in self.store
-
     def set(self, key: str, value: dict): self.store[key] = value
-
     def get(self, key: str)->dict: return self.store.get(key,None)
-
     def delete(self, key: str): return self.store.pop(key)
-
     def keys(self, pattern: str='*'): return fnmatch.filter(self.store.keys(), pattern)
 
 class PythonMemoryLimitedDictStorageController(PythonDictStorageController):
@@ -187,19 +168,15 @@ class PythonMemoryLimitedDictStorageController(PythonDictStorageController):
         self._sizes[key] = sz
         self._current_bytes += sz
 
-        # Order update
         self._order[key] = None
         if self.policy == 'lru':
-            # For LRU we always treat 'set' as most recent use
             self._order.move_to_end(key, last=True)
 
-        # Enforce limit
         self._maybe_evict()
 
     def get(self, key: str) -> dict:
         val = super().get(key)
         if val is not None and self.policy == 'lru' and key in self._order:
-            # Mark as most recently used
             self._order.move_to_end(key, last=True)
         return val
 
@@ -246,128 +223,141 @@ class MessageQueueController(PythonMemoryLimitedDictStorageController):
     ROOT_KEY = "_MessageQueue"
     ROOT_KEY_EVENT = "MQE"
 
-    def __init__(self,model: PythonDictStorage, 
-                    max_memory_mb: float = 1024.0, policy: str = 'lru',
-                    on_evict: Optional[Callable[[str, dict], None]] = lambda x:x,
-                    pinned: Optional[set[str]] = None,
-                    dispatcher: Optional[EventDispatcherController] = None):
-        super().__init__(model,max_memory_mb,policy,on_evict,pinned)
-        self.counters: Dict[str, int] = {}  # per-queue next index
+    def __init__(self,
+                 model: PythonDictStorage,
+                 max_memory_mb: float = 1024.0,
+                 policy: str = 'lru',
+                 on_evict: Optional[Callable[[str, dict], None]] = lambda key, val: None,
+                 pinned: Optional[set[str]] = None,
+                 dispatcher: Optional[EventDispatcherController] = None):
+        super().__init__(model, max_memory_mb, policy, on_evict, pinned)
         self.dispatcher = dispatcher or EventDispatcherController(model)
+        
+    def _qkey(self, queue: str, index: Optional[Union[int, str]] = None) -> str:
+        return ':'.join([i for i in [self.ROOT_KEY, queue, (None if index is None else str(index))] if i is not None])
 
-    def _qkey(self, queue: str, index: int) -> str:
-        return f"{self.ROOT_KEY}:{queue}:{index}"
-    
-    @staticmethod
-    def _extract_index(key: str) -> int:
-        return int(key.rsplit(":", 1)[1])
-    
-    def _ensure_counter_initialized(self, queue: str) -> None:
-        if queue in self.counters: return
-        keys = self.keys(f"{self.ROOT_KEY}:{queue}:*")
-        max_idx = -1
-        try:
-            max_idx = max([self._extract_index(k) for k in keys])
-        except Exception:
-            pass
-        self.counters[queue] = 0 if max_idx < 0 else (max_idx + 1)
-
-    def _next_index(self, queue: str) -> int:
-        self._ensure_counter_initialized(queue)
-        idx = self.counters[queue]
-        self.counters[queue] = idx + 1
-        return idx
-    
     def _event_name(self, queue_name: str, kind: str) -> str:
         return f"{self.ROOT_KEY_EVENT}:{queue_name}:{kind}"
 
-    def add_listener(self, queue_name: str, callback: Callable[..., None],
-                     event_name: str = "pushed", listener_id: Optional[str] = None) -> str:
-        # def on_any_event(queue: str, msg_key: str | None, message: dict | None, op: str, **_):
-        #     # op is one of: "push", "pop", "empty", "clear"
-        #     print(f"[{queue}] op={op} msg_key={msg_key} msg={message}")
-        return self.dispatcher.set_event(self._event_name(queue_name, event_name), callback, listener_id)
+    def _load_meta(self, queue_name: str) -> dict:
+        # meta: {'head': int, 'tail': int}
+        m = self.get(self._qkey(queue_name))
+        if not m:
+            m = {'head': 0, 'tail': 0}
+            self.set(self._qkey(queue_name), m)
+        # guard against bad states
+        if m['head'] < 0 or m['tail'] < m['head']:
+            m = {'head': 0, 'tail': 0}
+            self.set(self._qkey(queue_name), m)
+        return m
 
-    def _try_dispatch_event(self, queue_name: str, kind: str, key: Optional[str], message: Optional[dict]) -> None:
+    def _save_meta(self, queue_name: str, meta: dict) -> None:
+        self.set(self._qkey(queue_name), meta)
+
+    def _size_from_meta(self, meta: dict) -> int:
+        return max(0, meta['tail'] - meta['head'])
+
+    def _try_dispatch_event(self, queue_name: str, kind: str,
+                            key: Optional[str], message: Optional[dict]) -> None:
         try:
-            op = {"pushed": "push", "popped": "pop", "empty": "empty", "cleared": "clear"}[kind]
             self.dispatcher.dispatch_event(
-                self._event_name(queue_name, kind),
-                queue=queue_name, key=key, message=message, op=op)
+                self._event_name(queue_name, kind),message=message)
+            #     queue=queue_name, key=key, message=message, op=kind) # include helpful context
         except Exception:
             pass
+        
+    def add_listener(self, queue_name: str, callback: Callable[..., None],
+                     event_kind: Literal["pushed", "popped", "empty", "cleared"] = "pushed",
+                     listener_id: Optional[str] = None) -> str:
+        # def on_any_event(message: Any):
+        #     # op is one of: "push", "pop", "empty", "clear"
+        #     print(f"msg={message}")
+        return self.dispatcher.set_event(self._event_name(queue_name, event_kind), callback, listener_id)
 
     def remove_listener(self, listener_id: str) -> int:
         return self.dispatcher.delete_event(listener_id)
 
-    def list_listeners(self, queue_name: Optional[str]=None, event: Optional[str]=None):
-        evts = self.dispatcher.events()  # [(key, cb), ...]
+    def list_listeners(self, queue_name: Optional[str] = None, event: Optional[str] = None):
+        evts = self.dispatcher.events()  # -> [(key, cb), ...]
         if queue_name is None and event is None: return evts
 
         out: List[Tuple[str, Callable[..., None]]] = []
         for k, cb in evts:
-            # k looks like: "Event:<self._event_name(...)>:<id>" "Event:mq:q1:pushed:<id>"
-            kk = k.split(':')
-            if len(kk)!=5:continue
-            _,rk,qn,kind,_ = kk  # "mq:q1:pushed"
-            if rk!=self.ROOT_KEY_EVENT:continue
+            # expect "Event:MQE:<queue>:<kind>:<id>"
+            parts = k.split(':')
+            if len(parts) < 5: continue
+            _, rk, qn, kind, *_ = parts
+            if rk != self.ROOT_KEY_EVENT: continue
             if (queue_name is None or qn == queue_name) and (event is None or kind == event):
-                out.append((k, cb)) 
+                out.append((k, cb))
         return out
 
     def push(self, message: dict, queue_name: str = "default") -> str:
-        key = self._qkey(queue_name, self._next_index(queue_name))
+        meta = self._load_meta(queue_name)
+        idx = meta['tail']
+        key = self._qkey(queue_name, idx)
         self.set(key, message)
+        meta['tail'] = idx + 1
+        self._save_meta(queue_name, meta)
         self._try_dispatch_event(queue_name, "pushed", key, message)
         return key
 
-    def _earliest_key(self, queue_name: str) -> Optional[str]:
-        keys = self.keys(f"{self.ROOT_KEY}:{queue_name}:*")
-        if not keys: return None
-        # Filter to valid numeric-suffixed keys, then pick min by index
-        candidates: List[Tuple[int, str]] = []
-        for k in keys:
-            candidates.append((self._extract_index(k), k))
-        if not candidates: return None
-        candidates.sort(key=lambda t: t[0])
-        return candidates[0][1]
+    def _advance_head_past_holes(self, queue_name: str, meta: dict) -> dict:
+        # Skip missing/evicted entries at the head so pops don't get stuck
+        while meta['head'] < meta['tail']:
+            k = self._qkey(queue_name, meta['head'])
+            if self.get(k) is not None: break
+            meta['head'] += 1
+        return meta
+
+    def pop_item(self, queue_name: str = "default", peek: bool = False) -> Tuple[Optional[str], Optional[dict]]:
+        meta = self._load_meta(queue_name)
+        meta = self._advance_head_past_holes(queue_name, meta)
+
+        if meta['head'] >= meta['tail']: return None, None
+
+        key = self._qkey(queue_name, meta['head'])
+        msg = self.get(key)
+        if msg is None:
+            # Should be rare due to advance; treat as empty this turn
+            meta['head'] += 1
+            self._save_meta(queue_name, meta)
+            meta = self._advance_head_past_holes(queue_name, meta)
+            return (None, None) if meta['head'] >= meta['tail'] else self.pop_item(queue_name, peek)
+
+        if peek: return key, msg
+
+        self.delete(key)
+        meta['head'] += 1
+        self._save_meta(queue_name, meta)
+
+        self._try_dispatch_event(queue_name, "popped", key, msg)
+        if self._size_from_meta(meta) == 0:
+            self._try_dispatch_event(queue_name, "empty", None, None)
+        return key, msg
 
     def pop(self, queue_name: str = "default") -> Optional[dict]:
         return self.pop_item(queue_name)[1]
 
     def peek(self, queue_name: str = "default") -> Optional[dict]:
-        return self.pop_item(queue_name,True)[1]
-    
-    def pop_item(self, queue_name: str = "default", peek=False) -> Tuple[Optional[str], Optional[dict]]:
-        earliest_key = self._earliest_key(queue_name)
-        if earliest_key is None: return None,None
-        
-        msg = self.get(earliest_key)
-        if peek:return earliest_key, msg
-
-        self.delete(earliest_key)
-        self._try_dispatch_event(queue_name, "popped", earliest_key, msg)
-        if self.queue_size(queue_name) == 0:
-            self._try_dispatch_event(queue_name, "empty", None, None)
-        return earliest_key, msg
+        return self.pop_item(queue_name, True)[1]
 
     def queue_size(self, queue_name: str = "default") -> int:
-        # O(n) scan; fine for modest sizes. For large queues, consider meta counters.
-        return len(self.keys(f"{self.ROOT_KEY}:{queue_name}:*"))
+        return self._size_from_meta(self._load_meta(queue_name))
 
     def clear(self, queue_name: str = "default") -> None:
-        for key in list(self.keys(f"{self.ROOT_KEY}:{queue_name}:*")): self.delete(key)
-        self.counters.pop(queue_name, None)
+        for key in list(self.keys(f"{self.ROOT_KEY}:{queue_name}:*")):
+            self.delete(key)            
+        self.delete(self._qkey(queue_name))
         self._try_dispatch_event(queue_name, "cleared", None, None)
-        
+
     def list_queues(self) -> List[str]:
         queues: set[str] = set()
         for k in self.keys(f"{self.ROOT_KEY}:*"):
-            # k "{self.ROOT_KEY}:{queue}:{index}"
-            kk = k.split(':')
-            if len(kk)!=3:continue
-            r,q,_ = kk
-            queues.add(f'{r}:{q}')
+            parts = k.split(':')
+            # accept both meta ("ROOT:queue") and entries ("ROOT:queue:index")
+            if len(parts) >= 2 and parts[0] == self.ROOT_KEY:
+                queues.add(parts[1])
         return sorted(queues)
 
 class LocalVersionController:

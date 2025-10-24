@@ -484,163 +484,206 @@ export class EventDispatcherController extends DictStorageController {
 }
 
 export class MessageQueueController extends MemoryLimitedDictStorageController {
-    static ROOT_KEY = '_MessageQueue';
-    static ROOT_KEY_EVENT = 'MQE';
+  static ROOT_KEY = '_MessageQueue';
+  static ROOT_KEY_EVENT = 'MQE';
 
-    private counters: Map<string, number>;
-    private dispatcher: EventDispatcherController;
+  private dispatcher: EventDispatcherController;
 
-    constructor(
-        model: DictStorage,
-        maxMemoryMb: number = 1024,
-        policy: 'lru' | 'fifo' = 'lru',
-        onEvict: EvictHandler = () => undefined,
-        pinned: Iterable<string> = [],
-        dispatcher?: EventDispatcherController
-    ) {
-        super(model, maxMemoryMb, policy, onEvict, pinned);
-        this.counters = new Map();
-        this.dispatcher = dispatcher ?? new EventDispatcherController(model);
+  constructor(
+    model: DictStorage,
+    maxMemoryMb: number = 1024,
+    policy: 'lru' | 'fifo' = 'lru',
+    onEvict: EvictHandler = () => undefined,
+    pinned: Iterable<string> = [],
+    dispatcher?: EventDispatcherController
+  ) {
+    super(model, maxMemoryMb, policy, onEvict, pinned);
+    this.dispatcher = dispatcher ?? new EventDispatcherController(model);
+  }
+
+  // ===== helpers =====
+  private qkey(queue: string, index?: number | string | null): string {
+    const parts = [MessageQueueController.ROOT_KEY, queue];
+    if (index !== undefined && index !== null) parts.push(String(index));
+    return parts.join(':');
+  }
+
+  private eventName(queueName: string, kind: 'pushed' | 'popped' | 'empty' | 'cleared'): string {
+    return `${MessageQueueController.ROOT_KEY_EVENT}:${queueName}:${kind}`;
+  }
+
+  private loadMeta(queueName: string): { head: number; tail: number } {
+    // meta is stored at "_MessageQueue:<queue>"
+    const meta = this.get(this.qkey(queueName)) as { head: number; tail: number } | null;
+    let m: { head: number; tail: number };
+    if (!meta) {
+      m = { head: 0, tail: 0 };
+      this.set(this.qkey(queueName), m);
+    } else {
+      m = { head: Number(meta.head) || 0, tail: Number(meta.tail) || 0 };
+      // guard bad states
+      if (m.head < 0 || m.tail < m.head) {
+        m = { head: 0, tail: 0 };
+        this.set(this.qkey(queueName), m);
+      }
+    }
+    return m;
+  }
+
+  private saveMeta(queueName: string, meta: { head: number; tail: number }): void {
+    this.set(this.qkey(queueName), meta);
+  }
+
+  private sizeFromMeta(meta: { head: number; tail: number }): number {
+    return Math.max(0, meta.tail - meta.head);
+  }
+
+  private tryDispatchEvent(
+    queueName: string,
+    kind: 'pushed' | 'popped' | 'empty' | 'cleared',
+    _key: string | null, // kept for interface parity, but not used in payload
+    message: StoreValue | null
+  ): void {
+    try {
+      // Python version currently emits only "message"; keep parity here.
+      this.dispatcher.dispatchEvent(this.eventName(queueName, kind), { message });
+      // If you want richer payloads, uncomment and adjust listeners accordingly:
+      // this.dispatcher.dispatchEvent(this.eventName(queueName, kind), {
+      //   queue: queueName, key: _key, message, op: kind
+      // });
+    } catch {
+      // ignore listener failures
+    }
+  }
+
+  // Advance head to skip holes caused by eviction or manual deletes
+  private advanceHeadPastHoles(queueName: string, meta: { head: number; tail: number }): { head: number; tail: number } {
+    while (meta.head < meta.tail) {
+      const k = this.qkey(queueName, meta.head);
+      if (this.get(k) != null) break;
+      meta.head += 1;
+    }
+    return meta;
+  }
+
+  // ===== public API (Python parity) =====
+
+  addListener(
+    queueName: string,
+    callback: EventCallback,
+    eventKind: 'pushed' | 'popped' | 'empty' | 'cleared' = 'pushed',
+    listenerId?: string
+  ): string {
+    return this.dispatcher.setEvent(this.eventName(queueName, eventKind), callback, listenerId);
+  }
+
+  removeListener(listenerId: string): number {
+    return this.dispatcher.deleteEvent(listenerId);
+  }
+
+  listListeners(
+    queueName?: string,
+    event?: 'pushed' | 'popped' | 'empty' | 'cleared'
+  ): Array<[string, EventCallback]> {
+    const evts = this.dispatcher.events(); // -> Array<[eventKey, cb]>
+    if (!queueName && !event) {
+      return evts.filter(([, cb]) => typeof cb === 'function') as Array<[string, EventCallback]>;
     }
 
-    private queueKey(queue: string, index: number): string {
-        return `${MessageQueueController.ROOT_KEY}:${queue}:${index}`;
+    const out: Array<[string, EventCallback]> = [];
+    for (const [k, cb] of evts) {
+      if (typeof cb !== 'function') continue;
+      // expect "Event:MQE:<queue>:<kind>:<id>" OR "{MQE}:{queue}:{kind}" depending on your dispatcher
+      const parts = k.split(':');
+      // Try to locate "MQE" and read following parts safely
+      const mqeIdx = parts.indexOf(MessageQueueController.ROOT_KEY_EVENT);
+      if (mqeIdx < 0) continue;
+      const qn = parts[mqeIdx + 1];
+      const kind = parts[mqeIdx + 2] as 'pushed' | 'popped' | 'empty' | 'cleared' | undefined;
+      if (!qn || !kind) continue;
+      if (queueName && qn !== queueName) continue;
+      if (event && kind !== event) continue;
+      out.push([k, cb]);
+    }
+    return out;
+  }
+
+  push(message: StoreValue, queueName: string = 'default'): string {
+    const meta = this.loadMeta(queueName);
+    const idx = meta.tail;
+    const key = this.qkey(queueName, idx);
+    this.set(key, message);
+    meta.tail = idx + 1;
+    this.saveMeta(queueName, meta);
+    this.tryDispatchEvent(queueName, 'pushed', key, message);
+    return key;
+  }
+
+  popItem(queueName: string = 'default', peek: boolean = false): [string | null, StoreValue | null] {
+    let meta = this.loadMeta(queueName);
+    meta = this.advanceHeadPastHoles(queueName, meta);
+
+    if (meta.head >= meta.tail) return [null, null];
+
+    const key = this.qkey(queueName, meta.head);
+    const msg = this.get(key) as StoreValue | null;
+
+    if (msg == null) {
+      // Rare due to advance, treat as empty this turn and retry after moving head
+      meta.head += 1;
+      this.saveMeta(queueName, meta);
+      meta = this.advanceHeadPastHoles(queueName, meta);
+      return meta.head >= meta.tail ? [null, null] : this.popItem(queueName, peek);
     }
 
-    private static extractIndex(key: string): number {
-        const part = key.split(':').pop();
-        const idx = part ? Number(part) : NaN;
-        return Number.isFinite(idx) ? idx : NaN;
-    }
+    if (peek) return [key, msg];
 
-    private ensureCounter(queue: string): void {
-        if (this.counters.has(queue)) return;
-        const keys = this.keys(`${MessageQueueController.ROOT_KEY}:${queue}:*`);
-        let maxIdx = -1;
-        for (const key of keys) {
-            const idx = MessageQueueController.extractIndex(key);
-            if (!Number.isNaN(idx)) {
-                maxIdx = Math.max(maxIdx, idx);
-            }
-        }
-        this.counters.set(queue, maxIdx < 0 ? 0 : maxIdx + 1);
-    }
+    this.delete(key);
+    meta.head += 1;
+    this.saveMeta(queueName, meta);
 
-    private nextIndex(queue: string): number {
-        this.ensureCounter(queue);
-        const idx = this.counters.get(queue) ?? 0;
-        this.counters.set(queue, idx + 1);
-        return idx;
+    this.tryDispatchEvent(queueName, 'popped', key, msg);
+    if (this.sizeFromMeta(meta) === 0) {
+      this.tryDispatchEvent(queueName, 'empty', null, null);
     }
+    return [key, msg];
+  }
 
-    private eventName(queueName: string, kind: string): string {
-        return `${MessageQueueController.ROOT_KEY_EVENT}:${queueName}:${kind}`;
-    }
+  pop(queueName: string = 'default'): StoreValue | null {
+    const [, msg] = this.popItem(queueName, false);
+    return msg;
+  }
 
-    addListener(queueName: string, callback: EventCallback, event_name: string = 'pushed', listenerId?: string): string {
-        return this.dispatcher.setEvent(this.eventName(queueName, event_name), callback, listenerId);
-    }
+  peek(queueName: string = 'default'): StoreValue | null {
+    const [, msg] = this.popItem(queueName, true);
+    return msg;
+  }
 
-    private tryDispatchEvent(queueName: string, kind: 'pushed' | 'popped' | 'empty' | 'cleared', 
-                            key: string | null, message: StoreValue | null): void {
-        try {
-            const opMap: Record<'pushed' | 'popped' | 'empty' | 'cleared', string> = { 
-                pushed: 'push', popped: 'pop', empty: 'empty', cleared: 'clear'
-            };
-            this.dispatcher.dispatchEvent(
-                this.eventName(queueName, kind),
-                { queue: queueName, key, message, op: opMap[kind] }
-            );
-        } catch {
-            // ignore listener failures
-        }
-    }
+  queueSize(queueName: string = 'default'): number {
+    return this.sizeFromMeta(this.loadMeta(queueName));
+  }
 
-    removeListener(listenerId: string): number {
-        return this.dispatcher.deleteEvent(listenerId);
+  clear(queueName: string = 'default'): void {
+    // delete entries
+    for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`)) {
+      this.delete(key);
     }
+    // delete meta
+    this.delete(this.qkey(queueName));
+    this.tryDispatchEvent(queueName, 'cleared', null, null);
+  }
 
-    listListeners(queueName?: string, event?: string): Array<[string, EventCallback]> {
-        const events = this.dispatcher.events();
-        if (!queueName && !event) {
-            return events.filter(([, cb]) => typeof cb === 'function') as Array<[string, EventCallback]>;
-        }
-        const out: Array<[string, EventCallback]> = [];
-        for (const [key, cb] of events) {
-            if (typeof cb !== 'function') continue;
-            const parts = key.split(':');
-            if (parts.length !== 5) continue;
-            const [, root, qn, kind] = parts;
-            if (root !== MessageQueueController.ROOT_KEY_EVENT) continue;
-            if (queueName && qn !== queueName) continue;
-            if (event && kind !== event) continue;
-            out.push([key, cb]);
-        }
-        return out;
+  listQueues(): string[] {
+    const qs = new Set<string>();
+    for (const k of this.keys(`${MessageQueueController.ROOT_KEY}:*`)) {
+      const parts = k.split(':');
+      // accept meta ("ROOT:queue") and entries ("ROOT:queue:index")
+      if (parts.length >= 2 && parts[0] === MessageQueueController.ROOT_KEY) {
+        qs.add(parts[1]);
+      }
     }
-
-    push(message: StoreValue, queueName: string = 'default'): string {
-        const key = this.queueKey(queueName, this.nextIndex(queueName));
-        this.set(key, message);
-        this.tryDispatchEvent(queueName, 'pushed', key, message);
-        return key;
-    }
-
-    private earliestKey(queueName: string): string | null {
-        const keys = this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`);
-        const candidates = keys
-            .map(key => ({ key, idx: MessageQueueController.extractIndex(key) }))
-            .filter(item => !Number.isNaN(item.idx));
-        if (!candidates.length) return null;
-        candidates.sort((a, b) => a.idx - b.idx);
-        return candidates[0].key;
-    }
-
-    pop(queueName: string = 'default'): StoreValue | null {
-        const [, message] = this.popItem(queueName);
-        return message;
-    }
-
-    peek(queueName: string = 'default'): StoreValue | null {
-        const [, message] = this.popItem(queueName, true);
-        return message;
-    }
-
-    popItem(queueName: string = 'default', peek: boolean = false): [string | null, StoreValue | null] {
-        const key = this.earliestKey(queueName);
-        if (!key) return [null, null];
-        const message = this.get(key);
-        if (peek) return [key, message];
-        this.delete(key);
-        this.tryDispatchEvent(queueName, 'popped', key, message);
-        if (this.queueSize(queueName) === 0) {
-            this.tryDispatchEvent(queueName, 'empty', null, null);
-        }
-        return [key, message];
-    }
-
-    queueSize(queueName: string = 'default'): number {
-        return this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`).length;
-    }
-
-    clear(queueName: string = 'default'): void {
-        for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`)) {
-            this.delete(key);
-        }
-        this.counters.delete(queueName);
-        this.tryDispatchEvent(queueName, 'cleared', null, null);
-    }
-
-    listQueues(): string[] {
-        const queues = new Set<string>();
-        for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:*`)) {
-            const parts = key.split(':');
-            if (parts.length !== 3) continue;
-            const [root, queue] = parts;
-            queues.add(`${root}:${queue}`);
-        }
-        return Array.from(queues).sort();
-    }
+    return Array.from(qs).sort();
+  }
 }
 
 export class LocalVersionController {
