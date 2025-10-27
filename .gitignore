@@ -9,3 +9,5 @@ SingletonStorage/sqlite.db
 tmp/private_key.pem
 /target
 /ts
+/cpp
+*.pyc
