@@ -7,3 +7,4 @@ SingletonStorage/sqlite.db
 *.db
 /SingletonStorage/Storages/__pycache__
 tmp/private_key.pem
+*.pyc
