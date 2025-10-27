@@ -7,9 +7,9 @@ from uuid import uuid4
 from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict, Field
 try:
-    from .Storages import SingletonKeyValueStorage, PythonDictStorage
+    from .Storages import SingletonKeyValueStorage, DictStorage
 except Exception as e:
-    from Storages import SingletonKeyValueStorage, PythonDictStorage
+    from Storages import SingletonKeyValueStorage, DictStorage
 try:
     from typing import ParamSpec  # Py 3.10+
 except ImportError:               # Py <3.10 -> pip install typing_extensions
@@ -237,7 +237,7 @@ class BasicStore(SingletonKeyValueStorage):
     
     def __init__(self, version_controll=False) -> None:
         super().__init__(version_controll)
-        self.switch_backend(PythonDictStorage.build_tmp())
+        self.switch_backend(DictStorage.build_tmp())
 
     def _get_class(self, id: str, modelclass=MODEL_CLASS_GROUP):
         class_type = id.split(':')[0]
@@ -297,10 +297,10 @@ class Tests(unittest.TestCase):
         self.store = BasicStore()
 
     def test_all(self,num=1):
-        self.test_python(num)
+        self.test_dict(num)
 
-    def test_python(self,num=1):
-        self.store.switch_backend(PythonDictStorage.build_tmp())
+    def test_dict(self,num=1):
+        self.store.switch_backend(DictStorage.build_tmp())
         for i in range(num):self.test_all_cases()
         self.store.clean()
 

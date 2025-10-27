@@ -1,4 +1,4 @@
-
+// C++17 translation of https://github.com/qinhy/singleton-key-value-storage
 #pragma once
 #include <string>
 #include <unordered_map>
@@ -24,11 +24,10 @@
 #include <utils.hpp>
 
 using json = nlohmann::json;
-using String = std::string;
-namespace fs = std::filesystem;
+
 // ===================== Utilities =====================
 
-inline String uuid_v4() {
+inline std::string uuid_v4() {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
     std::uniform_int_distribution<uint64_t> dist;
     uint64_t a = dist(rng), b = dist(rng);
@@ -46,13 +45,13 @@ inline String uuid_v4() {
 }
 
 // ---- base64url (no padding) ----
-inline const String& b64_table() {
-    static const String tbl =
+inline const std::string& b64_table() {
+    static const std::string tbl =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     return tbl;
 }
-inline String base64_encode(const String& in) {
-    String out;
+inline std::string base64_encode(const std::string& in) {
+    std::string out;
     out.reserve(((in.size() + 2) / 3) * 4);
     int val = 0, valb = -6;
     for (uint8_t c : in) {
@@ -67,10 +66,10 @@ inline String base64_encode(const String& in) {
     while (out.size() % 4) out.push_back('=');
     return out;
 }
-inline String base64_decode(const String& in) {
+inline std::string base64_decode(const std::string& in) {
     std::vector<int> T(256, -1);
     for (int i = 0; i < 64; i++) T[b64_table()[i]] = i;
-    String out;
+    std::string out;
     out.reserve(in.size() * 3 / 4);
     int val = 0, valb = -8;
     for (uint8_t c : in) {
@@ -84,8 +83,8 @@ inline String base64_decode(const String& in) {
     }
     return out;
 }
-inline String b64url_encode(const String& s) {
-    String b64 = base64_encode(s);
+inline std::string b64url_encode(const std::string& s) {
+    std::string b64 = base64_encode(s);
     // url-safe
     for (char& c : b64) {
         if (c == '+') c = '-';
@@ -95,8 +94,8 @@ inline String b64url_encode(const String& s) {
     while (!b64.empty() && b64.back() == '=') b64.pop_back();
     return b64;
 }
-inline String b64url_decode(const String& s) {
-    String x = s;
+inline std::string b64url_decode(const std::string& s) {
+    std::string x = s;
     for (char& c : x) {
         if (c == '-') c = '+';
         else if (c == '_') c = '/';
@@ -104,7 +103,7 @@ inline String b64url_decode(const String& s) {
     while (x.size() % 4) x.push_back('=');
     return base64_decode(x);
 }
-inline bool is_b64url(const String& s) {
+inline bool is_b64url(const std::string& s) {
     try {
         return b64url_encode(b64url_decode(s)) == s;
     } catch (...) {
@@ -114,8 +113,8 @@ inline bool is_b64url(const String& s) {
 
 inline size_t deep_size_of_json(const json& j);
 
-inline size_t deep_size_of_string(const String& s) {
-    return sizeof(String) + s.size();
+inline size_t deep_size_of_string(const std::string& s) {
+    return sizeof(std::string) + s.size();
 }
 inline size_t deep_size_of_json(const json& j) {
     switch (j.type()) {
@@ -124,7 +123,7 @@ inline size_t deep_size_of_json(const json& j) {
         case json::value_t::number_integer: 
         case json::value_t::number_unsigned:
         case json::value_t::number_float: return sizeof(double);
-        case json::value_t::string:  return deep_size_of_string(j.get_ref<const String&>());
+        case json::value_t::string:  return deep_size_of_string(j.get_ref<const std::string&>());
         case json::value_t::array: {
             size_t sum = sizeof(json);
             for (const auto& v : j) sum += deep_size_of_json(v);
@@ -141,7 +140,7 @@ inline size_t deep_size_of_json(const json& j) {
         default: return sizeof(json);
     }
 }
-inline String humanize_bytes(size_t n) {
+inline std::string humanize_bytes(size_t n) {
     static const char* units[] = {"B","KB","MB","GB","TB","PB"};
     double size = static_cast<double>(n);
     int i = 0;
@@ -168,22 +167,22 @@ inline bool wildcard_match(const char* pat, const char* str) {
         return false;
     }
 }
-inline bool wildcard_match(const String& pattern, const String& s) {
+inline bool wildcard_match(const std::string& pattern, const std::string& s) {
     return wildcard_match(pattern.c_str(), s.c_str());
 }
 
 // ===================== Abstract Storage =====================
 
 struct AbstractStorage {
-    String uuid = uuid_v4();
+    std::string uuid = uuid_v4();
     bool is_singleton = false;
     virtual ~AbstractStorage() = default;
     virtual size_t bytes_used(bool deep=true) const = 0; // approx
 };
 
-// CppDictStorage: map<string, json>
-struct CppDictStorage : public AbstractStorage {
-    using Store = std::unordered_map<String, json>;
+// DictStorage: map<string, json>
+struct DictStorage : public AbstractStorage {
+    using Store = std::unordered_map<std::string, json>;
     std::shared_ptr<Store> store;
 
     // shared singleton backing
@@ -192,13 +191,13 @@ struct CppDictStorage : public AbstractStorage {
         return s;
     }
 
-    CppDictStorage(std::shared_ptr<Store> st = nullptr, bool singleton=false) {
+    DictStorage(std::shared_ptr<Store> st = nullptr, bool singleton=false) {
         store = st ? st : std::make_shared<Store>();
         is_singleton = singleton;
     }
 
-    CppDictStorage get_singleton() const {
-        CppDictStorage s(CppDictStorage::singleton_store(), true);
+    DictStorage get_singleton() const {
+        DictStorage s(DictStorage::singleton_store(), true);
         s.uuid = uuid; // mimic sharing class-level uuid semantic
         return s;
     }
@@ -220,19 +219,19 @@ struct AbstractStorageController {
     virtual ~AbstractStorageController() = default;
 
     virtual bool is_singleton() const = 0;
-    virtual bool exists(const String& key) const = 0;
-    virtual void set(const String& key, const json& value) = 0;
-    virtual std::optional<json> get(const String& key) const = 0;
-    virtual bool erase(const String& key) = 0;
+    virtual bool exists(const std::string& key) const = 0;
+    virtual void set(const std::string& key, const json& value) = 0;
+    virtual std::optional<json> get(const std::string& key) const = 0;
+    virtual bool erase(const std::string& key) = 0;
 
-    virtual std::vector<String> keys(const String& pattern="*") const = 0;
+    virtual std::vector<std::string> keys(const std::string& pattern="*") const = 0;
 
     virtual void clean() {
         auto ks = keys("*");
         for (auto& k : ks) erase(k);
     }
 
-    virtual String dumps() const {
+    virtual std::string dumps() const {
         json root = json::object();
         for (auto& k : keys("*")) {
             auto v = get(k);
@@ -240,34 +239,34 @@ struct AbstractStorageController {
         }
         return root.dump();
     }
-    virtual void loads(const String& s) {
+    virtual void loads(const std::string& s) {
         json root = json::parse(s);
         for (auto it = root.begin(); it != root.end(); ++it) set(it.key(), it.value());
     }
-    virtual void dump_file(const String& path) const {
+    virtual void dump_file(const std::string& path) const {
         std::ofstream ofs(path);
         ofs << dumps();
     }
-    virtual void load_file(const String& path) {
+    virtual void load_file(const std::string& path) {
         std::ifstream ifs(path);
-        Stringstream buf; buf << ifs.rdbuf();
+        std::stringstream buf; buf << ifs.rdbuf();
         loads(buf.str());
     }
 
     // ---- Optional RSA wrappers: plug your own encryptor if needed
     struct SimpleRSAChunkEncryptor {
         virtual ~SimpleRSAChunkEncryptor() = default;
-        virtual String encrypt_string(const String& s) = 0;
-        virtual String decrypt_string(const String& s) = 0;
+        virtual std::string encrypt_string(const std::string& s) = 0;
+        virtual std::string decrypt_string(const std::string& s) = 0;
     };
 
-    virtual void dump_RSA(const String& path, SimpleRSAChunkEncryptor& enc) const {
+    virtual void dump_RSA(const std::string& path, SimpleRSAChunkEncryptor& enc) const {
         std::ofstream ofs(path);
         ofs << enc.encrypt_string(dumps());
     }
-    virtual void load_RSA(const String& path, SimpleRSAChunkEncryptor& enc) {
+    virtual void load_RSA(const std::string& path, SimpleRSAChunkEncryptor& enc) {
         std::ifstream ifs(path);
-        Stringstream buf; buf << ifs.rdbuf();
+        std::stringstream buf; buf << ifs.rdbuf();
         loads(enc.decrypt_string(buf.str()));
     }
 
@@ -275,36 +274,36 @@ struct AbstractStorageController {
     virtual size_t bytes_used(bool deep=true) const = 0;
 };
 
-struct CppDictStorageController : public AbstractStorageController {
-    CppDictStorage model;
+struct DictStorageController : public AbstractStorageController {
+    DictStorage model;
 
-    explicit CppDictStorageController(const CppDictStorage& m) : model(m) {}
+    explicit DictStorageController(const DictStorage& m) : model(m) {}
 
     bool is_singleton() const override { return model.is_singleton; }
 
-    bool exists(const String& key) const override {
+    bool exists(const std::string& key) const override {
         return model.store->find(key) != model.store->end();
     }
 
-    void set(const String& key, const json& value) override {
+    void set(const std::string& key, const json& value) override {
         (*model.store)[key] = value;
     }
 
-    std::optional<json> get(const String& key) const override {
+    std::optional<json> get(const std::string& key) const override {
         auto it = model.store->find(key);
         if (it == model.store->end()) return std::nullopt;
         return it->second;
     }
 
-    bool erase(const String& key) override {
+    bool erase(const std::string& key) override {
         auto it = model.store->find(key);
         if (it == model.store->end()) return false;
         model.store->erase(it);
         return true;
     }
 
-    std::vector<String> keys(const String& pattern="*") const override {
-        std::vector<String> out;
+    std::vector<std::string> keys(const std::string& pattern="*") const override {
+        std::vector<std::string> out;
         out.reserve(model.store->size());
         for (auto& kv : *model.store) {
             if (wildcard_match(pattern, kv.first)) out.push_back(kv.first);
@@ -317,49 +316,49 @@ struct CppDictStorageController : public AbstractStorageController {
     }
 
     // Builders to mirror Python
-    static CppDictStorageController build_tmp() {
-        return CppDictStorageController(CppDictStorage{});
+    static DictStorageController build_tmp() {
+        return DictStorageController(DictStorage{});
     }
-    static CppDictStorageController build() {
-        CppDictStorage tmp;
-        return CppDictStorageController(tmp.get_singleton());
+    static DictStorageController build() {
+        DictStorage tmp;
+        return DictStorageController(tmp.get_singleton());
     }
 };
 
 // ---- Memory-limited dict with LRU/FIFO eviction ----
 
-struct PythonMemoryLimitedDictStorageController : public CppDictStorageController {
+struct PythonMemoryLimitedDictStorageController : public DictStorageController {
     enum class Policy { LRU, FIFO };
 
     size_t max_bytes;
     Policy policy;
-    std::function<void(const String&, const json&)> on_evict;
-    std::set<String> pinned;
+    std::function<void(const std::string&, const json&)> on_evict;
+    std::set<std::string> pinned;
 
-    std::unordered_map<String, size_t> sizes;
-    std::list<String> order; // front = oldest
-    std::unordered_map<String, std::list<String>::iterator> where;
+    std::unordered_map<std::string, size_t> sizes;
+    std::list<std::string> order; // front = oldest
+    std::unordered_map<std::string, std::list<std::string>::iterator> where;
     size_t current_bytes = 0;
 
     PythonMemoryLimitedDictStorageController(
-        const CppDictStorage& model,
+        const DictStorage& model,
         double max_memory_mb = 1024.0,
-        const String& pol = "lru",
-        std::function<void(const String&, const json&)> onEvict = [](auto, auto){},
-        std::set<String> pinnedKeys = {}
+        const std::string& pol = "lru",
+        std::function<void(const std::string&, const json&)> onEvict = [](auto, auto){},
+        std::set<std::string> pinnedKeys = {}
     )
-    : CppDictStorageController(model),
+    : DictStorageController(model),
       max_bytes(static_cast<size_t>(std::max(0.0, max_memory_mb) * 1024.0 * 1024.0)),
       policy( (pol == "fifo" || pol == "FIFO") ? Policy::FIFO : Policy::LRU ),
       on_evict(std::move(onEvict)),
       pinned(std::move(pinnedKeys))
     {}
 
-    size_t entry_size(const String& k, const json& v) const {
+    size_t entry_size(const std::string& k, const json& v) const {
         return deep_size_of_string(k) + deep_size_of_json(v);
     }
 
-    void reduce_key(const String& key) {
+    void reduce_key(const std::string& key) {
         auto itS = sizes.find(key);
         if (itS != sizes.end()) {
             if (current_bytes >= itS->second) current_bytes -= itS->second;
@@ -379,18 +378,18 @@ struct PythonMemoryLimitedDictStorageController : public CppDictStorageControlle
             auto it = order.begin();
             while (it != order.end() && pinned.count(*it)) ++it;
             if (it == order.end()) break;
-            const String victim = *it;
+            const std::string victim = *it;
 
-            auto val = CppDictStorageController::get(victim);
+            auto val = DictStorageController::get(victim);
             reduce_key(victim);
-            CppDictStorageController::erase(victim);
+            DictStorageController::erase(victim);
             if (val) on_evict(victim, *val);
         }
     }
 
-    void set(const String& key, const json& value) override {
+    void set(const std::string& key, const json& value) override {
         if (exists(key)) reduce_key(key);
-        CppDictStorageController::set(key, value);
+        DictStorageController::set(key, value);
 
         size_t sz = entry_size(key, value);
         sizes[key] = sz;
@@ -404,8 +403,8 @@ struct PythonMemoryLimitedDictStorageController : public CppDictStorageControlle
         maybe_evict();
     }
 
-    std::optional<json> get(const String& key) const override {
-        auto v = CppDictStorageController::get(key);
+    std::optional<json> get(const std::string& key) const override {
+        auto v = DictStorageController::get(key);
         if (v && policy == Policy::LRU) {
             auto self = const_cast<PythonMemoryLimitedDictStorageController*>(this);
             auto itW = self->where.find(key);
@@ -417,15 +416,15 @@ struct PythonMemoryLimitedDictStorageController : public CppDictStorageControlle
         return v;
     }
 
-    bool erase(const String& key) override {
+    bool erase(const std::string& key) override {
         if (!exists(key)) return false;
         reduce_key(key);
-        return CppDictStorageController::erase(key);
+        return DictStorageController::erase(key);
     }
 
     void clean() override {
         auto ks = keys("*");
-        for (auto& k : ks) CppDictStorageController::erase(k);
+        for (auto& k : ks) DictStorageController::erase(k);
         sizes.clear(); where.clear(); order.clear(); current_bytes = 0;
     }
 
@@ -441,54 +440,54 @@ struct EventDispatcherController {
     // We keep callbacks in-memory. (Python version stores callables in store.)
     using Callback = std::function<void(const json&)>;
 
-    std::unordered_map<String, Callback> callbacks; // key -> cb
-    mutable std::unordered_map<String, String> b64_cache{{"*","*"}};
+    std::unordered_map<std::string, Callback> callbacks; // key -> cb
+    mutable std::unordered_map<std::string, std::string> b64_cache{{"*","*"}};
 
-    String event_glob(const String& event_name="*", const String& event_id="*") const {
-        auto& cache = const_cast<std::unordered_map<String,String>&>(b64_cache);
+    std::string event_glob(const std::string& event_name="*", const std::string& event_id="*") const {
+        auto& cache = const_cast<std::unordered_map<std::string,std::string>&>(b64_cache);
         if (!cache.count(event_name)) cache[event_name] = b64url_encode(event_name);
-        return String(ROOT_KEY) + ":" + cache[event_name] + ":" + event_id;
+        return std::string(ROOT_KEY) + ":" + cache[event_name] + ":" + event_id;
     }
 
-    std::vector<std::pair<String, Callback>> events() const {
-        std::vector<std::pair<String, Callback>> out;
+    std::vector<std::pair<std::string, Callback>> events() const {
+        std::vector<std::pair<std::string, Callback>> out;
         out.reserve(callbacks.size());
         for (auto& kv : callbacks) out.emplace_back(kv.first, kv.second);
         return out;
     }
 
-    std::vector<Callback> get_event(const String& event_id) const {
+    std::vector<Callback> get_event(const std::string& event_id) const {
         // find keys matching "*:<event_id>"
         std::vector<Callback> out;
         for (auto& kv : callbacks) {
             auto& k = kv.first;
             auto pos1 = k.find(':');
-            auto pos2 = k.find(':', pos1 == String::npos ? 0 : pos1 + 1);
-            if (pos2 != String::npos) {
-                String eid = k.substr(pos2 + 1);
+            auto pos2 = k.find(':', pos1 == std::string::npos ? 0 : pos1 + 1);
+            if (pos2 != std::string::npos) {
+                std::string eid = k.substr(pos2 + 1);
                 if (eid == event_id) out.push_back(kv.second);
             }
         }
         return out;
     }
 
-    int delete_event(const String& id) {
+    int delete_event(const std::string& id) {
         return callbacks.erase(id);
     }
 
-    String set_event(const String& event_name, Callback cb, const std::optional<String>& event_id = std::nullopt) {
-        String eid = event_id.value_or(uuid_v4());
+    std::string set_event(const std::string& event_name, Callback cb, const std::optional<std::string>& event_id = std::nullopt) {
+        std::string eid = event_id.value_or(uuid_v4());
         auto& cache = b64_cache;
         if (!cache.count(event_name)) cache[event_name] = b64url_encode(event_name);
-        String key = String(ROOT_KEY) + ":" + cache[event_name] + ":" + eid;
+        std::string key = std::string(ROOT_KEY) + ":" + cache[event_name] + ":" + eid;
         callbacks[key] = std::move(cb);
         return eid;
     }
 
-    void dispatch_event(const String& event_name, const json& payload=json::object()) {
+    void dispatch_event(const std::string& event_name, const json& payload=json::object()) {
         auto& cache = b64_cache;
         if (!cache.count(event_name)) cache[event_name] = b64url_encode(event_name);
-        const String prefix = String(ROOT_KEY) + ":" + cache[event_name] + ":";
+        const std::string prefix = std::string(ROOT_KEY) + ":" + cache[event_name] + ":";
         // call all listeners with matching prefix
         // (Python uses store.keys(pattern); we do a simple prefix test)
         for (auto& kv : callbacks) {
@@ -506,41 +505,41 @@ struct MessageQueueController : public PythonMemoryLimitedDictStorageController 
     static constexpr const char* ROOT_KEY_EVENT = "MQE";
 
     EventDispatcherController dispatcher;
-    mutable std::unordered_map<String,String> b64_cache{{"*","*"}};
+    mutable std::unordered_map<std::string,std::string> b64_cache{{"*","*"}};
 
-    MessageQueueController(const CppDictStorage& model,
+    MessageQueueController(const DictStorage& model,
                            double max_memory_mb = 1024.0,
-                           const String& pol = "lru",
-                           std::function<void(const String&, const json&)> onEvict = [](auto, auto){},
-                           std::set<String> pinnedKeys = {},
+                           const std::string& pol = "lru",
+                           std::function<void(const std::string&, const json&)> onEvict = [](auto, auto){},
+                           std::set<std::string> pinnedKeys = {},
                            std::optional<EventDispatcherController> disp = std::nullopt)
     : PythonMemoryLimitedDictStorageController(model, max_memory_mb, pol, onEvict, std::move(pinnedKeys)),
       dispatcher(disp.value_or(EventDispatcherController{}))
     {}
 
-    String qname(const String& q) const {
-        auto& cache = const_cast<std::unordered_map<String,String>&>(b64_cache);
+    std::string qname(const std::string& q) const {
+        auto& cache = const_cast<std::unordered_map<std::string,std::string>&>(b64_cache);
         if (!cache.count(q)) {
-            String enc = b64url_encode(q);
+            std::string enc = b64url_encode(q);
             cache[q] = enc;
             cache[enc] = q;
         }
         return cache[q];
     }
-    String qkey(const String& q, std::optional<String> idx = std::nullopt) const {
-        String k = String(ROOT_KEY) + ":" + qname(q);
+    std::string qkey(const std::string& q, std::optional<std::string> idx = std::nullopt) const {
+        std::string k = std::string(ROOT_KEY) + ":" + qname(q);
         if (idx) k += ":" + *idx;
         return k;
     }
-    String event_name(const String& q, const String& kind) const {
-        return String(ROOT_KEY_EVENT) + ":" + qname(q) + ":" + kind;
+    std::string event_name(const std::string& q, const std::string& kind) const {
+        return std::string(ROOT_KEY_EVENT) + ":" + qname(q) + ":" + kind;
     }
 
-    json load_meta(const String& q) {
-        auto m = CppDictStorageController::get(qkey(q));
+    json load_meta(const std::string& q) {
+        auto m = DictStorageController::get(qkey(q));
         if (!m || !m->is_object()) {
             json nm = {{"head",0}, {"tail",0}};
-            CppDictStorageController::set(qkey(q), nm);
+            DictStorageController::set(qkey(q), nm);
             return nm;
         }
         json meta = *m;
@@ -548,17 +547,17 @@ struct MessageQueueController : public PythonMemoryLimitedDictStorageController 
             !meta["head"].is_number_integer() || !meta["tail"].is_number_integer() ||
             meta["head"].get<int64_t>() < 0 || meta["tail"].get<int64_t>() < meta["head"].get<int64_t>()) {
             meta = {{"head",0}, {"tail",0}};
-            CppDictStorageController::set(qkey(q), meta);
+            DictStorageController::set(qkey(q), meta);
         }
         return meta;
     }
-    void save_meta(const String& q, const json& meta) {
-        CppDictStorageController::set(qkey(q), meta);
+    void save_meta(const std::string& q, const json& meta) {
+        DictStorageController::set(qkey(q), meta);
     }
     int size_from_meta(const json& meta) const {
         return std::max<int64_t>(0, meta["tail"].get<int64_t>() - meta["head"].get<int64_t>());
     }
-    void try_dispatch(const String& q, const String& kind, const std::optional<String>& key, const std::optional<json>& msg) {
+    void try_dispatch(const std::string& q, const std::string& kind, const std::optional<std::string>& key, const std::optional<json>& msg) {
         try {
             json payload = json::object();
             if (msg) payload["message"] = *msg;
@@ -566,46 +565,46 @@ struct MessageQueueController : public PythonMemoryLimitedDictStorageController 
         } catch (...) {}
     }
 
-    String add_listener(const String& queue_name,
+    std::string add_listener(const std::string& queue_name,
                              EventDispatcherController::Callback cb,
-                             const String& event_kind = "pushed",
-                             const std::optional<String>& listener_id = std::nullopt) {
+                             const std::string& event_kind = "pushed",
+                             const std::optional<std::string>& listener_id = std::nullopt) {
         return dispatcher.set_event(event_name(queue_name, event_kind), std::move(cb), listener_id);
     }
-    int remove_listener(const String& listener_id) {
+    int remove_listener(const std::string& listener_id) {
         return dispatcher.delete_event(listener_id);
     }
 
-    String push(const json& message, const String& q="default") {
+    std::string push(const json& message, const std::string& q="default") {
         json meta = load_meta(q);
         int64_t idx = meta["tail"].get<int64_t>();
-        String key = qkey(q, std::to_string(idx));
-        CppDictStorageController::set(key, message);
+        std::string key = qkey(q, std::to_string(idx));
+        DictStorageController::set(key, message);
         meta["tail"] = idx + 1;
         save_meta(q, meta);
         try_dispatch(q, "pushed", key, message);
         return key;
     }
 
-    std::pair<std::optional<String>, std::optional<json>> pop_item(const String& q="default", bool peek=false) {
+    std::pair<std::optional<std::string>, std::optional<json>> pop_item(const std::string& q="default", bool peek=false) {
         json meta = load_meta(q);
         // advance head past holes
         while (meta["head"] < meta["tail"]) {
-            String k = qkey(q, std::to_string((int64_t)meta["head"]));
-            if (CppDictStorageController::get(k)) break;
+            std::string k = qkey(q, std::to_string((int64_t)meta["head"]));
+            if (DictStorageController::get(k)) break;
             meta["head"] = (int64_t)meta["head"] + 1;
         }
         if (meta["head"] >= meta["tail"]) return {std::nullopt, std::nullopt};
 
-        String key = qkey(q, std::to_string((int64_t)meta["head"]));
-        auto msg = CppDictStorageController::get(key);
+        std::string key = qkey(q, std::to_string((int64_t)meta["head"]));
+        auto msg = DictStorageController::get(key);
         if (!msg) {
             meta["head"] = (int64_t)meta["head"] + 1;
             save_meta(q, meta);
             // try again or return empty if at end
             while (meta["head"] < meta["tail"]) {
-                String k = qkey(q, std::to_string((int64_t)meta["head"]));
-                if (CppDictStorageController::get(k)) break;
+                std::string k = qkey(q, std::to_string((int64_t)meta["head"]));
+                if (DictStorageController::get(k)) break;
                 meta["head"] = (int64_t)meta["head"] + 1;
             }
             if (meta["head"] >= meta["tail"]) return {std::nullopt, std::nullopt};
@@ -614,7 +613,7 @@ struct MessageQueueController : public PythonMemoryLimitedDictStorageController 
 
         if (peek) return {key, msg};
 
-        CppDictStorageController::erase(key);
+        DictStorageController::erase(key);
         meta["head"] = (int64_t)meta["head"] + 1;
         save_meta(q, meta);
 
@@ -623,37 +622,37 @@ struct MessageQueueController : public PythonMemoryLimitedDictStorageController 
         return {key, msg};
     }
 
-    std::optional<json> pop(const String& q="default") { return pop_item(q).second; }
-    std::optional<json> peek(const String& q="default") { return pop_item(q, true).second; }
-    int queue_size(const String& q="default") { return size_from_meta(load_meta(q)); }
+    std::optional<json> pop(const std::string& q="default") { return pop_item(q).second; }
+    std::optional<json> peek(const std::string& q="default") { return pop_item(q, true).second; }
+    int queue_size(const std::string& q="default") { return size_from_meta(load_meta(q)); }
 
-    void clear(const String& q="default") {
-        auto ks = keys(String(ROOT_KEY) + ":" + qname(q) + ":*");
-        for (auto& k : ks) CppDictStorageController::erase(k);
-        CppDictStorageController::erase(qkey(q));
+    void clear(const std::string& q="default") {
+        auto ks = keys(std::string(ROOT_KEY) + ":" + qname(q) + ":*");
+        for (auto& k : ks) DictStorageController::erase(k);
+        DictStorageController::erase(qkey(q));
         try_dispatch(q, "cleared", std::nullopt, std::nullopt);
     }
 
-    std::vector<String> list_queues() const {
-        std::set<String> qs;
-        for (auto& k : keys(String(ROOT_KEY) + ":*")) {
-            auto parts = std::vector<String>{};
-            String tmp = k;
+    std::vector<std::string> list_queues() const {
+        std::set<std::string> qs;
+        for (auto& k : keys(std::string(ROOT_KEY) + ":*")) {
+            auto parts = std::vector<std::string>{};
+            std::string tmp = k;
             size_t pos = 0;
             while (true) {
                 auto p = tmp.find(':', pos);
-                if (p == String::npos) { parts.push_back(tmp.substr(pos)); break; }
+                if (p == std::string::npos) { parts.push_back(tmp.substr(pos)); break; }
                 parts.push_back(tmp.substr(pos, p - pos));
                 pos = p + 1;
             }
             if (parts.size() >= 2 && parts[0] == ROOT_KEY) {
-                const String& enc = parts[1];
+                const std::string& enc = parts[1];
                 auto it = b64_cache.find(enc);
                 if (it != b64_cache.end()) qs.insert(it->second);
                 else qs.insert(enc); // best effort
             }
         }
-        return std::vector<String>(qs.begin(), qs.end());
+        return std::vector<std::string>(qs.begin(), qs.end());
     }
 };
 
@@ -667,21 +666,21 @@ struct LocalVersionController {
 
     std::unique_ptr<PythonMemoryLimitedDictStorageController> client;
     double limit_memory_MB;
-    std::optional<String> current_version;
+    std::optional<std::string> current_version;
 
     explicit LocalVersionController(
         std::unique_ptr<PythonMemoryLimitedDictStorageController> client_ = nullptr,
         double limitMB = 128.0,
-        const String& eviction_policy = "fifo"
+        const std::string& eviction_policy = "fifo"
     )
     : limit_memory_MB(limitMB)
     {
         if (!client_) {
-            CppDictStorage model;
+            DictStorage model;
             client = std::make_unique<PythonMemoryLimitedDictStorageController>(
                 model, limitMB, eviction_policy,
-                [this](const String& key, const json& /*v*/) { this->on_evict(key); },
-                std::set<String>{TABLENAME}
+                [this](const std::string& key, const json& /*v*/) { this->on_evict(key); },
+                std::set<std::string>{TABLENAME}
             );
         } else {
             client = std::move(client_);
@@ -690,10 +689,10 @@ struct LocalVersionController {
         if (!table.contains(KEY)) client->set(TABLENAME, json{{KEY, json::array()}});
     }
 
-    void on_evict(const String& key) {
-        const String prefix = String(TABLENAME) + ":";
+    void on_evict(const std::string& key) {
+        const std::string prefix = std::string(TABLENAME) + ":";
         if (key.rfind(prefix, 0) != 0) return;
-        const String op_id = key.substr(prefix.size());
+        const std::string op_id = key.substr(prefix.size());
         auto ops = get_versions();
         auto it = std::find(ops.begin(), ops.end(), op_id);
         if (it != ops.end()) {
@@ -705,19 +704,19 @@ struct LocalVersionController {
         }
     }
 
-    std::vector<String> get_versions() const {
+    std::vector<std::string> get_versions() const {
         auto t = client->get(TABLENAME).value_or(json::object());
         if (!t.contains(KEY)) return {};
-        std::vector<String> out;
-        for (auto& v : t[KEY]) out.push_back(v.get<String>());
+        std::vector<std::string> out;
+        for (auto& v : t[KEY]) out.push_back(v.get<std::string>());
         return out;
     }
-    void set_versions(const std::vector<String>& ops) {
+    void set_versions(const std::vector<std::string>& ops) {
         client->set(TABLENAME, json{{KEY, ops}});
     }
 
-    std::tuple<std::vector<String>, int, std::optional<int>, std::optional<json>>
-    find_version(const std::optional<String>& version_uuid) const {
+    std::tuple<std::vector<std::string>, int, std::optional<int>, std::optional<json>>
+    find_version(const std::optional<std::string>& version_uuid) const {
         auto versions = get_versions();
         int current_idx = -1;
         if (current_version) {
@@ -730,7 +729,7 @@ struct LocalVersionController {
             auto it = std::find(versions.begin(), versions.end(), *version_uuid);
             if (it != versions.end()) {
                 target_idx = int(it - versions.begin());
-                auto opj = client->get(String(TABLENAME) + ":" + *version_uuid);
+                auto opj = client->get(std::string(TABLENAME) + ":" + *version_uuid);
                 if (opj) op = *opj;
             }
         }
@@ -742,9 +741,9 @@ struct LocalVersionController {
     }
 
     // operation format: ["set", key, value] etc.
-    std::optional<String> add_operation(const json& operation, const std::optional<json>& revert = std::nullopt, bool verbose=false) {
-        const String opuuid = uuid_v4();
-        client->set(String(TABLENAME) + ":" + opuuid, json{{FORWARD, operation}, {REVERT, revert ? *revert : json()}});
+    std::optional<std::string> add_operation(const json& operation, const std::optional<json>& revert = std::nullopt, bool verbose=false) {
+        const std::string opuuid = uuid_v4();
+        client->set(std::string(TABLENAME) + ":" + opuuid, json{{FORWARD, operation}, {REVERT, revert ? *revert : json()}});
         auto ops = get_versions();
         if (current_version) {
             auto it = std::find(ops.begin(), ops.end(), *current_version);
@@ -763,15 +762,15 @@ struct LocalVersionController {
         return std::nullopt;
     }
 
-    std::vector<std::pair<String, json>> pop_operation(int n=1) {
+    std::vector<std::pair<std::string, json>> pop_operation(int n=1) {
         if (n <= 0) return {};
         auto ops = get_versions();
         if (ops.empty()) return {};
-        std::vector<std::pair<String, json>> popped;
+        std::vector<std::pair<std::string, json>> popped;
         for (int i=0; i<std::min<int>(n, (int)ops.size()); ++i) {
             int pop_idx = (!ops.empty() && (!current_version || ops[0] != *current_version)) ? 0 : (int)ops.size()-1;
-            String op_id = ops[pop_idx];
-            String op_key = String(TABLENAME) + ":" + op_id;
+            std::string op_id = ops[pop_idx];
+            std::string op_key = std::string(TABLENAME) + ":" + op_id;
             auto op_record = client->get(op_key).value_or(json::object());
             popped.emplace_back(op_id, op_record);
             ops.erase(ops.begin() + pop_idx);
@@ -779,7 +778,7 @@ struct LocalVersionController {
         }
         set_versions(ops);
         if (!current_version || std::find(ops.begin(), ops.end(), *current_version) == ops.end()) {
-            current_version = ops.empty() ? std::optional<String>{} : std::optional<String>{ops.back()};
+            current_version = ops.empty() ? std::optional<std::string>{} : std::optional<std::string>{ops.back()};
         }
         return popped;
     }
@@ -789,7 +788,7 @@ struct LocalVersionController {
         auto [versions, cur_idx, _t, _o] = find_version(current_version);
         int next_idx = cur_idx + 1;
         if (next_idx >= (int)versions.size()) return;
-        auto op = client->get(String(TABLENAME) + ":" + versions[next_idx]);
+        auto op = client->get(std::string(TABLENAME) + ":" + versions[next_idx]);
         if (!op || !op->contains(FORWARD)) return;
         cb((*op)[FORWARD]);
         current_version = versions[next_idx];
@@ -804,7 +803,7 @@ struct LocalVersionController {
     }
 
     template<class VersionCB>
-    void to_version(const String& version_uuid, VersionCB cb) {
+    void to_version(const std::string& version_uuid, VersionCB cb) {
         auto [versions, cur_idx, target_idx, _] = find_version(version_uuid);
         if (!target_idx) throw std::runtime_error("no such version: " + version_uuid);
         if (cur_idx < 0) cur_idx = -1;
@@ -823,8 +822,8 @@ struct SingletonKeyValueStorage {
     // Optional encryptor for {"rjson": "..."} wrapping
     struct Encryptor {
         virtual ~Encryptor() = default;
-        virtual String encrypt_string(const String&) = 0;
-        virtual String decrypt_string(const String&) = 0;
+        virtual std::string encrypt_string(const std::string&) = 0;
+        virtual std::string decrypt_string(const std::string&) = 0;
     };
     Encryptor* encryptor = nullptr;
 
@@ -836,34 +835,34 @@ struct SingletonKeyValueStorage {
 
     SingletonKeyValueStorage(bool version_control_=false, Encryptor* enc=nullptr)
     : version_control(version_control_), encryptor(enc),
-      conn(std::make_unique<CppDictStorageController>(CppDictStorageController::build())),
+      conn(std::make_unique<DictStorageController>(DictStorageController::build())),
       event_disp(),
       verc(),
-      mq(CppDictStorageController::build_tmp().model)
+      mq(DictStorageController::build_tmp().model)
     {}
 
     SingletonKeyValueStorage& switch_backend(std::unique_ptr<AbstractStorageController> controller) {
         event_disp = EventDispatcherController{};
         verc = LocalVersionController{};
-        mq = MessageQueueController(CppDictStorageController::build_tmp().model);
+        mq = MessageQueueController(DictStorageController::build_tmp().model);
         conn = std::move(controller);
         return *this;
     }
 
     // --- helpers
-    bool exists(const String& key) {
+    bool exists(const std::string& key) {
         try { return conn->exists(key); } catch (...) { return false; }
     }
-    std::vector<String> keys(const String& pattern="*") {
+    std::vector<std::string> keys(const std::string& pattern="*") {
         try { return conn->keys(pattern); } catch (...) { return {}; }
     }
 
-    std::optional<json> get(const String& key) {
+    std::optional<json> get(const std::string& key) {
         try {
             auto v = conn->get(key);
             if (!v) return std::nullopt;
             if (encryptor && v->is_object() && v->contains("rjson")) {
-                auto s = (*v)["rjson"].get<String>();
+                auto s = (*v)["rjson"].get<std::string>();
                 return json::parse(encryptor->decrypt_string(s));
             }
             return v;
@@ -872,7 +871,7 @@ struct SingletonKeyValueStorage {
         }
     }
 
-    String dumps() {
+    std::string dumps() {
         try {
             json root = json::object();
             for (auto& k : keys("*")) {
@@ -883,7 +882,7 @@ struct SingletonKeyValueStorage {
         } catch (...) { return "{}"; }
     }
 
-    bool set(const String& key, json value) {
+    bool set(const std::string& key, json value) {
         auto args = json::array({"set", key, value});
         if (version_control) {
             json revert;
@@ -906,7 +905,7 @@ struct SingletonKeyValueStorage {
         } catch (const std::exception& e) { (void)e; return false; }
     }
 
-    bool erase(const String& key) {
+    bool erase(const std::string& key) {
         auto args = json::array({"delete", key});
         if (version_control) {
             json revert = json::array({"set", key, get(key).value_or(json())});
@@ -932,7 +931,7 @@ struct SingletonKeyValueStorage {
         } catch (...) { return false; }
     }
 
-    bool load_file(const String& path) {
+    bool load_file(const std::string& path) {
         auto args = json::array({"load", path});
         if (version_control) {
             json revert = json::array({"loads", dumps()});
@@ -941,7 +940,7 @@ struct SingletonKeyValueStorage {
         try { conn->load_file(path); event_disp.dispatch_event("load"); return true; }
         catch (...) { return false; }
     }
-    bool loads(const String& s) {
+    bool loads(const std::string& s) {
         auto args = json::array({"loads", s});
         if (version_control) {
             json revert = json::array({"loads", dumps()});
@@ -956,46 +955,315 @@ struct SingletonKeyValueStorage {
         verc.revert_one_operation([this](const json& rev){
             // rev like ["set", key, value] or ["delete", key] or ["loads", json_string]
             if (!rev.is_array() || rev.empty()) return;
-            String f = rev[0].get<String>();
-            if (f == "set")      this->conn->set(rev[1].get<String>(), rev[2]);
-            else if (f == "delete") this->conn->erase(rev[1].get<String>());
+            std::string f = rev[0].get<std::string>();
+            if (f == "set")      this->conn->set(rev[1].get<std::string>(), rev[2]);
+            else if (f == "delete") this->conn->erase(rev[1].get<std::string>());
             else if (f == "clean")  this->conn->clean();
-            else if (f == "load")   this->conn->load_file(rev[1].get<String>());
-            else if (f == "loads")  this->conn->loads(rev[1].is_string()? rev[1].get<String>() : rev[1].dump());
+            else if (f == "load")   this->conn->load_file(rev[1].get<std::string>());
+            else if (f == "loads")  this->conn->loads(rev[1].is_string()? rev[1].get<std::string>() : rev[1].dump());
         });
     }
     void forward_one_operation() {
         verc.forward_one_operation([this](const json& fwd){
             if (!fwd.is_array() || fwd.empty()) return;
-            String f = fwd[0].get<String>();
-            if (f == "set")      this->conn->set(fwd[1].get<String>(), fwd[2]);
-            else if (f == "delete") this->conn->erase(fwd[1].get<String>());
+            std::string f = fwd[0].get<std::string>();
+            if (f == "set")      this->conn->set(fwd[1].get<std::string>(), fwd[2]);
+            else if (f == "delete") this->conn->erase(fwd[1].get<std::string>());
             else if (f == "clean")  this->conn->clean();
-            else if (f == "load")   this->conn->load_file(fwd[1].get<String>());
-            else if (f == "loads")  this->conn->loads(fwd[1].is_string()? fwd[1].get<String>() : fwd[1].dump());
+            else if (f == "load")   this->conn->load_file(fwd[1].get<std::string>());
+            else if (f == "loads")  this->conn->loads(fwd[1].is_string()? fwd[1].get<std::string>() : fwd[1].dump());
         });
     }
 
-    std::optional<String> current_version() const { return verc.current_version; }
-    void local_to_version(const String& opuuid) {
+    std::optional<std::string> current_version() const { return verc.current_version; }
+    void local_to_version(const std::string& opuuid) {
         verc.to_version(opuuid, [this](const json& op){
             if (!op.is_array() || op.empty()) return;
-            String f = op[0].get<String>();
-            if (f == "set")      this->conn->set(op[1].get<String>(), op[2]);
-            else if (f == "delete") this->conn->erase(op[1].get<String>());
+            std::string f = op[0].get<std::string>();
+            if (f == "set")      this->conn->set(op[1].get<std::string>(), op[2]);
+            else if (f == "delete") this->conn->erase(op[1].get<std::string>());
             else if (f == "clean")  this->conn->clean();
-            else if (f == "load")   this->conn->load_file(op[1].get<String>());
-            else if (f == "loads")  this->conn->loads(op[1].is_string()? op[1].get<String>() : op[1].dump());
+            else if (f == "load")   this->conn->load_file(op[1].get<std::string>());
+            else if (f == "loads")  this->conn->loads(op[1].is_string()? op[1].get<std::string>() : op[1].dump());
         });
     }
 
     // Events facade
-    std::vector<std::pair<String, EventDispatcherController::Callback>> events() { return event_disp.events(); }
-    std::vector<EventDispatcherController::Callback> get_event(const String& id) { return event_disp.get_event(id); }
-    int delete_event(const String& id) { return event_disp.delete_event(id); }
-    String set_event(const String& name, EventDispatcherController::Callback cb, const std::optional<String>& id=std::nullopt) {
+    std::vector<std::pair<std::string, EventDispatcherController::Callback>> events() { return event_disp.events(); }
+    std::vector<EventDispatcherController::Callback> get_event(const std::string& id) { return event_disp.get_event(id); }
+    int delete_event(const std::string& id) { return event_disp.delete_event(id); }
+    std::string set_event(const std::string& name, EventDispatcherController::Callback cb, const std::optional<std::string>& id=std::nullopt) {
         return event_disp.set_event(name, std::move(cb), id);
     }
-    void dispatch_event(const String& name, const json& payload=json::object()) { event_disp.dispatch_event(name, payload); }
+    void dispatch_event(const std::string& name, const json& payload=json::object()) { event_disp.dispatch_event(name, payload); }
     void clean_events() { /* not stored -> nothing to wipe aside from replacing controller */ event_disp = EventDispatcherController{}; }
 };
+
+// ===================== Python-Tests port =====================
+// Requires: nlohmann::json and singleton_kv_storage.hpp
+
+struct Tests {
+    std::unique_ptr<SingletonKeyValueStorage> store;
+
+    int failures = 0;
+    int assertions = 0;
+
+    Tests() {
+        store = std::make_unique<SingletonKeyValueStorage>(false /*version_control*/);
+    }
+
+    // ---------- tiny assert helpers ----------
+    void fail(const std::string& msg) {
+        ++failures;
+        std::cout << "[FAIL] " << msg << "\n";
+    }
+    void pass(const std::string& msg) {
+        (void)msg; // keep output clean; uncomment if you want per-assert logs
+        // std::cout << "[OK] " << msg << "\n";
+    }
+    void assert_true(bool cond, const std::string& msg) {
+        ++assertions; cond ? pass(msg) : fail(msg);
+    }
+    void assert_false(bool cond, const std::string& msg) {
+        ++assertions; (!cond) ? pass(msg) : fail(msg);
+    }
+    void assert_eq_str(const std::string& a, const std::string& b, const std::string& msg) {
+        ++assertions; (a == b) ? pass(msg) : fail(msg + "  (got: \"" + a + "\", expect: \"" + b + "\")");
+    }
+    void assert_eq_json(const nlohmann::json& a, const nlohmann::json& b, const std::string& msg) {
+        ++assertions; (a == b) ? pass(msg) : fail(msg + "  (got: " + a.dump() + ", expect: " + b.dump() + ")");
+    }
+    void assert_opt_json_eq(const std::optional<nlohmann::json>& a, const nlohmann::json& b, const std::string& msg) {
+        ++assertions; (a && *a == b) ? pass(msg) : fail(msg + "  (got: " + (a? a->dump() : "null") + ", expect: " + b.dump() + ")");
+    }
+    void assert_is_none(const std::optional<nlohmann::json>& a, const std::string& msg) {
+        ++assertions; (!a.has_value()) ? pass(msg) : fail(msg + "  (got: " + a->dump() + ", expect: null)");
+    }
+
+    // ---------- helpers ----------
+    static bool dump_to_file(SingletonKeyValueStorage& s, const std::string& path) {
+        std::ofstream ofs(path);
+        ofs << s.dumps();
+        return ofs.good();
+    }
+
+    // ---------- tests ----------
+    void test_all(int num=1) {
+        test_dict(num);
+    }
+
+    void test_dict(int num=1) {
+        std::cout << "###### test_dict ######\n";
+        // DictStorage.build() -> singleton backing
+        store->switch_backend(std::make_unique<DictStorageController>(
+            DictStorageController::build()
+        ));
+
+        test_msg();
+        for (int i=0; i<num; ++i) test_all_cases();
+    }
+
+    void test_msg() {
+        std::cout << "start : self.test_msg()\n";
+
+        // FIFO & size
+        store->mq.push(json{{"n",1}});
+        store->mq.push(json{{"n",2}});
+        store->mq.push(json{{"n",3}});
+
+        assert_eq_json(store->mq.queue_size() , 3, "Size should reflect number of enqueued items.");
+        assert_opt_json_eq(store->mq.pop(), json{{"n",1}}, "Queue must be FIFO: first pop returns first pushed.");
+        assert_opt_json_eq(store->mq.pop(), json{{"n",2}}, "Second pop should return second item.");
+        assert_opt_json_eq(store->mq.pop(), json{{"n",3}}, "Third pop should return third item.");
+        assert_is_none(store->mq.pop(), "Popping an empty queue should return None.");
+        assert_eq_json(store->mq.queue_size(), 0, "Size should be zero after popping all items.");
+
+        // Peek
+        store->mq.push(json{{"a",1}});
+        assert_opt_json_eq(store->mq.peek(), json{{"a",1}}, "Peek should return earliest message without removing it.");
+        assert_eq_json(store->mq.queue_size(), 1, "Peek should not change the queue size.");
+        assert_opt_json_eq(store->mq.pop(), json{{"a",1}}, "Pop should still return the same earliest message after peek.");
+
+        // Clear
+        store->mq.push(json{{"x",1}});
+        store->mq.push(json{{"y",2}});
+        store->mq.clear();
+        assert_eq_json(store->mq.queue_size(), 0, "Clear should remove all items from the queue.");
+        assert_is_none(store->mq.pop(), "After clear, popping should return None.");
+
+        // Capture normal event flow (we'll just ensure callbacks are invoked)
+        std::vector<json> events;
+        auto capture = [&events](const json& payload){ events.push_back(payload); };
+        store->mq.add_listener("default", capture, "pushed");
+        store->mq.add_listener("default", capture, "popped");
+        store->mq.add_listener("default", capture, "empty");
+        store->mq.add_listener("default", capture, "cleared");
+        store->mq.push(json{{"m",1}});
+        store->mq.push(json{{"m",2}});
+        auto a = store->mq.pop();
+        auto b = store->mq.pop();
+        store->mq.clear();
+        // (Python had specific order asserts commented out; we mirror that.)
+
+        // Listener failure should not break queue ops (isolated queue)
+        std::string queue = std::string("t_listener_fail_") + uuid_v4().substr(0,8);
+        auto bad = [](const json&) { throw std::runtime_error("boom"); };
+        store->mq.add_listener(queue, bad, "pushed");
+
+        store->mq.push(json{{"ok", true}}, queue);
+        assert_eq_json(store->mq.queue_size(queue), 1, "ops should succeed even if a listener fails.");
+        assert_opt_json_eq(store->mq.pop(queue), json{{"ok", true}}, "pop returns pushed message (listener threw).");
+
+        // Multiple queues are isolated
+        store->mq.push(json{{"a",1}}, "q1");
+        store->mq.push(json{{"b",2}}, "q2");
+        assert_eq_json(store->mq.queue_size("q1"), 1, "q1 should have one item.");
+        assert_eq_json(store->mq.queue_size("q2"), 1, "q2 should have one item.");
+        assert_opt_json_eq(store->mq.pop("q1"), json{{"a",1}}, "Popping q1 should return its own item.");
+        assert_eq_json(store->mq.queue_size("q2"), 1, "Popping q1 should not affect q2.");
+    }
+
+    void test_all_cases() {
+        std::cout << "start : self.test_set_and_get()\n";      test_set_and_get();
+        std::cout << "start : self.test_exists()\n";           test_exists();
+        std::cout << "start : self.test_delete()\n";           test_delete();
+        std::cout << "start : self.test_keys()\n";             test_keys();
+        std::cout << "start : self.test_get_nonexistent()\n";  test_get_nonexistent();
+        std::cout << "start : self.test_dump_and_load()\n";    test_dump_and_load();
+        std::cout << "start : self.test_version()\n";          test_version();
+        std::cout << "start : self.test_slaves()\n";           test_slaves();
+        std::cout << "start : self.store.clean()\n";           store->clean();
+        std::cout << "end all.\n";
+    }
+
+    void test_set_and_get() {
+        store->set("test1", nlohmann::json{{"data",123}});
+        assert_opt_json_eq(store->get("test1"), nlohmann::json{{"data",123}}, "The retrieved value should match the set value.");
+    }
+
+    void test_exists() {
+        store->set("test2", nlohmann::json{{"data",456}});
+        assert_true(store->exists("test2"), "Key should exist after being set.");
+    }
+
+    void test_delete() {
+        store->set("test3", nlohmann::json{{"data",789}});
+        store->erase("test3");
+        assert_false(store->exists("test3"), "Key should not exist after being deleted.");
+    }
+
+    void test_keys() {
+        store->set("alpha", nlohmann::json{{"info","first"}});
+        store->set("abeta", nlohmann::json{{"info","second"}});
+        store->set("gamma", nlohmann::json{{"info","third"}});
+        std::vector<std::string> ks = store->keys("a*");
+        std::sort(ks.begin(), ks.end());
+        std::vector<std::string> expected = {"abeta","alpha"};
+        assert_true(ks == expected, "Should return the correct keys matching the pattern.");
+    }
+
+    void test_get_nonexistent() {
+        auto v = store->get("nonexistent");
+        assert_is_none(v, "Getting a non-existent key should return None.");
+    }
+
+    void test_dump_and_load() {
+        json raw = {
+            {"test1", {{"data",123}}},
+            {"test2", {{"data",456}}},
+            {"alpha", {{"info","first"}}},
+            {"abeta", {{"info","second"}}},
+            {"gamma", {{"info","third"}}}
+        };
+        // dump to file
+        assert_true(dump_to_file(*store, "test.json"), "dump file created");
+        store->clean();
+        assert_eq_str(store->dumps(), "{}", "Should return {} after clean.");
+        // load from file
+        store->load_file("test.json");
+        assert_eq_json(nlohmann::json::parse(store->dumps()), raw, "Should return the correct keys and values (file load).");
+        // loads from string
+        store->clean();
+        store->loads(raw.dump());
+        assert_eq_json(nlohmann::json::parse(store->dumps()), raw, "Should return the correct keys and values (loads).");
+    }
+
+    void test_slaves() {
+        // Set up a follower store with a temporary backend
+        auto store2 = std::make_shared<SingletonKeyValueStorage>(false);
+        store2->switch_backend(std::make_unique<DictStorageController>(
+            DictStorageController::build_tmp()
+        ));
+        // Wire replication via events (equivalent to Python add_slave)
+        store->set_event("set", [store2](const nlohmann::json& p){
+            auto key = p.value("key", std::string{});
+            if (!key.empty() && p.contains("value")) store2->set(key, p["value"]);
+        });
+        store->set_event("delete", [store2](const nlohmann::json& p){
+            auto key = p.value("key", std::string{});
+            if (!key.empty()) store2->erase(key);
+        });
+
+        store->set("alpha", nlohmann::json{{"info","first"}});
+        store->set("abeta", nlohmann::json{{"info","second"}});
+        store->set("gamma", nlohmann::json{{"info","third"}});
+        store->erase("abeta");
+
+        auto a = nlohmann::json::parse(store->dumps());
+        auto b = nlohmann::json::parse(store2->dumps());
+        assert_eq_json(a, b, "Should return the correct keys and values (slave replication).");
+    }
+
+    void test_version() {
+
+        store->clean();
+        store->version_control = true;
+
+        store->set("alpha", json{{"info","first"}});
+        std::string data1 = store->dumps();
+        auto v1 = store->current_version();
+
+        store->set("abeta", json{{"info","second"}});
+        auto v2 = store->current_version();
+        std::string data2 = store->dumps();
+
+        store->set("gamma", json{{"info","third"}});
+        if (v1) store->local_to_version(*v1);
+        assert_eq_json(json::parse(store->dumps()), json::parse(data1), "Should return the same keys and values (to v1).");
+
+        if (v2) store->local_to_version(*v2);
+        assert_eq_json(json::parse(store->dumps()), json::parse(data2), "Should return the same keys and values (to v2).");
+
+        // memory limit warning scenario
+        auto make_big_payload = [](int size_kb)->std::string {
+            return std::string(1024 * size_kb, 'X');
+        };
+        store->verc.limit_memory_MB = 0.2; // 0.2 MB
+        auto& lvc2 = store->verc;
+
+        for (int i=0;i<3;++i) {
+            std::string small_payload = make_big_payload(62); // ~0.062 MB
+            auto res = lvc2.add_operation(json::array({"write", "small_" + std::to_string(i), small_payload}),
+                                          json::array({"delete","small_" + std::to_string(i)}));
+            assert_true(!res.has_value(), "Should not return any warning message for small payloads.");
+        }
+
+        std::string big_payload = make_big_payload(600); // ~0.6 MB
+        auto res = lvc2.add_operation(json::array({"write", "too_big", big_payload}),
+                                      json::array({"delete", "too_big"}));
+        std::string expect_prefix = "[LocalVersionController] Warning: memory usage";
+        assert_true(res.has_value() && res->rfind(expect_prefix, 0) == 0,
+                    "Should return warning message about memory usage.");
+    }
+};
+
+// Run all tests; returns number of failures (0 means all good)
+int run_ported_python_tests(int num=1) {
+    Tests t;
+    t.test_all(num);
+    std::cout << "\n==== TEST SUMMARY ====\n";
+    std::cout << "Assertions: " << t.assertions << "\n";
+    std::cout << "Failures:   " << t.failures << "\n";
+    std::cout << "======================\n";
+    return t.failures;
+}

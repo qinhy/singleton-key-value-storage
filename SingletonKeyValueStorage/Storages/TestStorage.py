@@ -4,7 +4,7 @@ import json
 import unittest
 
 try:
-    from .Storage import SingletonKeyValueStorage, PythonDictStorage, MessageQueueController
+    from .Storage import SingletonKeyValueStorage, DictStorage, MessageQueueController
     from .utils import SimpleRSAChunkEncryptor, PEMFileReader
     from .RedisStorage import SingletonRedisStorage
     from .AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
@@ -14,7 +14,7 @@ try:
     from .FileSystemStorage import SingletonFileSystemStorage
     from .CouchStorage import SingletonCouchDBStorage
 except Exception as e:
-    from Storage import SingletonKeyValueStorage, PythonDictStorage, MessageQueueController
+    from Storage import SingletonKeyValueStorage, DictStorage, MessageQueueController
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
     from RedisStorage import SingletonRedisStorage
     from AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
@@ -38,7 +38,7 @@ class Tests(unittest.TestCase):
         )
 
     def test_all(self,num=1):
-        self.test_python(num)
+        self.test_dict(num)
         # self.test_sqlite_pymix(num)
         # self.test_file(num)
         # self.test_sqlite(num)
@@ -52,9 +52,9 @@ class Tests(unittest.TestCase):
         self.store.switch_backend(SingletonFileSystemStorage.build())
         for i in range(num):self.test_all_cases()
 
-    def test_python(self,num=1):
-        print('###### test_python ######')
-        self.store.switch_backend(PythonDictStorage.build())
+    def test_dict(self,num=1):
+        print('###### test_dict ######')
+        self.store.switch_backend(DictStorage.build())
         self.test_msg()
         for i in range(num):self.test_all_cases()
     
@@ -227,9 +227,9 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(self.store.dumps()),raw, "Should return the correct keys and values.")
 
     def test_slaves(self):
-        if self.store.conn.__class__.__name__=='SingletonPythonDictStorageController':return
+        if self.store.conn.__class__.__name__=='SingletonDictStorageController':return
         store2 = SingletonKeyValueStorage(encryptor=ENCRYPPR)
-        store2.switch_backend(PythonDictStorage.build_tmp())
+        store2.switch_backend(DictStorage.build_tmp())
         self.store.add_slave(store2)
         self.store.set('alpha', {'info': 'first'})
         self.store.set('abeta', {'info': 'second'})

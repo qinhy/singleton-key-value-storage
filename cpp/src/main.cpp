@@ -1,3 +1,5 @@
+// main.cpp (updated for SingletonKeyValueStorage)
+
 #include <iostream>
 #include <string>
 #include <json.hpp>
@@ -9,296 +11,262 @@
 
 using json = nlohmann::json;
 
-// Helper functions
-std::string prompt(const std::string &message)
-{
+// -------- Helpers ----------
+std::string prompt(const std::string &message) {
     std::string input;
     std::cout << message;
     std::getline(std::cin, input);
     return input;
 }
 
-void handle_json_parse_error(const json::parse_error &e)
-{
+void handle_json_parse_error(const json::parse_error &e) {
     std::cout << "Invalid JSON format: " << e.what() << std::endl;
 }
 
-void handle_invalid_argument(const std::invalid_argument &e)
-{
+void handle_invalid_argument(const std::invalid_argument &e) {
     std::cout << "ERROR: " << e.what() << std::endl;
 }
 
-// Command map
+// -------- Commands ----------
 using Shared_store_ptr = std::shared_ptr<SingletonKeyValueStorage>;
 using CommandFunction = std::function<void(Shared_store_ptr)>;
 
 std::map<std::string, CommandFunction> command_map = {
-    {"set", [](Shared_store_ptr controller)
-     {
-         std::string key = prompt("Enter key: ");
-         std::string value = prompt("Enter value (in JSON format): ");
-         try
-         {
-             json json_value = json::parse(value);
-             controller->set(key, json_value);
-             std::cout << "Set key " << key << " : " << json_value.dump() << std::endl;
-         }
-         catch (json::parse_error &e)
-         {
-             handle_json_parse_error(e);
-         }
-         catch (std::invalid_argument &e)
-         {
-             handle_invalid_argument(e);
-         }
-     }},
+    {"set", [](Shared_store_ptr controller) {
+        std::string key = prompt("Enter key: ");
+        std::string value = prompt("Enter value (in JSON format): ");
+        try {
+            json json_value = json::parse(value);
+            bool ok = controller->set(key, json_value);
+            if (ok) {
+                std::cout << "Set key " << key << " : " << json_value.dump() << std::endl;
+            } else {
+                std::cout << "Set failed.\n";
+            }
+        } catch (json::parse_error &e) {
+            handle_json_parse_error(e);
+        } catch (std::invalid_argument &e) {
+            handle_invalid_argument(e);
+        }
+    }},
 
-    {"get", [](Shared_store_ptr controller)
-     {
-         std::string key = prompt("Enter key: ");
-         json value = controller->get(key);
-         if (!value.is_null())
-         {
-             std::cout << "Value for key " << key << ": " << value.dump() << std::endl;
-         }
-         else
-         {
-             std::cout << "No value found for key " << key << std::endl;
-         }
-     }},
+    {"get", [](Shared_store_ptr controller) {
+        std::string key = prompt("Enter key: ");
+        auto val = controller->get(key);
+        if (val) {
+            std::cout << "Value for key " << key << ": " << val->dump() << std::endl;
+        } else {
+            std::cout << "No value found for key " << key << std::endl;
+        }
+    }},
 
-    {"exists", [](Shared_store_ptr controller)
-     {
-         std::string key = prompt("Enter key: ");
-         if (controller->exists(key))
-         {
-             std::cout << "Key " << key << " exists in storage." << std::endl;
-         }
-         else
-         {
-             std::cout << "Key " << key << " does not exist in storage." << std::endl;
-         }
-     }},
+    {"exists", [](Shared_store_ptr controller) {
+        std::string key = prompt("Enter key: ");
+        if (controller->exists(key)) {
+            std::cout << "Key " << key << " exists in storage." << std::endl;
+        } else {
+            std::cout << "Key " << key << " does not exist in storage." << std::endl;
+        }
+    }},
 
-    {"delete", [](Shared_store_ptr controller)
-     {
-         std::string key = prompt("Enter key: ");
-         controller->deleteKey(key);
-         std::cout << "Deleted key " << key << std::endl;
-     }},
+    {"delete", [](Shared_store_ptr controller) {
+        std::string key = prompt("Enter key: ");
+        bool ok = controller->erase(key);
+        std::cout << (ok ? "Deleted key " : "No such key (nothing deleted): ") << key << std::endl;
+    }},
 
-    {"keys", [](Shared_store_ptr controller)
-     {
-         std::string pattern = prompt("Enter key pattern: ");
-         std::vector<std::string> allKeys = controller->keys(pattern);
-         std::cout << "All Keys in Storage:" << std::endl;
-         for (const auto &k : allKeys)
-         {
-             std::cout << "- " << k << std::endl;
-         }
-     }},
+    {"keys", [](Shared_store_ptr controller) {
+        std::string pattern = prompt("Enter key pattern (e.g. * or user*): ");
+        std::vector<std::string> allKeys = controller->keys(pattern);
+        std::cout << "Keys (" << allKeys.size() << "):\n";
+        for (const auto &k : allKeys) std::cout << "- " << k << std::endl;
+    }},
 
-    {"dumps", [](Shared_store_ptr controller)
-     {
-         std::string dumpedData = controller->dumps();
-         std::cout << "Dumped Data: " << dumpedData << std::endl;
-     }},
+    {"dumps", [](Shared_store_ptr controller) {
+        std::string dumpedData = controller->dumps();
+        std::cout << "Dumped Data: " << dumpedData << std::endl;
+    }},
 
-    {"loads", [](Shared_store_ptr controller)
-     {
-         std::string jsonData = prompt("Enter JSON data string: ");
-         try
-         {
-             controller->loads(jsonData);
-             std::cout << "Loaded JSON data into storage." << std::endl;
-         }
-         catch (json::parse_error &e)
-         {
-             handle_json_parse_error(e);
-         }
-     }},
+    {"loads", [](Shared_store_ptr controller) {
+        std::string jsonData = prompt("Enter JSON data string: ");
+        try {
+            bool ok = controller->loads(jsonData);
+            std::cout << (ok ? "Loaded JSON data into storage." : "Load failed.") << std::endl;
+        } catch (json::parse_error &e) {
+            handle_json_parse_error(e);
+        }
+    }},
 
-    {"clean", [](Shared_store_ptr controller)
-     {
-         controller->clean();
-         std::cout << "Cleaned all data." << std::endl;
-     }},
+    {"clean", [](Shared_store_ptr controller) {
+        bool ok = controller->clean();
+        std::cout << (ok ? "Cleaned all data." : "Clean failed.") << std::endl;
+    }},
 
-    {"ver", [](Shared_store_ptr controller)
-     {
-         std::cout << "Current: " << controller->get_current_version() << std::endl;
-     }},
+    {"ver", [](Shared_store_ptr controller) {
+        auto v = controller->current_version();
+        std::cout << "Current: " << (v ? *v : std::string("(none)")) << std::endl;
+    }},
 
-    {"rev", [](Shared_store_ptr controller)
-     {
-         std::cout << "Current: " << controller->get_current_version() << std::endl;
-         controller->revert_one_operation();
-         std::cout << "Reverted to: " << controller->get_current_version() << std::endl;
-     }},
+    {"rev", [](Shared_store_ptr controller) {
+        auto before = controller->current_version();
+        std::cout << "Current: " << (before ? *before : std::string("(none)")) << std::endl;
+        controller->revert_one_operation();
+        auto after = controller->current_version();
+        std::cout << "Reverted to: " << (after ? *after : std::string("(none)")) << std::endl;
+    }},
 
-    {"exit", [](Shared_store_ptr)
-     {
-         std::cout << "Exiting..." << std::endl;
-     }}};
+    {"fwd", [](Shared_store_ptr controller) {
+        auto before = controller->current_version();
+        std::cout << "Current: " << (before ? *before : std::string("(none)")) << std::endl;
+        controller->forward_one_operation();
+        auto after = controller->current_version();
+        std::cout << "Forwarded to: " << (after ? *after : std::string("(none)")) << std::endl;
+    }},
 
-// Function to auto-generate command list
-std::string generate_command_list(const std::map<std::string, CommandFunction> &command_map)
-{
+    {"exit", [](Shared_store_ptr) {
+        std::cout << "Exiting..." << std::endl;
+    }}
+};
+
+// List available commands
+std::string generate_command_list(const std::map<std::string, CommandFunction> &command_map) {
     std::ostringstream oss;
-    for (const auto &cmd : command_map)
-    {
-        if (oss.tellp() > 0) oss << ", ";  // Add comma separator between commands
-        oss << cmd.first;
+    for (auto it = command_map.begin(); it != command_map.end(); ++it) {
+        if (it != command_map.begin()) oss << ", ";
+        oss << it->first;
     }
     return oss.str();
 }
 
-// Function to handle console commands
-void handle_command(Shared_store_ptr controller, const std::string &command)
-{
+void handle_command(Shared_store_ptr controller, const std::string &command) {
     auto cmd = command_map.find(command);
-    if (cmd != command_map.end())
-    {
+    if (cmd != command_map.end()) {
         cmd->second(controller);
-    }
-    else
-    {
+    } else {
         std::cout << "Invalid command. Available commands: " << generate_command_list(command_map) << std::endl;
     }
 }
 
 
-void test_rsa()
-{
-    // Define paths to the PEM files
-    std::string public_key_path = "public_key.pem";
-    std::string private_key_path = "private_key.pem";
+void test_rsa() {
+    // === Uses your existing RSA utilities (PEMFileReader + SimpleRSAChunkEncryptor) ===
+    std::string public_key_path  = "../tmp/public_key.pem";
+    std::string private_key_path = "../tmp/private_key.pem";
 
-    // Load the public key from the PEM file
     PEMFileReader public_key_reader(public_key_path);
     auto public_key = public_key_reader.load_public_key_from_pkcs8();
 
-    // Load the private key from the PEM file
     PEMFileReader private_key_reader(private_key_path);
     auto private_key = private_key_reader.load_private_key_from_pkcs8();
 
-    // Instantiate the encryptor with the loaded keys
     SimpleRSAChunkEncryptor encryptor(public_key, private_key);
 
-    // Define the plaintext to be encrypted
     std::string plaintext = "Hello, RSA encryption with .pem support!";
-    std::cout << "Original Plaintext: [" << plaintext << "]" << std::endl;
+    std::cout << "Original Plaintext: [" << plaintext << "]\n";
 
-    // Encrypt the plaintext
     std::string encrypted_text = encryptor.encrypt_string(plaintext);
-    std::cout << "\nEncrypted (Base64 encoded): [" << encrypted_text << "]" << std::endl;
+    std::cout << "\nEncrypted (Base64 encoded): [" << encrypted_text << "]\n";
 
-    // Decrypt the encrypted text
     std::string decrypted_text = encryptor.decrypt_string(encrypted_text);
-    std::cout << "\nDecrypted Text: [" << decrypted_text << "]" << std::endl;
+    std::cout << "\nDecrypted Text: [" << decrypted_text << "]\n";
 }
 
-int test()
-{
-    std::cout << "######## start." << std::endl;
-    auto controllerfs = std::make_shared<SingletonKeyValueStorage>();
-    controllerfs->file_backend();
 
-    {
-        SingletonKeyValueStorage controller;
-        controller.add_slave(controllerfs);
-        controller.set("user2", json{{"name", "Bob"}, {"age", 25}});
-    }
+// --- test(): end-to-end smoke test of the key-value store and events ---
+int test() {
+    std::cout << "######## start test.\n";
 
-    SingletonKeyValueStorage controller;
-    controller.add_slave(controllerfs);
-    std::cout << controller.uuid() << std::endl;
+    // Primary store (with version control so rev/fwd works)
+    auto controller = std::make_shared<SingletonKeyValueStorage>(true /*version_control*/);
 
-    std::cout << "######## Set some key-value pairs" << std::endl;
-    controller.set("user1", json{{"name", "Alice"}, {"age", 30}, {"nums", {1, 2, 3}}});
+    // Follower store: we’ll mirror "set" and "delete" from the primary via events
+    auto follower = std::make_shared<SingletonKeyValueStorage>(true);
 
-    std::cout << "######## Check if a key exists" << std::endl;
+    controller->set_event("set", [follower](const nlohmann::json& p) {
+        auto key = p.value("key", std::string{});
+        if (!key.empty() && p.contains("value")) follower->set(key, p["value"]);
+    });
+    controller->set_event("delete", [follower](const nlohmann::json& p) {
+        auto key = p.value("key", std::string{});
+        if (!key.empty()) follower->erase(key);
+    });
+
+    std::cout << "######## Set some key-value pairs\n";
+    controller->set("user1", nlohmann::json{{"name","Alice"},{"age",30},{"nums", nlohmann::json::array({1,2,3})}});
+    controller->set("user2", nlohmann::json{{"name","Bob"},{"age",25}});
+
+    std::cout << "######## Check if a key exists\n";
     std::string key = "user1";
-    if (controller.exists(key))
-    {
-        std::cout << "Key " << key << " exists in storage." << std::endl;
-    }
-    else
-    {
-        std::cout << "Key " << key << " does not exist in storage." << std::endl;
+    if (controller->exists(key)) {
+        std::cout << "Key " << key << " exists in storage.\n";
+    } else {
+        std::cout << "Key " << key << " does not exist in storage.\n";
     }
 
-    std::cout << "######## Retrieve and print the value for a key" << std::endl;
-    json value = controller.get("user1");
-    if (!value.is_null())
-    {
-        std::cout << "Value for key " << key << ": " << value.dump() << std::endl;
-    }
-    else
-    {
-        std::cout << "No value found for key " << key << std::endl;
+    std::cout << "######## Retrieve and print the value for a key\n";
+    auto value = controller->get("user1");
+    if (value) {
+        std::cout << "Value for key " << key << ": " << value->dump() << "\n";
+    } else {
+        std::cout << "No value found for key " << key << "\n";
     }
 
-    std::cout << "######## Dump all data to a JSON string" << std::endl;
-    std::string dumpedData = controller.dumps();
-    std::cout << "Dumped Data: " << dumpedData << std::endl;
+    std::cout << "######## Dump all data to a JSON string\n";
+    std::string dumpedData = controller->dumps();
+    std::cout << "Dumped Data: " << dumpedData << "\n";
 
-    std::cout << "######## Load from dumped data string" << std::endl;
+    std::cout << "######## Load from dumped data string\n";
     std::string jsonData = R"({"user3": {"name": "Charlie", "age": 35}})";
-    controller.loads(jsonData);
-    std::cout << "######## Print all keys" << std::endl;
-    std::vector<std::string> allKeys = controller.keys();
-    std::cout << "All Keys in Storage:" << std::endl;
-    for (const auto &k : allKeys)
-    {
-        std::cout << "- " << k << std::endl;
+    controller->loads(jsonData);
+
+    std::cout << "######## Print all keys\n";
+    std::vector<std::string> allKeys = controller->keys("*");
+    std::cout << "All Keys in Storage:\n";
+    for (const auto& k : allKeys) std::cout << "- " << k << "\n";
+
+    std::cout << "######## Delete a key\n";
+    controller->erase("user1");
+    std::cout << "Deleted key 'user1'\n";
+
+    std::cout << "######## Verify deletion\n";
+    if (!controller->exists("user1")) {
+        std::cout << "Key 'user1' was successfully deleted.\n";
     }
 
-    std::cout << "######## Delete a key" << std::endl;
-    controller.deleteKey("user1");
-    std::cout << "Deleted key 'user1'" << std::endl;
+    std::cout << "######## Test keys(pattern)\n";
+    auto kuser = controller->keys("user*");
+    if (!kuser.empty()) std::cout << kuser[0] << "\n";
 
-    std::cout << "######## Verify deletion" << std::endl;
-    if (!controller.exists("user1"))
-    {
-        std::cout << "Key 'user1' was successfully deleted." << std::endl;
-    }
+    std::cout << controller->dumps() << "\n";
 
-    std::cout << "######## Test keys" << std::endl;
-    std::cout << controller.keys("user*")[0] << std::endl;
+    std::cout << "######## Follower (replicated via events)\n";
+    std::cout << follower->dumps() << "\n";
 
-    std::cout << controller.dumps() << std::endl;
-
-    test_rsa();
-
+    // Optional: try version moves
+    controller->revert_one_operation();
+    std::cout << "After revert, current version: "
+              << (controller->current_version().value_or("(none)")) << "\n";
+              
+    std::cout << "######## end test.\n";
     return 0;
 }
 
-int main()
-{
+
+int main() {
+    run_ported_python_tests();
     // test();
-    // Initialize storage
-    auto controllerfs = std::make_shared<SingletonKeyValueStorage>();
-    controllerfs->file_backend();
-    auto controllermemo = std::make_shared<SingletonKeyValueStorage>();
-    controllermemo->loads(controllerfs->dumps());
-    controllermemo->add_slave(controllerfs, {"set", "deleteKey", "clean", "loads"});
-    auto controller = controllermemo;
+    // test_rsa();
+
+    // Turn on version control to enable rev/fwd history
+    auto controller = std::make_shared<SingletonKeyValueStorage>(true /*version_control*/);
 
     // Console loop
     std::string command;
-    while (true)
-    {
+    while (true) {
         std::cout << "\n> Enter command (" << generate_command_list(command_map) << "): ";
-        std::getline(std::cin, command);
-
-        if (command == "exit")
-        {
-            break;
-        }
-
+        if (!std::getline(std::cin, command)) break;
+        if (command == "exit") break;
         handle_command(controller, command);
     }
-
     return 0;
 }

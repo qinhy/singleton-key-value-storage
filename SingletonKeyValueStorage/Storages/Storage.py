@@ -78,7 +78,7 @@ class AbstractStorage:
     def bytes_used(self, deep=True, human_readable=True):
         raise NotImplementedError("Subclasses must implement memory_usage method")
     
-class PythonDictStorage(AbstractStorage):
+class DictStorage(AbstractStorage):
     _uuid = uuid.uuid4()
     _store = {}
         
@@ -91,10 +91,10 @@ class PythonDictStorage(AbstractStorage):
         return humanize_bytes(size) if human_readable else size
     
     @staticmethod
-    def build_tmp(): return PythonDictStorageController(PythonDictStorage())
+    def build_tmp(): return DictStorageController(DictStorage())
 
     @staticmethod
-    def build(): return PythonDictStorageController(PythonDictStorage().get_singleton())
+    def build(): return DictStorageController(DictStorage().get_singleton())
     
 class AbstractStorageController:
     def __init__(self, model): self.model:AbstractStorage = model
@@ -120,9 +120,9 @@ class AbstractStorageController:
             None, PEMFileReader(private_pkcs8_key_path).load_private_pkcs8_key())
         return self.loads(encryptor.decrypt_string(Path(path).read_text()))
 
-class PythonDictStorageController(AbstractStorageController):
-    def __init__(self, model:PythonDictStorage):
-        self.model:PythonDictStorage = model
+class DictStorageController(AbstractStorageController):
+    def __init__(self, model:DictStorage):
+        self.model:DictStorage = model
         self.store = self.model.store
     def exists(self, key: str)->bool: return key in self.store
     def set(self, key: str, value: dict): self.store[key] = value
@@ -130,8 +130,8 @@ class PythonDictStorageController(AbstractStorageController):
     def delete(self, key: str): return self.store.pop(key)
     def keys(self, pattern: str='*'): return fnmatch.filter(self.store.keys(), pattern)
 
-class PythonMemoryLimitedDictStorageController(PythonDictStorageController):
-    def __init__(self,model: PythonDictStorage, 
+class PythonMemoryLimitedDictStorageController(DictStorageController):
+    def __init__(self,model: DictStorage, 
                  max_memory_mb: float = 1024.0, policy: str = 'lru',
                 on_evict: Optional[Callable[[str, dict], None]] = lambda x:x,
                 pinned: Optional[set[str]] = None,):
@@ -203,7 +203,7 @@ class PythonMemoryLimitedDictStorageController(PythonDictStorageController):
         [super().delete(k) for k in list(self._order.keys())]
         self.init_size_manage()
 
-class EventDispatcherController(PythonDictStorageController):
+class EventDispatcherController(DictStorageController):
     ROOT_KEY = '_Event'
     _b64_cache_:Dict[str,str] = {'*':'*'}
 
@@ -242,7 +242,7 @@ class MessageQueueController(PythonMemoryLimitedDictStorageController):
     _b64_cache_:Dict[str,str] = {'*':'*'}
 
     def __init__(self,
-                 model: PythonDictStorage,
+                 model: DictStorage,
                  max_memory_mb: float = 1024.0,
                  policy: str = 'lru',
                  on_evict: Optional[Callable[[str, dict], None]] = lambda key, val: None,
@@ -400,7 +400,7 @@ class LocalVersionController:
         self.client = client
         if client is None:
             # Build a private, memory-capped op-log store
-            model = PythonDictStorage()
+            model = DictStorage()
             self.client = PythonMemoryLimitedDictStorageController(
                 model,
                 max_memory_mb=self.limit_memory_MB,
@@ -541,12 +541,12 @@ class SingletonKeyValueStorage(AbstractStorageController):
         self.version_controll = version_controll
         self.encryptor = encryptor
         self.conn:AbstractStorageController = None
-        self.switch_backend(PythonDictStorage.build())
+        self.switch_backend(DictStorage.build())
     
     def switch_backend(self,controller:AbstractStorageController):
-        self._event_dispa = EventDispatcherController(PythonDictStorage())
+        self._event_dispa = EventDispatcherController(DictStorage())
         self._verc = LocalVersionController()
-        self.message_queue = MessageQueueController(PythonDictStorage.build_tmp())
+        self.message_queue = MessageQueueController(DictStorage.build_tmp())
         self.conn = controller
         return self
 

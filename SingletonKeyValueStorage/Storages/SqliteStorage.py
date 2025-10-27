@@ -12,9 +12,9 @@ import urllib.parse
 from urllib.parse import urlparse
 
 try:
-    from .Storage import SingletonKeyValueStorage,AbstractStorageController,PythonDictStorageController,PythonDictStorage
+    from .Storage import SingletonKeyValueStorage,AbstractStorageController,DictStorageController,DictStorage
 except Exception as e:
-    from Storage import SingletonKeyValueStorage,AbstractStorageController,PythonDictStorageController,PythonDictStorage
+    from Storage import SingletonKeyValueStorage,AbstractStorageController,DictStorageController,DictStorage
 
 
 def try_if_error(func):
@@ -219,7 +219,7 @@ if sqlite_back:
     class SingletonSqlitePythonMixStorageController(AbstractStorageController):
         def __init__(self, model: SingletonSqliteStorage):
             self.disk = SingletonSqliteStorageController(model)
-            self.memory = PythonDictStorageController(PythonDictStorage())
+            self.memory = DictStorageController(DictStorage())
             for k in self.disk.keys():self.memory.set(k,{})
 
         def exists(self, key: str)->bool:
