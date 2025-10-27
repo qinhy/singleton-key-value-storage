@@ -2,7 +2,7 @@ mod singleton_storage;
 mod basic_store;
 mod rsa;
 
-use singleton_storage::{RustDictStorage, RustDictStorageController, AbstractStorageController};
+use singleton_storage::{DictStorage, DictStorageController, AbstractStorageController};
 use basic_store::{AbstractObj, BasicStore};
 use serde_json::json;
 
@@ -12,9 +12,9 @@ use rsa::SimpleRSAChunkEncryptor;
 
 fn test_store() {
     // Initialize storage and controller
-    let storage = RustDictStorage::get_singleton();
+    let storage = DictStorage::get_singleton();
     println!("Storage UUID: {:?}", storage.uuid);
-    let mut storage_conn = RustDictStorageController{model:storage};
+    let mut storage_conn = DictStorageController{model:storage};
 
     // Perform operations on the controller
     storage_conn.set("key1", json!({"example": "data"}));
@@ -26,8 +26,8 @@ fn test_store() {
 
     // check singleton
     {
-        let tmp_storage = RustDictStorage::get_singleton();
-        let mut tmp_conn = RustDictStorageController{model:tmp_storage};
+        let tmp_storage = DictStorage::get_singleton();
+        let mut tmp_conn = DictStorageController{model:tmp_storage};
         if let Some(value) = tmp_conn.get("key1") {
             println!("Value for 'key1': {:?}", value);
         } else {

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use serde_json::Value;
 use uuid::Uuid;
-use crate::singleton_storage::{AbstractStorageController, RustDictStorageController};
+use crate::singleton_storage::{AbstractStorageController, DictStorageController};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AbstractObj {
@@ -93,11 +93,11 @@ impl<'a> AbstractObjController<'a> {
 }
 
 pub struct BasicStore {
-    storage: RustDictStorageController<Value>,
+    storage: DictStorageController<Value>,
 }
 
 impl BasicStore {
-    pub fn new(storage:RustDictStorageController<Value>) -> Self {
+    pub fn new(storage:DictStorageController<Value>) -> Self {
         Self {storage}
     }
 

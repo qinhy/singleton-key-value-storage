@@ -23,13 +23,13 @@ pub trait AbstractStorageController<T> {
 // Define your custom type for T
 type GenericArcHashMap<T> = Arc<RwLock<HashMap<String, T>>>;
 
-pub struct RustDictStorage<T> {
+pub struct DictStorage<T> {
     pub uuid: Uuid,
     pub store: Option<GenericArcHashMap<T>>,
     pub is_singleton: bool,
 }
 
-impl<T> RustDictStorage<T> {
+impl<T> DictStorage<T> {
     pub fn new() -> Self {
         Self {
             uuid: Uuid::new_v4(),
@@ -45,7 +45,7 @@ lazy_static! {
         Arc::new(RwLock::new(HashMap::new()));
 }
 
-impl RustDictStorage<Value> {
+impl DictStorage<Value> {
     pub fn get_singleton() -> Self {
         Self {
             uuid: *_RustDict_Json_UUID,
@@ -55,11 +55,11 @@ impl RustDictStorage<Value> {
     }
 }
 
-pub struct RustDictStorageController<T> {
-    pub(crate) model: RustDictStorage<T>,
+pub struct DictStorageController<T> {
+    pub(crate) model: DictStorage<T>,
 }
 
-impl<T> AbstractStorageController<T> for RustDictStorageController<T> {
+impl<T> AbstractStorageController<T> for DictStorageController<T> {
     fn is_singleton(&self) -> bool {
         self.model.is_singleton
     }
@@ -128,7 +128,7 @@ impl<T> AbstractStorageController<T> for RustDictStorageController<T> {
     }
 }
 
-impl<Value: Clone> RustDictStorageController<Value> {
+impl<Value: Clone> DictStorageController<Value> {
     pub fn get(&self, key: &str) -> Option<Value> {
         self.model
             .store
