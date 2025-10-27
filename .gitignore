@@ -12,3 +12,4 @@ tmp/private_key.pem
 /SingletonKeyValueStorage/Storages/__pycache__
 *.pyc
 ts/node_modules/
+/cpp/build
