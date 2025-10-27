@@ -1,4 +1,5 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
+import base64
 import sys
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 import uuid
@@ -12,6 +13,20 @@ try:
 except Exception as e:
     from utils import SimpleRSAChunkEncryptor, PEMFileReader
 
+def b64url_encode(s: str) -> str:
+    return base64.urlsafe_b64encode(s.encode("utf-8")).decode("ascii").rstrip("=")
+
+def b64url_decode(s: str) -> str:
+    # add back missing padding
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode((s + pad).encode("ascii")).decode("utf-8")
+
+def is_b64url(s: str) -> bool:
+    try:
+        return b64url_encode(b64url_decode(s)) == s
+    except Exception:
+        return False
+        
 def get_deep_bytes_size(obj, seen=None):
     obj_id = id(obj)
     if seen is None:
@@ -190,9 +205,11 @@ class PythonMemoryLimitedDictStorageController(PythonDictStorageController):
 
 class EventDispatcherController(PythonDictStorageController):
     ROOT_KEY = '_Event'
+    _b64_cache_:Dict[str,str] = {'*':'*'}
 
     def _event_glob(self, event_name: str = '*', event_id: str = '*') -> str:
-        return f'{self.ROOT_KEY}:{event_name}:{event_id}'
+        self._b64_cache_[event_name] = self._b64_cache_.get(event_name,b64url_encode(event_name))
+        return f'{self.ROOT_KEY}:{self._b64_cache_[event_name]}:{event_id}'
 
     def _find_event_keys(self, event_id: str) -> List[str]:
         return self.keys(self._event_glob('*', event_id))
@@ -222,6 +239,7 @@ class EventDispatcherController(PythonDictStorageController):
 class MessageQueueController(PythonMemoryLimitedDictStorageController):
     ROOT_KEY = "_MessageQueue"
     ROOT_KEY_EVENT = "MQE"
+    _b64_cache_:Dict[str,str] = {'*':'*'}
 
     def __init__(self,
                  model: PythonDictStorage,
@@ -232,12 +250,17 @@ class MessageQueueController(PythonMemoryLimitedDictStorageController):
                  dispatcher: Optional[EventDispatcherController] = None):
         super().__init__(model, max_memory_mb, policy, on_evict, pinned)
         self.dispatcher = dispatcher or EventDispatcherController(model)
-        
-    def _qkey(self, queue: str, index: Optional[Union[int, str]] = None) -> str:
-        return ':'.join([i for i in [self.ROOT_KEY, queue, (None if index is None else str(index))] if i is not None])
+
+    def _qname(self, queue_name) -> str:
+        self._b64_cache_[queue_name] = q = self._b64_cache_.get(queue_name,b64url_encode(queue_name))
+        self._b64_cache_[q] = queue_name
+        return q
+
+    def _qkey(self, queue_name: str, index: Optional[Union[int, str]] = None) -> str:
+        return ':'.join([i for i in [self.ROOT_KEY, self._qname(queue_name), (None if index is None else str(index))] if i is not None])
 
     def _event_name(self, queue_name: str, kind: str) -> str:
-        return f"{self.ROOT_KEY_EVENT}:{queue_name}:{kind}"
+        return f"{self.ROOT_KEY_EVENT}:{self._qname(queue_name)}:{kind}"
 
     def _load_meta(self, queue_name: str) -> dict:
         # meta: {'head': int, 'tail': int}
@@ -277,9 +300,10 @@ class MessageQueueController(PythonMemoryLimitedDictStorageController):
     def remove_listener(self, listener_id: str) -> int:
         return self.dispatcher.delete_event(listener_id)
 
-    def list_listeners(self, queue_name: Optional[str] = None, event: Optional[str] = None):
+    def list_listeners(self, queue_name: Optional[str] = None, event_kind: Optional[str] = None):
         evts = self.dispatcher.events()  # -> [(key, cb), ...]
-        if queue_name is None and event is None: return evts
+        if queue_name is None and event_kind is None: return evts
+        queue_name = self._qname(queue_name)
 
         out: List[Tuple[str, Callable[..., None]]] = []
         for k, cb in evts:
@@ -288,7 +312,7 @@ class MessageQueueController(PythonMemoryLimitedDictStorageController):
             if len(parts) < 5: continue
             _, rk, qn, kind, *_ = parts
             if rk != self.ROOT_KEY_EVENT: continue
-            if (queue_name is None or qn == queue_name) and (event is None or kind == event):
+            if (queue_name is None or qn == queue_name) and (event_kind is None or kind == event_kind):
                 out.append((k, cb))
         return out
 
@@ -346,8 +370,8 @@ class MessageQueueController(PythonMemoryLimitedDictStorageController):
         return self._size_from_meta(self._load_meta(queue_name))
 
     def clear(self, queue_name: str = "default") -> None:
-        for key in list(self.keys(f"{self.ROOT_KEY}:{queue_name}:*")):
-            self.delete(key)            
+        for key in list(self.keys(f"{self.ROOT_KEY}:{self._qname(queue_name)}:*")):
+            self.delete(key)
         self.delete(self._qkey(queue_name))
         self._try_dispatch_event(queue_name, "cleared", None, None)
 
@@ -357,7 +381,7 @@ class MessageQueueController(PythonMemoryLimitedDictStorageController):
             parts = k.split(':')
             # accept both meta ("ROOT:queue") and entries ("ROOT:queue:index")
             if len(parts) >= 2 and parts[0] == self.ROOT_KEY:
-                queues.add(parts[1])
+                queues.add(self._b64_cache_(parts[1]))                
         return sorted(queues)
 
 class LocalVersionController:

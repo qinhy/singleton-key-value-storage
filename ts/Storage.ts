@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
 import { PEMFileReader, SimpleRSAChunkEncryptor } from './RSA';
+import { Buffer } from 'buffer';
 
 export type StoreValue = any;
 export type StoreRecord = Record<string, StoreValue>;
@@ -17,6 +18,46 @@ function getGlobalCrypto(): Crypto | null {
         return maybeCrypto as Crypto;
     }
     return null;
+}
+
+function b64urlEncode(input: string): string {
+    // Prefer Node Buffer if present; fall back to browser APIs
+    if (typeof Buffer !== 'undefined') {
+        return Buffer.from(input, 'utf8')
+            .toString('base64')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/g, '');
+    } else {
+        const enc = new TextEncoder();
+        const bytes = enc.encode(input);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        const b64 = btoa(bin);
+        return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    }
+}
+
+function b64urlDecode(input: string): string {
+    const padLen = (4 - (input.length % 4)) % 4;
+    const withPad = input.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(padLen);
+    if (typeof Buffer !== 'undefined') {
+        return Buffer.from(withPad, 'base64').toString('utf8');
+    } else {
+        const bin = atob(withPad);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const dec = new TextDecoder();
+        return dec.decode(bytes);
+    }
+}
+
+function isB64url(s: string): boolean {
+    try {
+        return b64urlEncode(b64urlDecode(s)) === s;
+    } catch {
+        return false;
+    }
 }
 
 export function uuidv4(): string {
@@ -144,7 +185,7 @@ function globToRegExp(pattern: string): RegExp {
 }
 
 interface AbstractStorageStatic<T extends AbstractStorage> {
-    new (id?: string | null, store?: any, isSingleton?: boolean | null): T;
+    new(id?: string | null, store?: any, isSingleton?: boolean | null): T;
     _uuid: string;
     _store: any;
     _is_singleton: boolean;
@@ -396,10 +437,10 @@ export class MemoryLimitedDictStorageController extends DictStorageController {
         this.currentBytes += size;
 
         if (this.policy === 'lru') {
-        if (this.order.has(key)) {
-            this.order.delete(key);
-        }
-        this.order.set(key, null);
+            if (this.order.has(key)) {
+                this.order.delete(key);
+            }
+            this.order.set(key, null);
         } else {
             if (this.order.has(key)) this.order.delete(key);
             this.order.set(key, null);
@@ -434,13 +475,36 @@ export class MemoryLimitedDictStorageController extends DictStorageController {
 
 export class EventDispatcherController extends DictStorageController {
     static ROOT_KEY = '_Event';
+    static nameEncCache = new Map<string, string>([['*', '*']]); // orig -> b64
+    static nameDecCache = new Map<string, string>([['*', '*']]); // b64  -> orig
+
+    private encodeEventName(name: string): string {
+        if (name === '*') return '*'; // wildcard must remain wildcard
+        const cached = EventDispatcherController.nameEncCache.get(name);
+        if (cached) return cached;
+        const enc = b64urlEncode(name);
+        EventDispatcherController.nameEncCache.set(name, enc);
+        EventDispatcherController.nameDecCache.set(enc, name);
+        return enc;
+    }
+
+    private decodeEventName(encoded: string): string {
+        const cached = EventDispatcherController.nameDecCache.get(encoded);
+        if (cached) return cached;
+        const dec = isB64url(encoded) ? b64urlDecode(encoded) : encoded;
+        // populate caches for future
+        EventDispatcherController.nameEncCache.set(dec, encoded);
+        EventDispatcherController.nameDecCache.set(encoded, dec);
+        return dec;
+    }
 
     private eventKey(eventName: string, eventId: string): string {
-        return `${EventDispatcherController.ROOT_KEY}:${eventName}:${eventId}`;
+        return `${EventDispatcherController.ROOT_KEY}:${this.encodeEventName(eventName)}:${eventId}`;
     }
 
     private eventPattern(eventName: string = '*', eventId: string = '*'): string {
-        return this.eventKey(eventName, eventId);
+        const namePart = this.encodeEventName(eventName);
+        return `${EventDispatcherController.ROOT_KEY}:${namePart}:${eventId ?? '*'}`;
     }
 
     private findEventKeys(eventId: string): string[] {
@@ -448,18 +512,16 @@ export class EventDispatcherController extends DictStorageController {
     }
 
     events(): Array<[string, EventCallback | null]> {
-        return this.keys(this.eventPattern()).map(key => [key, this.get(key) as EventCallback | null]);
+        return this.keys(this.eventPattern()).map(k => [k, this.get(k) as EventCallback | null]);
     }
 
     getEvent(eventId: string): Array<EventCallback | null> {
-        return this.findEventKeys(eventId).map(key => this.get(key) as EventCallback | null);
+        return this.findEventKeys(eventId).map(k => this.get(k) as EventCallback | null);
     }
 
     deleteEvent(eventId: string): number {
         const keys = this.findEventKeys(eventId);
-        for (const key of keys) {
-            this.delete(key);
-        }
+        for (const k of keys) this.delete(k);
         return keys.length;
     }
 
@@ -481,209 +543,238 @@ export class EventDispatcherController extends DictStorageController {
             }
         }
     }
+
+    decodeEventNameFromKey(storageKey: string): string | null {
+        const parts = storageKey.split(':');
+        if (parts.length < 3 || parts[0] !== EventDispatcherController.ROOT_KEY) return null;
+        const enc = parts[1];
+        return this.decodeEventName(enc);
+    }
 }
 
+
 export class MessageQueueController extends MemoryLimitedDictStorageController {
-  static ROOT_KEY = '_MessageQueue';
-  static ROOT_KEY_EVENT = 'MQE';
+    static ROOT_KEY = '_MessageQueue';
+    static ROOT_KEY_EVENT = 'MQE';
+    static qEncCache = new Map<string, string>([['*', '*']]); // orig -> b64
+    static qDecCache = new Map<string, string>([['*', '*']]); // b64  -> orig
 
-  private dispatcher: EventDispatcherController;
+    private dispatcher: EventDispatcherController;
 
-  constructor(
-    model: DictStorage,
-    maxMemoryMb: number = 1024,
-    policy: 'lru' | 'fifo' = 'lru',
-    onEvict: EvictHandler = () => undefined,
-    pinned: Iterable<string> = [],
-    dispatcher?: EventDispatcherController
-  ) {
-    super(model, maxMemoryMb, policy, onEvict, pinned);
-    this.dispatcher = dispatcher ?? new EventDispatcherController(model);
-  }
-
-  // ===== helpers =====
-  private qkey(queue: string, index?: number | string | null): string {
-    const parts = [MessageQueueController.ROOT_KEY, queue];
-    if (index !== undefined && index !== null) parts.push(String(index));
-    return parts.join(':');
-  }
-
-  private eventName(queueName: string, kind: 'pushed' | 'popped' | 'empty' | 'cleared'): string {
-    return `${MessageQueueController.ROOT_KEY_EVENT}:${queueName}:${kind}`;
-  }
-
-  private loadMeta(queueName: string): { head: number; tail: number } {
-    // meta is stored at "_MessageQueue:<queue>"
-    const meta = this.get(this.qkey(queueName)) as { head: number; tail: number } | null;
-    let m: { head: number; tail: number };
-    if (!meta) {
-      m = { head: 0, tail: 0 };
-      this.set(this.qkey(queueName), m);
-    } else {
-      m = { head: Number(meta.head) || 0, tail: Number(meta.tail) || 0 };
-      // guard bad states
-      if (m.head < 0 || m.tail < m.head) {
-        m = { head: 0, tail: 0 };
-        this.set(this.qkey(queueName), m);
-      }
-    }
-    return m;
-  }
-
-  private saveMeta(queueName: string, meta: { head: number; tail: number }): void {
-    this.set(this.qkey(queueName), meta);
-  }
-
-  private sizeFromMeta(meta: { head: number; tail: number }): number {
-    return Math.max(0, meta.tail - meta.head);
-  }
-
-  private tryDispatchEvent(
-    queueName: string,
-    kind: 'pushed' | 'popped' | 'empty' | 'cleared',
-    _key: string | null, // kept for interface parity, but not used in payload
-    message: StoreValue | null
-  ): void {
-    try {
-      // Python version currently emits only "message"; keep parity here.
-      this.dispatcher.dispatchEvent(this.eventName(queueName, kind), { message });
-      // If you want richer payloads, uncomment and adjust listeners accordingly:
-      // this.dispatcher.dispatchEvent(this.eventName(queueName, kind), {
-      //   queue: queueName, key: _key, message, op: kind
-      // });
-    } catch {
-      // ignore listener failures
-    }
-  }
-
-  // Advance head to skip holes caused by eviction or manual deletes
-  private advanceHeadPastHoles(queueName: string, meta: { head: number; tail: number }): { head: number; tail: number } {
-    while (meta.head < meta.tail) {
-      const k = this.qkey(queueName, meta.head);
-      if (this.get(k) != null) break;
-      meta.head += 1;
-    }
-    return meta;
-  }
-
-  // ===== public API (Python parity) =====
-
-  addListener(
-    queueName: string,
-    callback: EventCallback,
-    eventKind: 'pushed' | 'popped' | 'empty' | 'cleared' = 'pushed',
-    listenerId?: string
-  ): string {
-    return this.dispatcher.setEvent(this.eventName(queueName, eventKind), callback, listenerId);
-  }
-
-  removeListener(listenerId: string): number {
-    return this.dispatcher.deleteEvent(listenerId);
-  }
-
-  listListeners(
-    queueName?: string,
-    event?: 'pushed' | 'popped' | 'empty' | 'cleared'
-  ): Array<[string, EventCallback]> {
-    const evts = this.dispatcher.events(); // -> Array<[eventKey, cb]>
-    if (!queueName && !event) {
-      return evts.filter(([, cb]) => typeof cb === 'function') as Array<[string, EventCallback]>;
+    constructor(
+        model: DictStorage,
+        maxMemoryMb: number = 1024,
+        policy: 'lru' | 'fifo' = 'lru',
+        onEvict: EvictHandler = () => undefined,
+        pinned: Iterable<string> = [],
+        dispatcher?: EventDispatcherController
+    ) {
+        super(model, maxMemoryMb, policy, onEvict, pinned);
+        this.dispatcher = dispatcher ?? new EventDispatcherController(model);
     }
 
-    const out: Array<[string, EventCallback]> = [];
-    for (const [k, cb] of evts) {
-      if (typeof cb !== 'function') continue;
-      // expect "Event:MQE:<queue>:<kind>:<id>" OR "{MQE}:{queue}:{kind}" depending on your dispatcher
-      const parts = k.split(':');
-      // Try to locate "MQE" and read following parts safely
-      const mqeIdx = parts.indexOf(MessageQueueController.ROOT_KEY_EVENT);
-      if (mqeIdx < 0) continue;
-      const qn = parts[mqeIdx + 1];
-      const kind = parts[mqeIdx + 2] as 'pushed' | 'popped' | 'empty' | 'cleared' | undefined;
-      if (!qn || !kind) continue;
-      if (queueName && qn !== queueName) continue;
-      if (event && kind !== event) continue;
-      out.push([k, cb]);
-    }
-    return out;
-  }
-
-  push(message: StoreValue, queueName: string = 'default'): string {
-    const meta = this.loadMeta(queueName);
-    const idx = meta.tail;
-    const key = this.qkey(queueName, idx);
-    this.set(key, message);
-    meta.tail = idx + 1;
-    this.saveMeta(queueName, meta);
-    this.tryDispatchEvent(queueName, 'pushed', key, message);
-    return key;
-  }
-
-  popItem(queueName: string = 'default', peek: boolean = false): [string | null, StoreValue | null] {
-    let meta = this.loadMeta(queueName);
-    meta = this.advanceHeadPastHoles(queueName, meta);
-
-    if (meta.head >= meta.tail) return [null, null];
-
-    const key = this.qkey(queueName, meta.head);
-    const msg = this.get(key) as StoreValue | null;
-
-    if (msg == null) {
-      // Rare due to advance, treat as empty this turn and retry after moving head
-      meta.head += 1;
-      this.saveMeta(queueName, meta);
-      meta = this.advanceHeadPastHoles(queueName, meta);
-      return meta.head >= meta.tail ? [null, null] : this.popItem(queueName, peek);
+    // ===== encoding helpers =====
+    private qname(queueName: string): string {
+        const cached = MessageQueueController.qEncCache.get(queueName);
+        if (cached) return cached;
+        const enc = b64urlEncode(queueName);
+        MessageQueueController.qEncCache.set(queueName, enc);
+        MessageQueueController.qDecCache.set(enc, queueName);
+        return enc;
     }
 
-    if (peek) return [key, msg];
-
-    this.delete(key);
-    meta.head += 1;
-    this.saveMeta(queueName, meta);
-
-    this.tryDispatchEvent(queueName, 'popped', key, msg);
-    if (this.sizeFromMeta(meta) === 0) {
-      this.tryDispatchEvent(queueName, 'empty', null, null);
+    // ===== internal key builders =====
+    private qkey(queueName: string, index?: number | string | null): string {
+        const parts = [MessageQueueController.ROOT_KEY, this.qname(queueName)];
+        if (index !== undefined && index !== null) parts.push(String(index));
+        return parts.join(':');
     }
-    return [key, msg];
-  }
 
-  pop(queueName: string = 'default'): StoreValue | null {
-    const [, msg] = this.popItem(queueName, false);
-    return msg;
-  }
-
-  peek(queueName: string = 'default'): StoreValue | null {
-    const [, msg] = this.popItem(queueName, true);
-    return msg;
-  }
-
-  queueSize(queueName: string = 'default'): number {
-    return this.sizeFromMeta(this.loadMeta(queueName));
-  }
-
-  clear(queueName: string = 'default'): void {
-    // delete entries
-    for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`)) {
-      this.delete(key);
+    private eventName(queueName: string, kind: 'pushed' | 'popped' | 'empty' | 'cleared'): string {
+        return `${MessageQueueController.ROOT_KEY_EVENT}:${this.qname(queueName)}:${kind}`;
     }
-    // delete meta
-    this.delete(this.qkey(queueName));
-    this.tryDispatchEvent(queueName, 'cleared', null, null);
-  }
 
-  listQueues(): string[] {
-    const qs = new Set<string>();
-    for (const k of this.keys(`${MessageQueueController.ROOT_KEY}:*`)) {
-      const parts = k.split(':');
-      // accept meta ("ROOT:queue") and entries ("ROOT:queue:index")
-      if (parts.length >= 2 && parts[0] === MessageQueueController.ROOT_KEY) {
-        qs.add(parts[1]);
-      }
+    private loadMeta(queueName: string): { head: number; tail: number } {
+        const meta = this.get(this.qkey(queueName)) as { head: number; tail: number } | null;
+        let m: { head: number; tail: number };
+        if (!meta) {
+            m = { head: 0, tail: 0 };
+            this.set(this.qkey(queueName), m);
+        } else {
+            m = { head: Number(meta.head) || 0, tail: Number(meta.tail) || 0 };
+            if (m.head < 0 || m.tail < m.head) {
+                m = { head: 0, tail: 0 };
+                this.set(this.qkey(queueName), m);
+            }
+        }
+        return m;
     }
-    return Array.from(qs).sort();
-  }
+
+    private saveMeta(queueName: string, meta: { head: number; tail: number }): void {
+        this.set(this.qkey(queueName), meta);
+    }
+
+    private sizeFromMeta(meta: { head: number; tail: number }): number {
+        return Math.max(0, meta.tail - meta.head);
+    }
+
+    private tryDispatchEvent(
+        queueName: string,
+        kind: 'pushed' | 'popped' | 'empty' | 'cleared',
+        _key: string | null, // kept for parity
+        message: StoreValue | null
+    ): void {
+        try {
+            this.dispatcher.dispatchEvent(this.eventName(queueName, kind), { message });
+        } catch {
+            // ignore listener failures
+        }
+    }
+
+    private advanceHeadPastHoles(queueName: string, meta: { head: number; tail: number }): { head: number; tail: number } {
+        while (meta.head < meta.tail) {
+            const k = this.qkey(queueName, meta.head);
+            if (this.get(k) != null) break;
+            meta.head += 1;
+        }
+        return meta;
+    }
+
+    addListener(
+        queueName: string,
+        callback: EventCallback,
+        eventKind: 'pushed' | 'popped' | 'empty' | 'cleared' = 'pushed',
+        listenerId?: string
+    ): string {
+        return this.dispatcher.setEvent(this.eventName(queueName, eventKind), callback, listenerId);
+    }
+
+    removeListener(listenerId: string): number {
+        return this.dispatcher.deleteEvent(listenerId);
+    }
+
+    listListeners(
+        queueName?: string,
+        eventKind?: 'pushed' | 'popped' | 'empty' | 'cleared'
+    ): Array<[string, EventCallback]> {
+        const evts = this.dispatcher.events(); // [storageKey, cb]
+        const wantAll = !queueName && !eventKind;
+        if (wantAll) {
+            return evts.filter(([, cb]) => typeof cb === 'function') as Array<[string, EventCallback]>;
+        }
+
+        const encodedWantedQueue = queueName ? this.qname(queueName) : undefined;
+        const out: Array<[string, EventCallback]> = [];
+
+        for (const [storageKey, cb] of evts) {
+            if (typeof cb !== 'function') continue;
+
+            // storageKey = "_Event:<b64(eventName)>:<id>"
+            const parts = storageKey.split(':');
+            if (parts.length < 3 || parts[0] !== EventDispatcherController.ROOT_KEY) continue;
+            const encEventName = parts[1];
+
+            // Decode the logical event name: "MQE:<b64(queue)>:<kind>"
+            let logical: string;
+            try {
+                logical = b64urlDecode(encEventName);
+            } catch {
+                continue;
+            }
+            const segs = logical.split(':');
+            if (segs.length < 3 || segs[0] !== MessageQueueController.ROOT_KEY_EVENT) continue;
+            const qn = segs[1]; // encoded queue name
+            const kind = segs[2] as 'pushed' | 'popped' | 'empty' | 'cleared';
+
+            if (encodedWantedQueue && qn !== encodedWantedQueue) continue;
+            if (eventKind && kind !== eventKind) continue;
+
+            out.push([storageKey, cb]);
+        }
+
+        return out;
+    }
+
+    push(message: StoreValue, queueName: string = 'default'): string {
+        const meta = this.loadMeta(queueName);
+        const idx = meta.tail;
+        const key = this.qkey(queueName, idx);
+        this.set(key, message);
+        meta.tail = idx + 1;
+        this.saveMeta(queueName, meta);
+        this.tryDispatchEvent(queueName, 'pushed', key, message);
+        return key;
+    }
+
+    popItem(queueName: string = 'default', peek: boolean = false): [string | null, StoreValue | null] {
+        let meta = this.loadMeta(queueName);
+        meta = this.advanceHeadPastHoles(queueName, meta);
+
+        if (meta.head >= meta.tail) return [null, null];
+
+        const key = this.qkey(queueName, meta.head);
+        const msg = this.get(key) as StoreValue | null;
+
+        if (msg == null) {
+            meta.head += 1;
+            this.saveMeta(queueName, meta);
+            meta = this.advanceHeadPastHoles(queueName, meta);
+            return meta.head >= meta.tail ? [null, null] : this.popItem(queueName, peek);
+        }
+
+        if (peek) return [key, msg];
+
+        this.delete(key);
+        meta.head += 1;
+        this.saveMeta(queueName, meta);
+
+        this.tryDispatchEvent(queueName, 'popped', key, msg);
+        if (this.sizeFromMeta(meta) === 0) {
+            this.tryDispatchEvent(queueName, 'empty', null, null);
+        }
+        return [key, msg];
+    }
+
+    pop(queueName: string = 'default'): StoreValue | null {
+        const [, msg] = this.popItem(queueName, false);
+        return msg;
+    }
+
+    peek(queueName: string = 'default'): StoreValue | null {
+        const [, msg] = this.popItem(queueName, true);
+        return msg;
+    }
+
+    queueSize(queueName: string = 'default'): number {
+        return this.sizeFromMeta(this.loadMeta(queueName));
+    }
+
+    clear(queueName: string = 'default'): void {
+        // delete entries for this queue (encoded name)
+        const enc = this.qname(queueName);
+        for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:${enc}:*`)) {
+            this.delete(key);
+        }
+        // delete meta
+        this.delete(this.qkey(queueName));
+        this.tryDispatchEvent(queueName, 'cleared', null, null);
+    }
+
+    listQueues(): string[] {
+        const qs = new Set<string>();
+        for (const k of this.keys(`${MessageQueueController.ROOT_KEY}:*`)) {
+            const parts = k.split(':');
+            if (parts.length >= 2 && parts[0] === MessageQueueController.ROOT_KEY) {
+                const enc = parts[1];
+                const name = MessageQueueController.qDecCache.get(enc) ?? (isB64url(enc) ? b64urlDecode(enc) : enc);
+                // backfill caches
+                MessageQueueController.qEncCache.set(name, enc);
+                MessageQueueController.qDecCache.set(enc, name);
+                qs.add(name);
+            }
+        }
+        return Array.from(qs).sort();
+    }
 }
 
 export class LocalVersionController {
@@ -763,7 +854,7 @@ export class LocalVersionController {
         return bytes / (1024 * 1024);
     }
 
-    addOperation(operation: Operation, revert: Operation | null = null, verbose=false): string | null {
+    addOperation(operation: Operation, revert: Operation | null = null, verbose = false): string | null {
         const opuuid = uuidv4();
         this.client.set(
             `${LocalVersionController.TABLENAME}:${opuuid}`,
@@ -781,7 +872,7 @@ export class LocalVersionController {
 
         if (this.estimateMemoryMB() > this.limitMemoryMB) {
             const warning = `[LocalVersionController] Warning: memory usage ${this.estimateMemoryMB().toFixed(1)} MB exceeds limit of ${this.limitMemoryMB} MB`;
-            verbose??console.warn(warning);
+            verbose ?? console.warn(warning);
             return warning;
         }
         return null;
@@ -894,8 +985,8 @@ export class SingletonKeyValueStorage {
                 return false;
             }
         }
-        for (const name of eventNames) {            
-            const fn = (...args: any[])=>slave[name](...args);
+        for (const name of eventNames) {
+            const fn = (...args: any[]) => slave[name](...args);
             if (typeof fn === 'function') {
                 this.setEvent(name, fn, slave.uuid);
             } else {

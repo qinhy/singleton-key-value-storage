@@ -1,12 +1,47 @@
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
 import { PEMFileReader, SimpleRSAChunkEncryptor } from './RSA.js';
+import { Buffer } from 'buffer';
 
-/** @typedef {any} StoreValue */
-/** @typedef {{[key: string]: StoreValue}} StoreRecord */
-/** @typedef {Array<any>} Operation */
-/** @typedef {(...args: any[]) => unknown} EventCallback */
-/** @typedef {(key: string, value: StoreValue | null) => void} EvictHandler */
+export function b64urlEncode(input) {
+  // Prefer Node Buffer if present; fall back to browser APIs
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(input, 'utf8')
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
+  } else {
+    const enc = new TextEncoder();
+    const bytes = enc.encode(input);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    const b64 = btoa(bin);
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+}
+
+export function b64urlDecode(input) {
+  const padLen = (4 - (input.length % 4)) % 4;
+  const withPad = input.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(padLen);
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(withPad, 'base64').toString('utf8');
+  } else {
+    const bin = atob(withPad);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const dec = new TextDecoder();
+    return dec.decode(bytes);
+  }
+}
+
+export function isB64url(s) {
+  try {
+    return b64urlEncode(b64urlDecode(s)) === s;
+  } catch {
+    return false;
+  }
+}
 
 function getGlobalCrypto() {
     if (typeof globalThis === 'undefined') return null;
@@ -406,61 +441,85 @@ export class MemoryLimitedDictStorageController extends DictStorageController {
     }
 }
 
+
 export class EventDispatcherController extends DictStorageController {
-    static ROOT_KEY = '_Event';
+  static ROOT_KEY = '_Event';
+  static nameEncCache = new Map([['*', '*']]); // orig -> b64
+  static nameDecCache = new Map([['*', '*']]); // b64  -> orig
 
-    eventKey(eventName, eventId) {
-        return `${EventDispatcherController.ROOT_KEY}:${eventName}:${eventId}`;
-    }
+  encodeEventName(name) {
+    if (name === '*') return '*'; // wildcard must remain wildcard
+    const cached = EventDispatcherController.nameEncCache.get(name);
+    if (cached) return cached;
+    const enc = b64urlEncode(name);
+    EventDispatcherController.nameEncCache.set(name, enc);
+    EventDispatcherController.nameDecCache.set(enc, name);
+    return enc;
+  }
 
-    eventPattern(eventName = '*', eventId = '*') {
-        return this.eventKey(eventName, eventId);
-    }
+  decodeEventName(encoded) {
+    const cached = EventDispatcherController.nameDecCache.get(encoded);
+    if (cached) return cached;
+    const dec = isB64url(encoded) ? b64urlDecode(encoded) : encoded;
+    // populate caches for future
+    EventDispatcherController.nameEncCache.set(dec, encoded);
+    EventDispatcherController.nameDecCache.set(encoded, dec);
+    return dec;
+  }
 
-    findEventKeys(eventId) {
-        return this.keys(this.eventPattern('*', eventId));
-    }
+  eventKey(eventName, eventId) {
+    return `${EventDispatcherController.ROOT_KEY}:${this.encodeEventName(eventName)}:${eventId}`;
+  }
 
-    events() {
-        return this.keys(this.eventPattern()).map(key => [key, this.get(key)]);
-    }
+  eventPattern(eventName = '*', eventId = '*') {
+    const namePart = this.encodeEventName(eventName);
+    return `${EventDispatcherController.ROOT_KEY}:${namePart}:${eventId ?? '*'}`;
+  }
 
-    getEvent(eventId) {
-        return this.findEventKeys(eventId).map(key => this.get(key));
-    }
+  findEventKeys(eventId) {
+    return this.keys(this.eventPattern('*', eventId));
+  }
+  
+  events() {
+    return this.keys(this.eventPattern()).map(k => [k, this.get(k)]);
+  }
 
-    deleteEvent(eventId) {
-        const keys = this.findEventKeys(eventId);
-        for (const key of keys) {
-            this.delete(key);
+  getEvent(eventId) {
+    return this.findEventKeys(eventId).map(k => this.get(k));
+  }
+
+  deleteEvent(eventId) {
+    const keys = this.findEventKeys(eventId);
+    for (const k of keys) this.delete(k);
+    return keys.length;
+  }
+  
+  setEvent(eventName, callback, id) {
+    const eventId = id ?? uuidv4();
+    this.set(this.eventKey(eventName, eventId), callback);
+    return eventId;
+  }
+  
+  dispatchEvent(eventName, ...args) {
+    for (const key of this.keys(this.eventPattern(eventName, '*'))) {
+      const entry = this.get(key);
+      if (typeof entry === 'function') {
+        try {
+          entry(...args);
+        } catch {
+          // swallow callback errors
         }
-        return keys.length;
+      }
     }
+  }
 
-    setEvent(eventName, callback, id) {
-        const eventId = id ?? uuidv4();
-        this.set(this.eventKey(eventName, eventId), callback);
-        return eventId;
-    }
-
-    dispatchEvent(eventName, ...args) {
-        for (const key of this.keys(this.eventPattern(eventName, '*'))) {
-            const entry = this.get(key);
-            
-            if (typeof entry === 'function') {
-                try {
-                    entry(...args);
-                } catch {
-                    // swallow callback errors
-                }
-            }
-        }
-    }
 }
 
 export class MessageQueueController extends MemoryLimitedDictStorageController {
   static ROOT_KEY = '_MessageQueue';
   static ROOT_KEY_EVENT = 'MQE';
+  static qEncCache = new Map([['*', '*']]); // orig -> b64
+  static qDecCache = new Map([['*', '*']]); // b64  -> orig
 
   constructor(
     model,
@@ -474,20 +533,26 @@ export class MessageQueueController extends MemoryLimitedDictStorageController {
     this.dispatcher = dispatcher ?? new EventDispatcherController(model);
   }
 
-  // ===== helpers =====
-  qkey(queue, index = null) {
-    const parts = [MessageQueueController.ROOT_KEY, queue];
-    if (index !== null && index !== undefined) parts.push(String(index));
+  qname(queueName) {
+    const cached = MessageQueueController.qEncCache.get(queueName);
+    if (cached) return cached;
+    const enc = b64urlEncode(queueName);
+    MessageQueueController.qEncCache.set(queueName, enc);
+    MessageQueueController.qDecCache.set(enc, queueName);
+    return enc;
+  }
+
+  qkey(queueName, index) {
+    const parts = [MessageQueueController.ROOT_KEY, this.qname(queueName)];
+    if (index !== undefined && index !== null) parts.push(String(index));
     return parts.join(':');
   }
 
   eventName(queueName, kind) {
-    // kind in: 'pushed' | 'popped' | 'empty' | 'cleared'
-    return `${MessageQueueController.ROOT_KEY_EVENT}:${queueName}:${kind}`;
+    return `${MessageQueueController.ROOT_KEY_EVENT}:${this.qname(queueName)}:${kind}`;
   }
 
   loadMeta(queueName) {
-    // meta stored at "_MessageQueue:<queue>"
     const meta = this.get(this.qkey(queueName));
     let m;
     if (!meta) {
@@ -513,18 +578,12 @@ export class MessageQueueController extends MemoryLimitedDictStorageController {
 
   tryDispatchEvent(queueName, kind, _key, message) {
     try {
-      // Python parity: only pass { message }.
       this.dispatcher.dispatchEvent(this.eventName(queueName, kind), { message });
-      // If you prefer richer payloads, swap to:
-      // this.dispatcher.dispatchEvent(this.eventName(queueName, kind), {
-      //   queue: queueName, key: _key, message, op: kind
-      // });
     } catch {
-      /* ignore listener failures */
+      // ignore listener failures
     }
   }
 
-  // Skip holes at head (evictions/manual deletes) so pop doesn't get stuck
   advanceHeadPastHoles(queueName, meta) {
     while (meta.head < meta.tail) {
       const k = this.qkey(queueName, meta.head);
@@ -534,39 +593,53 @@ export class MessageQueueController extends MemoryLimitedDictStorageController {
     return meta;
   }
 
-  // ===== public API =====
-
   addListener(queueName, callback, eventKind = 'pushed', listenerId) {
     return this.dispatcher.setEvent(this.eventName(queueName, eventKind), callback, listenerId);
   }
-
+  
   removeListener(listenerId) {
     return this.dispatcher.deleteEvent(listenerId);
   }
-
-  listListeners(queueName, event /* 'pushed' | 'popped' | 'empty' | 'cleared' */) {
-    const evts = this.dispatcher.events(); // -> Array<[eventKey, cb]>
-    if (!queueName && !event) {
+  
+  listListeners(queueName, eventKind) {
+    const evts = this.dispatcher.events(); // [storageKey, cb]
+    const wantAll = !queueName && !eventKind;
+    if (wantAll) {
       return evts.filter(([, cb]) => typeof cb === 'function');
     }
 
+    const encodedWantedQueue = queueName ? this.qname(queueName) : undefined;
     const out = [];
-    for (const [k, cb] of evts) {
+
+    for (const [storageKey, cb] of evts) {
       if (typeof cb !== 'function') continue;
-      // Expect "...:MQE:<queue>:<kind>:<id>" or "MQE:<queue>:<kind>"
-      const parts = k.split(':');
-      const mqeIdx = parts.indexOf(MessageQueueController.ROOT_KEY_EVENT);
-      if (mqeIdx < 0) continue;
-      const qn = parts[mqeIdx + 1];
-      const kind = parts[mqeIdx + 2];
-      if (!qn || !kind) continue;
-      if (queueName && qn !== queueName) continue;
-      if (event && kind !== event) continue;
-      out.push([k, cb]);
+
+      // storageKey = "_Event:<b64(eventName)>:<id>"
+      const parts = storageKey.split(':');
+      if (parts.length < 3 || parts[0] !== EventDispatcherController.ROOT_KEY) continue;
+      const encEventName = parts[1];
+
+      // Decode the logical event name: "MQE:<b64(queue)>:<kind>"
+      let logical;
+      try {
+        logical = b64urlDecode(encEventName);
+      } catch {
+        continue;
+      }
+      const segs = logical.split(':');
+      if (segs.length < 3 || segs[0] !== MessageQueueController.ROOT_KEY_EVENT) continue;
+      const qn = segs[1]; // encoded queue name
+      const kind = segs[2];
+
+      if (encodedWantedQueue && qn !== encodedWantedQueue) continue;
+      if (eventKind && kind !== eventKind) continue;
+
+      out.push([storageKey, cb]);
     }
+
     return out;
   }
-
+  
   push(message, queueName = 'default') {
     const meta = this.loadMeta(queueName);
     const idx = meta.tail;
@@ -577,7 +650,7 @@ export class MessageQueueController extends MemoryLimitedDictStorageController {
     this.tryDispatchEvent(queueName, 'pushed', key, message);
     return key;
   }
-
+  
   popItem(queueName = 'default', peek = false) {
     let meta = this.loadMeta(queueName);
     meta = this.advanceHeadPastHoles(queueName, meta);
@@ -588,7 +661,6 @@ export class MessageQueueController extends MemoryLimitedDictStorageController {
     const msg = this.get(key);
 
     if (msg == null) {
-      // Rare due to advance; treat as empty this turn and retry after moving head
       meta.head += 1;
       this.saveMeta(queueName, meta);
       meta = this.advanceHeadPastHoles(queueName, meta);
@@ -607,35 +679,45 @@ export class MessageQueueController extends MemoryLimitedDictStorageController {
     }
     return [key, msg];
   }
-
+  
   pop(queueName = 'default') {
     const [, msg] = this.popItem(queueName, false);
     return msg;
   }
-
+  
   peek(queueName = 'default') {
     const [, msg] = this.popItem(queueName, true);
     return msg;
   }
-
+  
   queueSize(queueName = 'default') {
     return this.sizeFromMeta(this.loadMeta(queueName));
   }
-
+  
   clear(queueName = 'default') {
-    for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:${queueName}:*`)) {
+    // delete entries for this queue (encoded name)
+    const enc = this.qname(queueName);
+    for (const key of this.keys(`${MessageQueueController.ROOT_KEY}:${enc}:*`)) {
       this.delete(key);
     }
+    // delete meta
     this.delete(this.qkey(queueName));
     this.tryDispatchEvent(queueName, 'cleared', null, null);
   }
-
+  
   listQueues() {
     const qs = new Set();
     for (const k of this.keys(`${MessageQueueController.ROOT_KEY}:*`)) {
       const parts = k.split(':');
       if (parts.length >= 2 && parts[0] === MessageQueueController.ROOT_KEY) {
-        qs.add(parts[1]);
+        const enc = parts[1];
+        const name =
+          MessageQueueController.qDecCache.get(enc) ??
+          (isB64url(enc) ? b64urlDecode(enc) : enc);
+        // backfill caches
+        MessageQueueController.qEncCache.set(name, enc);
+        MessageQueueController.qDecCache.set(enc, name);
+        qs.add(name);
       }
     }
     return Array.from(qs).sort();
