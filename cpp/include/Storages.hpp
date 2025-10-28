@@ -26,22 +26,10 @@
 using json = nlohmann::json;
 
 // ===================== Utilities =====================
-
-inline std::string uuid_v4() {
-    static thread_local std::mt19937_64 rng{std::random_device{}()};
-    std::uniform_int_distribution<uint64_t> dist;
-    uint64_t a = dist(rng), b = dist(rng);
-    // Set version and variant bits
-    a = (a & 0xFFFFFFFFFFFF0FFFULL) | 0x0000000000004000ULL; // version 4
-    b = (b & 0x3FFFFFFFFFFFFFFFULL) | 0x8000000000000000ULL; // variant 1
-    std::ostringstream oss;
-    oss << std::hex << std::setfill('0')
-        << std::setw(8)  << ((a >> 32) & 0xFFFFFFFFULL) << "-"
-        << std::setw(4)  << ((a >> 16) & 0xFFFFULL)     << "-"
-        << std::setw(4)  << ((a >>  0) & 0xFFFFULL)     << "-"
-        << std::setw(4)  << ((b >> 48) & 0xFFFFULL)     << "-"
-        << std::setw(12) << ( b        & 0x0000FFFFFFFFFFFFULL);
-    return oss.str();
+inline std::string uuid_v4(){
+    static std::mt19937 generator{std::random_device{}()};
+    static uuids::uuid_random_generator uuidGen{generator};
+    return uuids::to_string(uuidGen());
 }
 
 // ---- base64url (no padding) ----
@@ -247,7 +235,7 @@ struct AbstractStorageController {
         std::ofstream ofs(path);
         ofs << dumps();
     }
-    virtual void load_file(const std::string& path) {
+    virtual void load(const std::string& path) {
         std::ifstream ifs(path);
         std::stringstream buf; buf << ifs.rdbuf();
         loads(buf.str());
@@ -466,7 +454,7 @@ struct EventDispatcherController {
         return out;
     }
 
-    int delete_event(const std::string& id) {
+    int erase_event(const std::string& id) {
         return callbacks.erase(id);
     }
 
@@ -567,7 +555,7 @@ struct MessageQueueController : public PythonMemoryLimitedDictStorageController 
         return dispatcher.set_event(event_name(queue_name, event_kind), std::move(cb), listener_id);
     }
     int remove_listener(const std::string& listener_id) {
-        return dispatcher.delete_event(listener_id);
+        return dispatcher.erase_event(listener_id);
     }
 
     std::string push(const json& message, const std::string& q="default") {
@@ -810,189 +798,304 @@ struct LocalVersionController {
 };
 
 // ===================== SingletonKeyValueStorage =====================
+// Assumes: json = nlohmann::json
 
 struct SingletonKeyValueStorage {
+    // --- config
     bool version_control = false;
 
-    // Optional encryptor for {"rjson": "..."} wrapping
-    struct Encryptor {
-        virtual ~Encryptor() = default;
-        virtual std::string encrypt_string(const std::string&) = 0;
-        virtual std::string decrypt_string(const std::string&) = 0;
-    };
-    Encryptor* encryptor = nullptr;
+    rjson::SimpleRSAChunkEncryptor* encryptor = nullptr;
 
-    // active backend
+    // --- runtime
     std::unique_ptr<AbstractStorageController> conn;
-    EventDispatcherController event_disp;
-    LocalVersionController verc;
-    MessageQueueController mq;
+    EventDispatcherController _event_dispa;
+    LocalVersionController _verc;
+    MessageQueueController message_queue;
 
-    SingletonKeyValueStorage(bool version_control_=false, Encryptor* enc=nullptr)
-    : version_control(version_control_), encryptor(enc),
-      conn(std::make_unique<DictStorageController>(DictStorageController::build())),
-      event_disp(),
-      verc(),
-      mq(DictStorageController::build_tmp().model)
-    {}
+    // --- ctor / backend switch (matches Python flow)
+    explicit SingletonKeyValueStorage(bool version_control_ = false,
+                                      rjson::SimpleRSAChunkEncryptor* enc = nullptr)
+        : version_control(version_control_), encryptor(enc),
+          _event_dispa(EventDispatcherController{}),
+          message_queue(DictStorageController::build_tmp().model)
+    {
+        switch_backend(std::make_unique<DictStorageController>(
+            DictStorageController::build()));
+    }
 
     SingletonKeyValueStorage& switch_backend(std::unique_ptr<AbstractStorageController> controller) {
-        event_disp = EventDispatcherController{};
-        verc = LocalVersionController{};
-        mq = MessageQueueController(DictStorageController::build_tmp().model);
-        conn = std::move(controller);
+        _event_dispa   = EventDispatcherController{};
+        _verc          = LocalVersionController{};
+        message_queue  = MessageQueueController(DictStorageController::build_tmp().model);
+        conn           = std::move(controller);
         return *this;
     }
 
-    // --- helpers
-    bool exists(const std::string& key) {
-        try { return conn->exists(key); } catch (...) { return false; }
-    }
-    std::vector<std::string> keys(const std::string& pattern="*") {
-        try { return conn->keys(pattern); } catch (...) { return {}; }
+    // --- tiny logger
+    void _print(const std::string& msg) const {
+        std::cerr << "[" << typeid(*this).name() << "]: " << msg << "\n";
     }
 
-    std::optional<json> get(const std::string& key) {
-        try {
-            auto v = conn->get(key);
-            if (!v) return std::nullopt;
-            if (encryptor && v->is_object() && v->contains("rjson")) {
-                auto s = (*v)["rjson"].get<std::string>();
-                return json::parse(encryptor->decrypt_string(s));
+    // --- "slave" helpers (explicit id + callbacks, since no reflection)
+    using Callback = EventDispatcherController::Callback;
+
+    bool delete_slave(const std::string& id) {
+        return _event_dispa.erase_event(id) > 0;
+    }
+
+    // Register multiple callbacks under a single id (default events: "set","erase")
+    bool add_slave(const std::string& id,
+                   const std::vector<std::pair<std::string, Callback>>& event_map = {}) {
+        bool ok = true;
+        if (id.empty()) {
+            _print("cannot register slave: empty id");
+            return false;
+        }
+        if (event_map.empty()) {
+            // nothing to attach => warn but don't fail
+            _print("add_slave called with empty event_map — nothing to register");
+            return true;
+        }
+        for (const auto& [name, cb] : event_map) {
+            try {
+                _event_dispa.set_event(name, cb, id);
+            } catch (const std::exception& e) {
+                _print(std::string("failed to set_event '") + name + "': " + e.what());
+                ok = false;
+            } catch (...) {
+                _print(std::string("failed to set_event '") + name + "': unknown error");
+                ok = false;
             }
-            return v;
+        }
+        return ok;
+    }
+
+    // ---------- Unified editing pipeline (Python-like) ----------
+
+    // local raw edit (no encryption, no events, no VC)
+    bool _edit_local(const std::string& func_name,
+                     const std::optional<std::string>& key = std::nullopt,
+                     const std::optional<json>& value = std::nullopt)
+    {
+        try {
+            if (func_name == "set") {
+                if (!key || !value) return false;
+                conn->set(*key, *value);
+                return true;
+            } else if (func_name == "erase") {
+                if (!key) return false;
+                return conn->erase(*key);
+            } else if (func_name == "clean") {
+                conn->clean();
+                return true;
+            } else if (func_name == "load") {
+                if (!key) return false;           // here 'key' holds path for parity with Python
+                conn->load(*key);
+                return true;
+            } else if (func_name == "loads") {
+                if (!value) return false;         // value can be string or json
+                if (value->is_string()) conn->loads(value->get<std::string>());
+                else                     conn->loads(value->dump());
+                return true;
+            } else {
+                _print("no func of '" + func_name + "'. return.");
+                return false;
+            }
+        } catch (const std::exception& e) {
+            _print(e.what());
+            return false;
         } catch (...) {
-            return std::nullopt;
+            _print("unknown error in _edit_local");
+            return false;
         }
     }
 
-    std::string dumps() {
+    // encryption + event dispatch
+    bool _edit(const std::string& func_name,
+               const std::optional<std::string>& key = std::nullopt,
+               std::optional<json> value = std::nullopt)
+    {
+        // wrap only for "set"
+        std::optional<json> to_store = value;
+        if (encryptor && func_name == "set" && value) {
+            to_store = json{{"rjson", encryptor->encrypt_string(value->dump())}};
+        }
+
+        bool ok = _edit_local(func_name, key, to_store);
+
+        // event payload mirrors Python spirit: pass the raw args (unencrypted)
         try {
-            json root = json::object();
-            for (auto& k : keys("*")) {
-                auto v = get(k);
-                if (v) root[k] = *v;
+            json payload = json::object();
+            if (key)   payload["key"] = *key;
+            if (value) payload["value"] = *value;
+            _event_dispa.dispatch_event(func_name, payload);
+        } catch (...) {
+            // don't fail the operation due to event dispatch errors
+        }
+
+        return ok;
+    }
+
+    // VC wrapper + try/catch (main entry)
+    bool _try_edit_error(const std::string& func_name,
+                         const std::optional<std::string>& key = std::nullopt,
+                         const std::optional<json>& value = std::nullopt)
+    {
+        // --- local version control bookkeeping, store ops as arrays like ["set", key, value]
+        auto to_args = [&](const std::string& f,
+                           const std::optional<std::string>& k,
+                           const std::optional<json>& v) -> json {
+            json a = json::array();
+            a.push_back(f);
+            if (k) a.push_back(*k);
+            if (v) a.push_back(*v);
+            return a;
+        };
+        auto current_snapshot_revert = [&]() -> json {
+            return json::array({"loads", dumps()});
+        };
+
+        if (version_control) {
+            if (func_name == "set") {
+                if (!key) return false;
+                json revert;
+                if (exists(*key)) {
+                    revert = json::array({"set", *key, get(*key).value_or(json())});
+                } else {
+                    revert = json::array({"erase", *key});
+                }
+                _verc.add_operation(to_args("set", key, value), revert);
+
+            } else if (func_name == "erase") {
+                if (!key) return false;
+                json revert = json::array({"set", *key, get(*key).value_or(json())});
+                _verc.add_operation(to_args("erase", key, std::nullopt), revert);
+
+            } else if (func_name == "clean" || func_name == "load" || func_name == "loads") {
+                json revert = current_snapshot_revert();
+                _verc.add_operation(to_args(func_name, key, value), revert);
             }
-            return root.dump();
-        } catch (...) { return "{}"; }
-    }
-
-    bool set(const std::string& key, json value) {
-        auto args = json::array({"set", key, value});
-        if (version_control) {
-            json revert;
-            if (exists(key)) {
-                revert = json::array({"set", key, get(key).value_or(json())});
-            } else {
-                revert = json::array({"delete", key});
-            }
-            verc.add_operation(args, revert);
         }
+
         try {
-            if (encryptor) {
-                json wrapped = json{{"rjson", encryptor->encrypt_string(value.dump())}};
-                conn->set(key, wrapped);
-            } else {
-                conn->set(key, value);
-            }
-            event_disp.dispatch_event("set", json{{"key", key}, {"value", value}});
-            return true;
-        } catch (const std::exception& e) { (void)e; return false; }
+            return _edit(func_name, key, value);
+        } catch (const std::exception& e) {
+            _print(e.what());
+            return false;
+        } catch (...) {
+            _print("unknown error in _try_edit_error");
+            return false;
+        }
     }
 
-    bool erase(const std::string& key) {
-        auto args = json::array({"delete", key});
-        if (version_control) {
-            json revert = json::array({"set", key, get(key).value_or(json())});
-            verc.add_operation(args, revert);
-        }
-        try {
-            bool ok = conn->erase(key);
-            event_disp.dispatch_event("delete", json{{"key", key}});
-            return ok;
-        } catch (...) { return false; }
-    }
+    // ---------- Public API (Python method names / behavior) ----------
 
-    bool clean() {
-        auto args = json::array({"clean"});
-        if (version_control) {
-            json revert = json::array({"loads", dumps()});
-            verc.add_operation(args, revert);
-        }
-        try {
-            conn->clean();
-            event_disp.dispatch_event("clean");
-            return true;
-        } catch (...) { return false; }
-    }
+    // True/False (on error)
+    bool set(const std::string& key, const json& value)  { return _try_edit_error("set",   key, value); }
+    bool erase(const std::string& key)                   { return _try_edit_error("erase", key, std::nullopt); }
+    bool del_(const std::string& key)                    { return erase(key); } // convenience alias
 
-    bool load_file(const std::string& path) {
-        auto args = json::array({"load", path});
-        if (version_control) {
-            json revert = json::array({"loads", dumps()});
-            verc.add_operation(args, revert);
-        }
-        try { conn->load_file(path); event_disp.dispatch_event("load"); return true; }
-        catch (...) { return false; }
-    }
-    bool loads(const std::string& s) {
-        auto args = json::array({"loads", s});
-        if (version_control) {
-            json revert = json::array({"loads", dumps()});
-            verc.add_operation(args, revert);
-        }
-        try { conn->loads(s); event_disp.dispatch_event("loads"); return true; }
-        catch (...) { return false; }
-    }
+    bool clean()                                         { return _try_edit_error("clean"); }
+
+    bool load(const std::string& json_path)              { return _try_edit_error("load",  json_path, std::nullopt); }
+    bool loads(const std::string& json_str)              { return _try_edit_error("loads", std::nullopt, json_str); }
 
     // Version navigation
     void revert_one_operation() {
-        verc.revert_one_operation([this](const json& rev){
-            // rev like ["set", key, value] or ["delete", key] or ["loads", json_string]
-            if (!rev.is_array() || rev.empty()) return;
-            std::string f = rev[0].get<std::string>();
-            if (f == "set")      this->conn->set(rev[1].get<std::string>(), rev[2]);
-            else if (f == "delete") this->conn->erase(rev[1].get<std::string>());
-            else if (f == "clean")  this->conn->clean();
-            else if (f == "load")   this->conn->load_file(rev[1].get<std::string>());
-            else if (f == "loads")  this->conn->loads(rev[1].is_string()? rev[1].get<std::string>() : rev[1].dump());
+        _verc.revert_one_operation([this](const json& rev){
+            // rev like ["set", key, value] or ["erase", key] or ["loads", json_string]...
+            _apply_array_to_local(rev);
         });
     }
     void forward_one_operation() {
-        verc.forward_one_operation([this](const json& fwd){
-            if (!fwd.is_array() || fwd.empty()) return;
-            std::string f = fwd[0].get<std::string>();
-            if (f == "set")      this->conn->set(fwd[1].get<std::string>(), fwd[2]);
-            else if (f == "delete") this->conn->erase(fwd[1].get<std::string>());
-            else if (f == "clean")  this->conn->clean();
-            else if (f == "load")   this->conn->load_file(fwd[1].get<std::string>());
-            else if (f == "loads")  this->conn->loads(fwd[1].is_string()? fwd[1].get<std::string>() : fwd[1].dump());
+        _verc.forward_one_operation([this](const json& fwd){
+            _apply_array_to_local(fwd);
         });
     }
-
-    std::optional<std::string> current_version() const { return verc.current_version; }
+    std::optional<std::string> get_current_version() const { return _verc.current_version; }
     void local_to_version(const std::string& opuuid) {
-        verc.to_version(opuuid, [this](const json& op){
-            if (!op.is_array() || op.empty()) return;
-            std::string f = op[0].get<std::string>();
-            if (f == "set")      this->conn->set(op[1].get<std::string>(), op[2]);
-            else if (f == "delete") this->conn->erase(op[1].get<std::string>());
-            else if (f == "clean")  this->conn->clean();
-            else if (f == "load")   this->conn->load_file(op[1].get<std::string>());
-            else if (f == "loads")  this->conn->loads(op[1].is_string()? op[1].get<std::string>() : op[1].dump());
+        _verc.to_version(opuuid, [this](const json& op){
+            _apply_array_to_local(op);
         });
     }
 
-    // Events facade
-    std::vector<std::pair<std::string, EventDispatcherController::Callback>> events() { return event_disp.events(); }
-    std::vector<EventDispatcherController::Callback> get_event(const std::string& id) { return event_disp.get_event(id); }
-    int delete_event(const std::string& id) { return event_disp.delete_event(id); }
-    std::string set_event(const std::string& name, EventDispatcherController::Callback cb, const std::optional<std::string>& id=std::nullopt) {
-        return event_disp.set_event(name, std::move(cb), id);
+    // ---------- Safe load helpers (like _try_load_error) ----------
+
+    template<typename F, typename R>
+    R _try_load_error(F&& f, R fallback) const noexcept {
+        try { return f(); }
+        catch (const std::exception& e) { const_cast<SingletonKeyValueStorage*>(this)->_print(e.what()); return fallback; }
+        catch (...) { const_cast<SingletonKeyValueStorage*>(this)->_print("unknown error in _try_load_error"); return fallback; }
     }
-    void dispatch_event(const std::string& name, const json& payload=json::object()) { event_disp.dispatch_event(name, payload); }
-    void clean_events() { /* not stored -> nothing to wipe aside from replacing controller */ event_disp = EventDispatcherController{}; }
+
+    // Object / None(in error)
+    bool exists(const std::string& key) const {
+        return _try_load_error([&]{ return conn->exists(key); }, false);
+    }
+
+    std::vector<std::string> keys(const std::string& pattern="*") const {
+        return _try_load_error([&]{ return conn->keys(pattern); }, std::vector<std::string>{});
+    }
+
+    std::optional<json> get(const std::string& key) const {
+        auto val = _try_load_error([&]{ return conn->get(key); }, std::optional<json>{});
+        if (val && encryptor && val->is_object() && val->contains("rjson")) {
+            return _try_load_error([&]{
+                auto dec = encryptor->decrypt_string((*val)["rjson"].get<std::string>());
+                return std::optional<json>(json::parse(dec));
+            }, std::optional<json>{});
+        }
+        return val;
+    }
+
+    std::string dumps() const {
+        return _try_load_error([&]{
+            json root = json::object();
+            for (const auto& k : keys("*")) {
+                if (auto v = get(k)) root[k] = *v;
+            }
+            return root.dump();
+        }, std::string{"{}"});
+    }
+
+    // ---------- Events facade (names + surface mirrored to Python) ----------
+    auto events()                                    { return _event_dispa.events(); }
+    auto get_event(const std::string& id)            { return _event_dispa.get_event(id); }
+    int  erase_event(const std::string& id)         { return _event_dispa.erase_event(id); }
+    std::string set_event(const std::string& name, Callback cb, const std::optional<std::string>& id = std::nullopt) {
+        return _event_dispa.set_event(name, std::move(cb), id);
+    }
+    void dispatch_event(const std::string& name, const json& payload = json::object()) {
+        _event_dispa.dispatch_event(name, payload);
+    }
+    void clean_events()                              { _event_dispa = EventDispatcherController{}; }
+
+private:
+    // apply ["set", key, value] etc. *locally* (no encryption, no events)
+    void _apply_array_to_local(const json& arr) {
+        if (!arr.is_array() || arr.empty()) return;
+        const std::string f = arr[0].get<std::string>();
+        if (f == "set") {
+            if (arr.size() < 3) return;
+            _edit_local("set",   arr[1].get<std::string>(), arr[2]);
+        } else if (f == "erase") {
+            if (arr.size() < 2) return;
+            _edit_local("erase", arr[1].get<std::string>());
+        } else if (f == "clean") {
+            _edit_local("clean");
+        } else if (f == "load") {
+            if (arr.size() < 2) return;
+            _edit_local("load",  arr[1].get<std::string>());
+        } else if (f == "loads") {
+            if (arr.size() < 2) return;
+            if (arr[1].is_string())
+                _edit_local("loads", std::nullopt, arr[1].get<std::string>());
+            else
+                _edit_local("loads", std::nullopt, arr[1]);
+        }
+    }
 };
+
 
 // ===================== Python-Tests port =====================
 // Requires: nlohmann::json and singleton_kv_storage.hpp
@@ -1062,66 +1165,66 @@ struct Tests {
         std::cout << "start : self.test_msg()\n";
 
         // FIFO & size
-        store->mq.push(json{{"n",1}});
-        store->mq.push(json{{"n",2}});
-        store->mq.push(json{{"n",3}});
+        store->message_queue.push(json{{"n",1}});
+        store->message_queue.push(json{{"n",2}});
+        store->message_queue.push(json{{"n",3}});
 
-        assert_eq_json(store->mq.queue_size() , 3, "Size should reflect number of enqueued items.");
-        assert_opt_json_eq(store->mq.pop(), json{{"n",1}}, "Queue must be FIFO: first pop returns first pushed.");
-        assert_opt_json_eq(store->mq.pop(), json{{"n",2}}, "Second pop should return second item.");
-        assert_opt_json_eq(store->mq.pop(), json{{"n",3}}, "Third pop should return third item.");
-        assert_is_none(store->mq.pop(), "Popping an empty queue should return None.");
-        assert_eq_json(store->mq.queue_size(), 0, "Size should be zero after popping all items.");
+        assert_eq_json(store->message_queue.queue_size() , 3, "Size should reflect number of enqueued items.");
+        assert_opt_json_eq(store->message_queue.pop(), json{{"n",1}}, "Queue must be FIFO: first pop returns first pushed.");
+        assert_opt_json_eq(store->message_queue.pop(), json{{"n",2}}, "Second pop should return second item.");
+        assert_opt_json_eq(store->message_queue.pop(), json{{"n",3}}, "Third pop should return third item.");
+        assert_is_none(store->message_queue.pop(), "Popping an empty queue should return None.");
+        assert_eq_json(store->message_queue.queue_size(), 0, "Size should be zero after popping all items.");
 
         // Peek
-        store->mq.push(json{{"a",1}});
-        assert_opt_json_eq(store->mq.peek(), json{{"a",1}}, "Peek should return earliest message without removing it.");
-        assert_eq_json(store->mq.queue_size(), 1, "Peek should not change the queue size.");
-        assert_opt_json_eq(store->mq.pop(), json{{"a",1}}, "Pop should still return the same earliest message after peek.");
+        store->message_queue.push(json{{"a",1}});
+        assert_opt_json_eq(store->message_queue.peek(), json{{"a",1}}, "Peek should return earliest message without removing it.");
+        assert_eq_json(store->message_queue.queue_size(), 1, "Peek should not change the queue size.");
+        assert_opt_json_eq(store->message_queue.pop(), json{{"a",1}}, "Pop should still return the same earliest message after peek.");
 
         // Clear
-        store->mq.push(json{{"x",1}});
-        store->mq.push(json{{"y",2}});
-        store->mq.clear();
-        assert_eq_json(store->mq.queue_size(), 0, "Clear should remove all items from the queue.");
-        assert_is_none(store->mq.pop(), "After clear, popping should return None.");
+        store->message_queue.push(json{{"x",1}});
+        store->message_queue.push(json{{"y",2}});
+        store->message_queue.clear();
+        assert_eq_json(store->message_queue.queue_size(), 0, "Clear should remove all items from the queue.");
+        assert_is_none(store->message_queue.pop(), "After clear, popping should return None.");
 
         // Capture normal event flow (we'll just ensure callbacks are invoked)
         std::vector<json> events;
         auto capture = [&events](const json& payload){ events.push_back(payload); };
-        store->mq.add_listener("default", capture, "pushed");
-        store->mq.add_listener("default", capture, "popped");
-        store->mq.add_listener("default", capture, "empty");
-        store->mq.add_listener("default", capture, "cleared");
-        store->mq.push(json{{"m",1}});
-        store->mq.push(json{{"m",2}});
-        auto a = store->mq.pop();
-        auto b = store->mq.pop();
-        store->mq.clear();
+        store->message_queue.add_listener("default", capture, "pushed");
+        store->message_queue.add_listener("default", capture, "popped");
+        store->message_queue.add_listener("default", capture, "empty");
+        store->message_queue.add_listener("default", capture, "cleared");
+        store->message_queue.push(json{{"m",1}});
+        store->message_queue.push(json{{"m",2}});
+        auto a = store->message_queue.pop();
+        auto b = store->message_queue.pop();
+        store->message_queue.clear();
         // (Python had specific order asserts commented out; we mirror that.)
 
         // Listener failure should not break queue ops (isolated queue)
         std::string queue = std::string("t_listener_fail_") + uuid_v4().substr(0,8);
         auto bad = [](const json&) { throw std::runtime_error("boom"); };
-        store->mq.add_listener(queue, bad, "pushed");
+        store->message_queue.add_listener(queue, bad, "pushed");
 
-        store->mq.push(json{{"ok", true}}, queue);
-        assert_eq_json(store->mq.queue_size(queue), 1, "ops should succeed even if a listener fails.");
-        assert_opt_json_eq(store->mq.pop(queue), json{{"ok", true}}, "pop returns pushed message (listener threw).");
+        store->message_queue.push(json{{"ok", true}}, queue);
+        assert_eq_json(store->message_queue.queue_size(queue), 1, "ops should succeed even if a listener fails.");
+        assert_opt_json_eq(store->message_queue.pop(queue), json{{"ok", true}}, "pop returns pushed message (listener threw).");
 
         // Multiple queues are isolated
-        store->mq.push(json{{"a",1}}, "q1");
-        store->mq.push(json{{"b",2}}, "q2");
-        assert_eq_json(store->mq.queue_size("q1"), 1, "q1 should have one item.");
-        assert_eq_json(store->mq.queue_size("q2"), 1, "q2 should have one item.");
-        assert_opt_json_eq(store->mq.pop("q1"), json{{"a",1}}, "Popping q1 should return its own item.");
-        assert_eq_json(store->mq.queue_size("q2"), 1, "Popping q1 should not affect q2.");
+        store->message_queue.push(json{{"a",1}}, "q1");
+        store->message_queue.push(json{{"b",2}}, "q2");
+        assert_eq_json(store->message_queue.queue_size("q1"), 1, "q1 should have one item.");
+        assert_eq_json(store->message_queue.queue_size("q2"), 1, "q2 should have one item.");
+        assert_opt_json_eq(store->message_queue.pop("q1"), json{{"a",1}}, "Popping q1 should return its own item.");
+        assert_eq_json(store->message_queue.queue_size("q2"), 1, "Popping q1 should not affect q2.");
     }
 
     void test_all_cases() {
         std::cout << "start : self.test_set_and_get()\n";      test_set_and_get();
         std::cout << "start : self.test_exists()\n";           test_exists();
-        std::cout << "start : self.test_delete()\n";           test_delete();
+        std::cout << "start : self.test_erase()\n";           test_erase();
         std::cout << "start : self.test_keys()\n";             test_keys();
         std::cout << "start : self.test_get_nonexistent()\n";  test_get_nonexistent();
         std::cout << "start : self.test_dump_and_load()\n";    test_dump_and_load();
@@ -1141,10 +1244,10 @@ struct Tests {
         assert_true(store->exists("test2"), "Key should exist after being set.");
     }
 
-    void test_delete() {
+    void test_erase() {
         store->set("test3", nlohmann::json{{"data",789}});
         store->erase("test3");
-        assert_false(store->exists("test3"), "Key should not exist after being deleted.");
+        assert_false(store->exists("test3"), "Key should not exist after being erased.");
     }
 
     void test_keys() {
@@ -1175,7 +1278,7 @@ struct Tests {
         store->clean();
         assert_eq_str(store->dumps(), "{}", "Should return {} after clean.");
         // load from file
-        store->load_file("test.json");
+        store->load("test.json");
         assert_eq_json(nlohmann::json::parse(store->dumps()), raw, "Should return the correct keys and values (file load).");
         // loads from string
         store->clean();
@@ -1194,7 +1297,7 @@ struct Tests {
             auto key = p.value("key", std::string{});
             if (!key.empty() && p.contains("value")) store2->set(key, p["value"]);
         });
-        store->set_event("delete", [store2](const nlohmann::json& p){
+        store->set_event("erase", [store2](const nlohmann::json& p){
             auto key = p.value("key", std::string{});
             if (!key.empty()) store2->erase(key);
         });
@@ -1216,10 +1319,10 @@ struct Tests {
 
         store->set("alpha", json{{"info","first"}});
         std::string data1 = store->dumps();
-        auto v1 = store->current_version();
+        auto v1 = store->get_current_version();
 
         store->set("abeta", json{{"info","second"}});
-        auto v2 = store->current_version();
+        auto v2 = store->get_current_version();
         std::string data2 = store->dumps();
 
         store->set("gamma", json{{"info","third"}});
@@ -1233,19 +1336,19 @@ struct Tests {
         auto make_big_payload = [](int size_kb)->std::string {
             return std::string(1024 * size_kb, 'X');
         };
-        store->verc.limit_memory_MB = 0.2; // 0.2 MB
-        auto& lvc2 = store->verc;
+        store->_verc.limit_memory_MB = 0.2; // 0.2 MB
+        auto& lvc2 = store->_verc;
 
         for (int i=0;i<3;++i) {
             std::string small_payload = make_big_payload(62); // ~0.062 MB
             auto res = lvc2.add_operation(json::array({"write", "small_" + std::to_string(i), small_payload}),
-                                          json::array({"delete","small_" + std::to_string(i)}));
+                                          json::array({"erase","small_" + std::to_string(i)}));
             assert_true(!res.has_value(), "Should not return any warning message for small payloads.");
         }
 
         std::string big_payload = make_big_payload(600); // ~0.6 MB
         auto res = lvc2.add_operation(json::array({"write", "too_big", big_payload}),
-                                      json::array({"delete", "too_big"}));
+                                      json::array({"erase", "too_big"}));
         std::string expect_prefix = "[LocalVersionController] Warning: memory usage";
         assert_true(res.has_value() && res->rfind(expect_prefix, 0) == 0,
                     "Should return warning message about memory usage.");

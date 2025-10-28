@@ -104,23 +104,23 @@ std::map<std::string, CommandFunction> command_map = {
     }},
 
     {"ver", [](Shared_store_ptr controller) {
-        auto v = controller->current_version();
+        auto v = controller->get_current_version();
         std::cout << "Current: " << (v ? *v : std::string("(none)")) << std::endl;
     }},
 
     {"rev", [](Shared_store_ptr controller) {
-        auto before = controller->current_version();
+        auto before = controller->get_current_version();
         std::cout << "Current: " << (before ? *before : std::string("(none)")) << std::endl;
         controller->revert_one_operation();
-        auto after = controller->current_version();
+        auto after = controller->get_current_version();
         std::cout << "Reverted to: " << (after ? *after : std::string("(none)")) << std::endl;
     }},
 
     {"fwd", [](Shared_store_ptr controller) {
-        auto before = controller->current_version();
+        auto before = controller->get_current_version();
         std::cout << "Current: " << (before ? *before : std::string("(none)")) << std::endl;
         controller->forward_one_operation();
-        auto after = controller->current_version();
+        auto after = controller->get_current_version();
         std::cout << "Forwarded to: " << (after ? *after : std::string("(none)")) << std::endl;
     }},
 
@@ -173,88 +173,8 @@ void test_rsa() {
 }
 
 
-// --- test(): end-to-end smoke test of the key-value store and events ---
-int test() {
-    std::cout << "######## start test.\n";
-
-    // Primary store (with version control so rev/fwd works)
-    auto controller = std::make_shared<SingletonKeyValueStorage>(true /*version_control*/);
-
-    // Follower store: we’ll mirror "set" and "delete" from the primary via events
-    auto follower = std::make_shared<SingletonKeyValueStorage>(true);
-
-    controller->set_event("set", [follower](const nlohmann::json& p) {
-        auto key = p.value("key", std::string{});
-        if (!key.empty() && p.contains("value")) follower->set(key, p["value"]);
-    });
-    controller->set_event("delete", [follower](const nlohmann::json& p) {
-        auto key = p.value("key", std::string{});
-        if (!key.empty()) follower->erase(key);
-    });
-
-    std::cout << "######## Set some key-value pairs\n";
-    controller->set("user1", nlohmann::json{{"name","Alice"},{"age",30},{"nums", nlohmann::json::array({1,2,3})}});
-    controller->set("user2", nlohmann::json{{"name","Bob"},{"age",25}});
-
-    std::cout << "######## Check if a key exists\n";
-    std::string key = "user1";
-    if (controller->exists(key)) {
-        std::cout << "Key " << key << " exists in storage.\n";
-    } else {
-        std::cout << "Key " << key << " does not exist in storage.\n";
-    }
-
-    std::cout << "######## Retrieve and print the value for a key\n";
-    auto value = controller->get("user1");
-    if (value) {
-        std::cout << "Value for key " << key << ": " << value->dump() << "\n";
-    } else {
-        std::cout << "No value found for key " << key << "\n";
-    }
-
-    std::cout << "######## Dump all data to a JSON string\n";
-    std::string dumpedData = controller->dumps();
-    std::cout << "Dumped Data: " << dumpedData << "\n";
-
-    std::cout << "######## Load from dumped data string\n";
-    std::string jsonData = R"({"user3": {"name": "Charlie", "age": 35}})";
-    controller->loads(jsonData);
-
-    std::cout << "######## Print all keys\n";
-    std::vector<std::string> allKeys = controller->keys("*");
-    std::cout << "All Keys in Storage:\n";
-    for (const auto& k : allKeys) std::cout << "- " << k << "\n";
-
-    std::cout << "######## Delete a key\n";
-    controller->erase("user1");
-    std::cout << "Deleted key 'user1'\n";
-
-    std::cout << "######## Verify deletion\n";
-    if (!controller->exists("user1")) {
-        std::cout << "Key 'user1' was successfully deleted.\n";
-    }
-
-    std::cout << "######## Test keys(pattern)\n";
-    auto kuser = controller->keys("user*");
-    if (!kuser.empty()) std::cout << kuser[0] << "\n";
-
-    std::cout << controller->dumps() << "\n";
-
-    std::cout << "######## Follower (replicated via events)\n";
-    std::cout << follower->dumps() << "\n";
-
-    // Optional: try version moves
-    controller->revert_one_operation();
-    std::cout << "After revert, current version: "
-              << (controller->current_version().value_or("(none)")) << "\n";
-              
-    std::cout << "######## end test.\n";
-    return 0;
-}
-
-
 int main() {
-    run_ported_python_tests();
+    Tests{}.test_all();
     // test();
     // test_rsa();
 
