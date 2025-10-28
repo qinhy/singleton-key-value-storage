@@ -310,7 +310,7 @@ struct DictStorageController : public AbstractStorageController {
 
 // ---- Memory-limited dict with LRU/FIFO eviction ----
 
-struct PythonMemoryLimitedDictStorageController : public DictStorageController {
+struct MemoryLimitedDictStorageController : public DictStorageController {
     enum class Policy { LRU, FIFO };
 
     size_t max_bytes;
@@ -323,7 +323,7 @@ struct PythonMemoryLimitedDictStorageController : public DictStorageController {
     std::unordered_map<std::string, std::list<std::string>::iterator> where;
     size_t current_bytes = 0;
 
-    PythonMemoryLimitedDictStorageController(
+    MemoryLimitedDictStorageController(
         const DictStorage& model,
         double max_memory_mb = 1024.0,
         const std::string& pol = "lru",
@@ -389,7 +389,7 @@ struct PythonMemoryLimitedDictStorageController : public DictStorageController {
     std::optional<json> get(const std::string& key) const override {
         auto v = DictStorageController::get(key);
         if (v && policy == Policy::LRU) {
-            auto self = const_cast<PythonMemoryLimitedDictStorageController*>(this);
+            auto self = const_cast<MemoryLimitedDictStorageController*>(this);
             auto itW = self->where.find(key);
             if (itW != self->where.end()) {
                 self->order.splice(self->order.end(), self->order, itW->second);
@@ -483,7 +483,7 @@ struct EventDispatcherController {
 
 // ===================== Message Queue =====================
 
-struct MessageQueueController : public PythonMemoryLimitedDictStorageController {
+struct MessageQueueController : public MemoryLimitedDictStorageController {
     static constexpr const char* ROOT_KEY = "_MessageQueue";
     static constexpr const char* ROOT_KEY_EVENT = "MQE";
 
@@ -496,7 +496,7 @@ struct MessageQueueController : public PythonMemoryLimitedDictStorageController 
                            std::function<void(const std::string&, const json&)> onEvict = [](auto, auto){},
                            std::set<std::string> pinnedKeys = {},
                            std::optional<EventDispatcherController> disp = std::nullopt)
-    : PythonMemoryLimitedDictStorageController(model, max_memory_mb, pol, onEvict, std::move(pinnedKeys)),
+    : MemoryLimitedDictStorageController(model, max_memory_mb, pol, onEvict, std::move(pinnedKeys)),
       dispatcher(disp.value_or(EventDispatcherController{}))
     {}
 
@@ -647,12 +647,12 @@ struct LocalVersionController {
     static constexpr const char* FORWARD = "forward";
     static constexpr const char* REVERT = "revert";
 
-    std::unique_ptr<PythonMemoryLimitedDictStorageController> client;
+    std::unique_ptr<MemoryLimitedDictStorageController> client;
     double limit_memory_MB;
     std::optional<std::string> current_version;
 
     explicit LocalVersionController(
-        std::unique_ptr<PythonMemoryLimitedDictStorageController> client_ = nullptr,
+        std::unique_ptr<MemoryLimitedDictStorageController> client_ = nullptr,
         double limitMB = 128.0,
         const std::string& eviction_policy = "fifo"
     )
@@ -660,7 +660,7 @@ struct LocalVersionController {
     {
         if (!client_) {
             DictStorage model;
-            client = std::make_unique<PythonMemoryLimitedDictStorageController>(
+            client = std::make_unique<MemoryLimitedDictStorageController>(
                 model, limitMB, eviction_policy,
                 [this](const std::string& key, const json& /*v*/) { this->on_evict(key); },
                 std::set<std::string>{TABLENAME}

@@ -130,7 +130,7 @@ class DictStorageController(AbstractStorageController):
     def delete(self, key: str): return self.store.pop(key)
     def keys(self, pattern: str='*'): return fnmatch.filter(self.store.keys(), pattern)
 
-class PythonMemoryLimitedDictStorageController(DictStorageController):
+class MemoryLimitedDictStorageController(DictStorageController):
     def __init__(self,model: DictStorage, 
                  max_memory_mb: float = 1024.0, policy: str = 'lru',
                 on_evict: Optional[Callable[[str, dict], None]] = lambda x:x,
@@ -236,7 +236,7 @@ class EventDispatcherController(DictStorageController):
             cb = self.get(k) or (lambda x:x)
             cb(*args, **kwargs)
 
-class MessageQueueController(PythonMemoryLimitedDictStorageController):
+class MessageQueueController(MemoryLimitedDictStorageController):
     ROOT_KEY = "_MessageQueue"
     ROOT_KEY_EVENT = "MQE"
     _b64_cache_:Dict[str,str] = {'*':'*'}
@@ -401,7 +401,7 @@ class LocalVersionController:
         if client is None:
             # Build a private, memory-capped op-log store
             model = DictStorage()
-            self.client = PythonMemoryLimitedDictStorageController(
+            self.client = MemoryLimitedDictStorageController(
                 model,
                 max_memory_mb=self.limit_memory_MB,
                 policy=eviction_policy,

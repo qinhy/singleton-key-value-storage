@@ -274,7 +274,7 @@ open class DictStorageController(private val dictModel: DictStorage) : AbstractS
     }
 }
 
-open class PythonMemoryLimitedDictStorageController(
+open class MemoryLimitedDictStorageController(
     model: DictStorage,
     maxMemoryMb: Double = 1024.0,
     policy: String = "lru",
@@ -454,7 +454,7 @@ class MessageQueueController(
     onEvict: (String, Any?) -> Unit = { _, _ -> },
     pinned: Set<String>? = null,
     dispatcher: EventDispatcherController? = null
-) : PythonMemoryLimitedDictStorageController(model, maxMemoryMb, policy, onEvict, pinned) {
+) : MemoryLimitedDictStorageController(model, maxMemoryMb, policy, onEvict, pinned) {
 
     companion object {
         private const val ROOT_KEY = "_MessageQueue"
@@ -648,7 +648,7 @@ class LocalVersionController(
         private set
 
     init {
-        storage = client ?: PythonMemoryLimitedDictStorageController(
+        storage = client ?: MemoryLimitedDictStorageController(
             DictStorage(),
             maxMemoryMb = limitMemoryMB,
             policy = evictionPolicy,
