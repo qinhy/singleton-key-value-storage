@@ -1,7 +1,45 @@
-import * as fs from 'fs';
-// import * as zlib from 'zlib';
-import * as pako from './pako.esm.mjs';
-import { Buffer } from 'buffer';
+// Dynamically import modules based on environment
+let fs;
+let pako;
+let Buffer;
+
+// In browser, fs is not available
+if (typeof window === 'undefined') {
+    try {
+        fs = await import('fs');
+    } catch (error) {
+        console.error('Failed to import fs:', error);
+    }
+}
+
+// Import pako for compression
+try {
+    if (typeof window !== 'undefined') {
+        // Browser - load from CDN or bundled file
+        const pakoModule = await import('https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.esm.mjs');
+        pako = pakoModule.default;
+    } else {
+        // Node.js environment
+        pako = await import('./pako.esm.mjs');
+    }
+} catch (error) {
+    console.error('Failed to import pako:', error);
+}
+
+// Set up Buffer
+try {
+    if (typeof window !== 'undefined') {
+        // Browser environment - use buffer from window
+        const bufferModule = await import('buffer/');
+        Buffer = bufferModule.Buffer;
+    } else {
+        // Node.js environment
+        const buffer = await import('buffer');
+        Buffer = buffer.Buffer;
+    }
+} catch (error) {
+    console.error('Failed to import Buffer:', error);
+}
 
 export class PEMFileReader {
     // private filePath: string;
@@ -227,30 +265,50 @@ export class SimpleRSAChunkEncryptor {
 }
 
 
-function ex3() {
-    const publicKeyPath = '../tmp/public_key.pem';
-    const privateKeyPath = '../tmp/private_key.pem';
-
-    // Load keys from .pem files
-    const publicKey = new PEMFileReader(publicKeyPath).loadPublicPkcs8Key();
-    const privateKey = new PEMFileReader(privateKeyPath).loadPrivatePkcs8Key();
-
-    // Instantiate the encryptor with the loaded keys
-    const encryptor = new SimpleRSAChunkEncryptor(publicKey, privateKey);
-
-    // Encrypt and decrypt a sample string
-    var plaintext = "Hello, RSA encryption with .pem support!";
-    console.log(`Original Plaintext: [${plaintext}]`);
-
-    // Encrypt the plaintext
-    const encryptedText = encryptor.encryptString(plaintext, true);
-    console.log(`\nEncrypted (Base64 encoded): [${encryptedText}]`);
-
-    // // Decrypt the encrypted text
-    const decryptedText = encryptor.decryptString(encryptedText);
-    console.log(`\nDecrypted Text: [${decryptedText}]`);
+/**
+ * Encrypts a JavaScript object to an encrypted JSON string using RSA encryption.
+ * @param dataDict The JavaScript object to encrypt
+ * @param publicPkcs8KeyPath Path to the public key file
+ * @returns Encrypted string representation of the JSON data
+ */
+export function dumpRJSONs(dataDict: any, publicPkcs8KeyPath: string): string {
+    const encryptor = new SimpleRSAChunkEncryptor(
+        new PEMFileReader(publicPkcs8KeyPath).loadPublicPkcs8Key()
+    );
+    return encryptor.encryptString(JSON.stringify(dataDict));
 }
 
+/**
+ * Decrypts an encrypted JSON string to a JavaScript object using RSA decryption.
+ * @param encryptedData The encrypted JSON string
+ * @param privatePkcs8KeyPath Path to the private key file
+ * @returns Decrypted JavaScript object
+ */
+export function loadRJSONs(encryptedData: string, privatePkcs8KeyPath: string): any {
+    const encryptor = new SimpleRSAChunkEncryptor(
+        undefined,
+        new PEMFileReader(privatePkcs8KeyPath).loadPrivatePkcs8Key()
+    );
+    return JSON.parse(encryptor.decryptString(encryptedData));
+}
 
-// npx tsx RSA.ts
-// ex3()
+/**
+ * Encrypts a JavaScript object and writes it to a file using RSA encryption.
+ * @param dataDict The JavaScript object to encrypt
+ * @param path Path where the encrypted data will be written
+ * @param publicPkcs8KeyPath Path to the public key file
+ * @returns void
+ */
+export function dumpRJSON(dataDict: any, path: string, publicPkcs8KeyPath: string): void {
+    fs.writeFileSync(path, dumpRJSONs(dataDict, publicPkcs8KeyPath));
+}
+
+/**
+ * Reads an encrypted JSON file and decrypts it to a JavaScript object using RSA decryption.
+ * @param path Path to the encrypted JSON file
+ * @param privatePkcs8KeyPath Path to the private key file
+ * @returns Decrypted JavaScript object
+ */
+export function loadRJSON(path: string, privatePkcs8KeyPath: string): any {
+    return loadRJSONs(fs.readFileSync(path, 'utf-8'), privatePkcs8KeyPath);
+}

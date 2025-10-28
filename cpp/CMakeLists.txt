@@ -16,6 +16,7 @@ file(GLOB SOURCES "src/*.cpp")
 # Create the executable
 add_executable(SingletonStorage ${SOURCES})
 
-# nlohmann::json and stduuid are header-only, so no linking is needed.
-# However, we need to add the pthread library for thread safety.
-# target_link_libraries(SingletonStorage pthread)
+find_package(ZLIB REQUIRED)
+target_link_libraries(SingletonStorage PRIVATE ZLIB::ZLIB)
+
+# nlohmann::json and stduuid are header-only, so no additional linking is needed here.

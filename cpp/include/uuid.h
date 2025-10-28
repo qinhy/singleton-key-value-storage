@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef STDUUID_H
 #define STDUUID_H
 

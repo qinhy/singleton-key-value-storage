@@ -1,3 +1,5 @@
+#pragma once
+
 #include "InfInt.h"
 #include "base64.hpp"
 #include "json.hpp"

@@ -13,3 +13,5 @@ tmp/private_key.pem
 *.pyc
 ts/node_modules/
 /cpp/build
+rust/target
+rust/Cargo.lock

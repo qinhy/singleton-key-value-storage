@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
-import { PEMFileReader, SimpleRSAChunkEncryptor } from './RSA.js';
+import { PEMFileReader, SimpleRSAChunkEncryptor } from './rjson.js';
 import { Buffer } from 'buffer';
 
 export function b64urlEncode(input) {

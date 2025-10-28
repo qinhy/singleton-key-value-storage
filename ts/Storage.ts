@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
-import { PEMFileReader, SimpleRSAChunkEncryptor } from './RSA';
+import { PEMFileReader, SimpleRSAChunkEncryptor } from './rjson';
 import { Buffer } from 'buffer';
 
 export type StoreValue = any;

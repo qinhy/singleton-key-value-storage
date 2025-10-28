@@ -9,9 +9,9 @@ from pathlib import Path
 from collections import OrderedDict
 
 try:
-    from .utils import SimpleRSAChunkEncryptor, PEMFileReader
+    from .rjson import SimpleRSAChunkEncryptor, PEMFileReader
 except Exception as e:
-    from utils import SimpleRSAChunkEncryptor, PEMFileReader
+    from rjson import SimpleRSAChunkEncryptor, PEMFileReader
 
 def b64url_encode(s: str) -> str:
     return base64.urlsafe_b64encode(s.encode("utf-8")).decode("ascii").rstrip("=")

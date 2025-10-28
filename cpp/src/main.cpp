@@ -1,9 +1,10 @@
 // main.cpp (updated for SingletonKeyValueStorage)
+#include <json.hpp>
+#include <Storages.hpp>
+#include <rjson.hpp>
 
 #include <iostream>
 #include <string>
-#include <json.hpp>
-#include <Storages.hpp>
 #include <map>
 #include <vector>
 #include <memory>
@@ -153,13 +154,13 @@ void test_rsa() {
     std::string public_key_path  = "../tmp/public_key.pem";
     std::string private_key_path = "../tmp/private_key.pem";
 
-    PEMFileReader public_key_reader(public_key_path);
-    auto public_key = public_key_reader.load_public_key_from_pkcs8();
+    rjson::PEMFileReader public_key_reader(public_key_path);
+    auto public_key = public_key_reader.load_public_pkcs8_key();
 
-    PEMFileReader private_key_reader(private_key_path);
-    auto private_key = private_key_reader.load_private_key_from_pkcs8();
+    rjson::PEMFileReader private_key_reader(private_key_path);
+    auto private_key = private_key_reader.load_private_pkcs8_key();
 
-    SimpleRSAChunkEncryptor encryptor(public_key, private_key);
+    rjson::SimpleRSAChunkEncryptor encryptor(public_key, private_key);
 
     std::string plaintext = "Hello, RSA encryption with .pem support!";
     std::cout << "Original Plaintext: [" << plaintext << "]\n";
@@ -258,15 +259,15 @@ int main() {
     // test_rsa();
 
     // Turn on version control to enable rev/fwd history
-    auto controller = std::make_shared<SingletonKeyValueStorage>(true /*version_control*/);
+    // auto controller = std::make_shared<SingletonKeyValueStorage>(true /*version_control*/);
 
-    // Console loop
-    std::string command;
-    while (true) {
-        std::cout << "\n> Enter command (" << generate_command_list(command_map) << "): ";
-        if (!std::getline(std::cin, command)) break;
-        if (command == "exit") break;
-        handle_command(controller, command);
-    }
+    // // Console loop
+    // std::string command;
+    // while (true) {
+    //     std::cout << "\n> Enter command (" << generate_command_list(command_map) << "): ";
+    //     if (!std::getline(std::cin, command)) break;
+    //     if (command == "exit") break;
+    //     handle_command(controller, command);
+    // }
     return 0;
 }

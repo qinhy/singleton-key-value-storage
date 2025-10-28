@@ -5,24 +5,24 @@ import unittest
 
 try:
     from .Storage import SingletonKeyValueStorage, DictStorage, MessageQueueController
-    from .utils import SimpleRSAChunkEncryptor, PEMFileReader
-    from .RedisStorage import SingletonRedisStorage
-    from .AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
-    from .FirestoreStorage import SingletonFirestoreStorage
-    from .SqliteStorage import SingletonSqliteStorage
-    from .MongoStorage import SingletonMongoDBStorage
+    from .rjson import SimpleRSAChunkEncryptor, PEMFileReader
+    # from .RedisStorage import SingletonRedisStorage
+    # from .AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
+    # from .FirestoreStorage import SingletonFirestoreStorage
+    # from .SqliteStorage import SingletonSqliteStorage
+    # from .MongoStorage import SingletonMongoDBStorage
     from .FileSystemStorage import SingletonFileSystemStorage
-    from .CouchStorage import SingletonCouchDBStorage
+    # from .CouchStorage import SingletonCouchDBStorage
 except Exception as e:
     from Storage import SingletonKeyValueStorage, DictStorage, MessageQueueController
-    from utils import SimpleRSAChunkEncryptor, PEMFileReader
-    from RedisStorage import SingletonRedisStorage
-    from AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
-    from FirestoreStorage import SingletonFirestoreStorage
-    from SqliteStorage import SingletonSqliteStorage
-    from MongoStorage import SingletonMongoDBStorage
+    from rjson import SimpleRSAChunkEncryptor, PEMFileReader
+    # from RedisStorage import SingletonRedisStorage
+    # from AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
+    # from FirestoreStorage import SingletonFirestoreStorage
+    # from SqliteStorage import SingletonSqliteStorage
+    # from MongoStorage import SingletonMongoDBStorage
     from FileSystemStorage import SingletonFileSystemStorage
-    from CouchStorage import SingletonCouchDBStorage
+    # from CouchStorage import SingletonCouchDBStorage
 
 ENCRYPPR=None
 # ENCRYPPR=SimpleRSAChunkEncryptor(
