@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use num_bigint::BigUint;
-use num_traits::{One, Zero};
+use num_traits::One;
 use std::{fs, io::{Read, Write}, path::{Path, PathBuf}};
 
 /// Minimal PEM reader + DER helper, mirroring the Python.

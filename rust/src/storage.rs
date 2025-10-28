@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::path::Path;
 use uuid::Uuid;
 use wildmatch::WildMatch;
 
@@ -188,7 +187,7 @@ pub struct MemoryLimitedDictStorageController {
     current_bytes: usize,
 
     // eviction callback
-    on_evict: Box<dyn Fn(&str, &Value) + 'static>,
+    on_evict: Box<dyn Fn(&str, &Value) + Send + Sync + 'static>,
 }
 
 impl MemoryLimitedDictStorageController {
@@ -196,7 +195,7 @@ impl MemoryLimitedDictStorageController {
         model: DictStorage,
         max_memory_mb: f64,
         policy: Policy,
-        on_evict: Option<Box<dyn Fn(&str, &Value) + 'static>>,
+        on_evict: Option<Box<dyn Fn(&str, &Value) + Send + Sync + 'static>>,
         pinned: Option<HashSet<String>>,
     ) -> Self {
         Self {
@@ -760,7 +759,7 @@ pub struct SingletonKeyValueStorage {
 }
 
 impl SingletonKeyValueStorage {
-    pub fn new(version_control: bool, encryptor: Option<Box<dyn Encryptor>>) -> Self {
+    pub fn new(version_control: bool, encryptor: Option<Box<dyn Encryptor + Send + Sync>>) -> Self {
         let dict = DictStorage::new();
         let conn: Box<dyn StorageController> = Box::new(DictStorageController::new(dict));
         let ver = LocalVersionController::new(128.0);
@@ -785,7 +784,7 @@ impl SingletonKeyValueStorage {
         }
     }
 
-    pub fn switch_backend(&mut self, controller: Box<dyn StorageController>) {
+    pub fn switch_backend(&mut self, controller: Box<dyn StorageController + Send + Sync>) {
         self.events = EventDispatcherController::default();
         self.ver = LocalVersionController::new(128.0);
         let mq_store = MemoryLimitedDictStorageController::new(
@@ -938,16 +937,29 @@ impl SingletonKeyValueStorage {
 
     // versioning control surface
     pub fn revert_one_operation(&mut self) {
-        self.ver.revert_one(|op| self.edit_local(op));
+        let mut ops = Vec::new();
+        self.ver.revert_one(|op| ops.push(op.clone()));
+        for op in ops {
+            self.edit_local(&op);
+        }
     }
     pub fn forward_one_operation(&mut self) {
-        self.ver.forward_one(|op| self.edit_local(op));
+        let mut ops = Vec::new();
+        self.ver.forward_one(|op| ops.push(op.clone()));
+        for op in ops {
+            self.edit_local(&op);
+        }
     }
     pub fn get_current_version(&self) -> Option<String> {
         self.ver.current()
     }
     pub fn local_to_version(&mut self, id: &str) -> Result<(), String> {
-        self.ver.to_version(id, |op| self.edit_local(op))
+        let mut ops = Vec::new();
+        self.ver.to_version(id, |op| ops.push(op.clone()))?;
+        for op in ops {
+            self.edit_local(&op);
+        }
+        Ok(())
     }
 
     // events
