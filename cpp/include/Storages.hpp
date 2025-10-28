@@ -252,22 +252,17 @@ struct AbstractStorageController {
         std::stringstream buf; buf << ifs.rdbuf();
         loads(buf.str());
     }
-
-    // ---- Optional RSA wrappers: plug your own encryptor if needed
-    struct SimpleRSAChunkEncryptor {
-        virtual ~SimpleRSAChunkEncryptor() = default;
-        virtual std::string encrypt_string(const std::string& s) = 0;
-        virtual std::string decrypt_string(const std::string& s) = 0;
-    };
-
-    virtual void dump_RSA(const std::string& path, SimpleRSAChunkEncryptor& enc) const {
-        std::ofstream ofs(path);
-        ofs << enc.encrypt_string(dumps());
+    
+    virtual void dump_rjson(const std::string& path,
+                            const std::string& public_pkcs8_key_path,
+                            bool compress=true) const {
+        rjson::dump_rJSON(dumps(), path, public_pkcs8_key_path, compress);
     }
-    virtual void load_RSA(const std::string& path, SimpleRSAChunkEncryptor& enc) {
-        std::ifstream ifs(path);
-        std::stringstream buf; buf << ifs.rdbuf();
-        loads(enc.decrypt_string(buf.str()));
+
+    virtual void load_rjson(const std::string& path,
+                            const std::string& private_pkcs8_key_path) {
+        const std::string plain_json = rjson::load_rJSON(path, private_pkcs8_key_path);
+        loads(plain_json);
     }
 
     // Approximate memory

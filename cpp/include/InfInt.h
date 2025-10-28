@@ -40,6 +40,8 @@
 #include <sstream>
 #include <iomanip>
 #include <climits>
+#include <cstdint>
+#include <algorithm>
 
 // #include <limits.h>
 // #include <stdlib.h>
