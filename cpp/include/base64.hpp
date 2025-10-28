@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <cmath>
 #include <tuple>
+#include <cstdint>
 
 namespace base64
 {
