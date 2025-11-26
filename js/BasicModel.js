@@ -1,5 +1,5 @@
 // from https://github.com/qinhy/singleton-key-value-storage.git
-import { SingletonKeyValueStorage, uuidv4 } from "./Storage.js"
+import { DictStorage, SingletonKeyValueStorage, uuidv4 } from "./Storage.js"
 
 function now_utc() {
   // Get the current time in milliseconds since the Unix epoch
@@ -265,7 +265,7 @@ export class BasicStore extends SingletonKeyValueStorage {
 
   constructor(version_control = false) {
     super(version_control)
-    this.tempTsBackend()
+    this.conn = DictStorage.buildTmp();
   }
 
   _get_class(id) {

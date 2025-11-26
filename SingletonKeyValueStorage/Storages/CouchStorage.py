@@ -1,6 +1,5 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 
-import fnmatch
 import re
 import uuid
 from urllib.parse import ParseResult, urlparse

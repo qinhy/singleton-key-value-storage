@@ -80,11 +80,11 @@ class AbstractStorage:
     
 class DictStorage(AbstractStorage):
     _uuid = uuid.uuid4()
-    _store = {}
+    _store = OrderedDict()
         
     def __init__(self,id=None,store=None,is_singleton=None):
         super().__init__(id,store,is_singleton)
-        self.store = {} if store is None else store
+        self.store = OrderedDict() if store is None else store
 
     def bytes_used(self, deep=True, human_readable=True):
         size = get_deep_bytes_size(self) if deep else sys.getsizeof(self)
@@ -145,8 +145,8 @@ class MemoryLimitedDictStorageController(DictStorageController):
         self.init_size_manage()
 
     def init_size_manage(self):
-        self._sizes: dict[str, int] = {}                     # key -> bytes (approx)
-        self._order: OrderedDict[str, None] = OrderedDict()  # access/insertion order
+        self._sizes: dict[str, int] = {}  # key -> bytes (approx)
+        self._order: OrderedDict[str, None] = self.model.store
         self._current_bytes: int = 0
 
     def _entry_size(self, key: str, value: dict) -> int:
@@ -156,10 +156,6 @@ class MemoryLimitedDictStorageController(DictStorageController):
         size = self._current_bytes
         return humanize_bytes(size) if human_readable else size
 
-    def _reduce(self,key):
-        self._order.pop(key, None)
-        self._current_bytes -= self._sizes.pop(key, 0)
-
     def pick_victim(self):
         return next((k for k in self._order if k not in self.pinned), None)
     
@@ -168,39 +164,37 @@ class MemoryLimitedDictStorageController(DictStorageController):
         while self._current_bytes > self.max_bytes and self._order:
             victim = self.pick_victim()
             if victim is None: break   # only pinned keys remain
-            val = super().get(victim)  # avoid LRU touch
-            self._reduce(victim)
-            super().delete(victim)    
+            val = self.get(victim,False)  # avoid LRU touch
+            self.delete(victim)
             self.on_evict(victim, val)
 
-    def set(self, key: str, value: dict):
-        if self.exists(key): self._reduce(key)
+    def move_to_end(self,key):
+        if self.policy == 'lru' and self.exists(key):
+            self._order.move_to_end(key, last=True)
 
+    def set(self, key: str, value: dict):
         super().set(key, value)
 
         # Track size and order
+        old_sz = self._sizes.pop(key, 0)
         sz = self._entry_size(key, value)
         self._sizes[key] = sz
-        self._current_bytes += sz
+        self._current_bytes += sz - old_sz
 
-        self._order[key] = None
-        if self.policy == 'lru':
-            self._order.move_to_end(key, last=True)
-
+        self.move_to_end(key)
         self._maybe_evict()
 
-    def get(self, key: str) -> dict:
-        val = super().get(key)
-        if val is not None and self.policy == 'lru' and key in self._order:
-            self._order.move_to_end(key, last=True)
-        return val
+    def get(self, key: str, move_to_end=True) -> dict:
+        value = super().get(key)
+        if move_to_end: self.move_to_end(key)
+        return value
 
     def delete(self, key: str):
-        if self.exists(key): self._reduce(key)
+        self._current_bytes -= self._sizes.pop(key, 0)
         return super().delete(key)
 
     def clean(self):
-        [super().delete(k) for k in list(self._order.keys())]
+        super().clean()
         self.init_size_manage()
 
 class EventDispatcherController(DictStorageController):
@@ -400,9 +394,8 @@ class LocalVersionController:
         self.client = client
         if client is None:
             # Build a private, memory-capped op-log store
-            model = DictStorage()
             self.client = MemoryLimitedDictStorageController(
-                model,
+                DictStorage(),
                 max_memory_mb=self.limit_memory_MB,
                 policy=eviction_policy,
                 on_evict=self._on_evict,

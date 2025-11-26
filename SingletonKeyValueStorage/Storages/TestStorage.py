@@ -9,7 +9,7 @@ try:
     # from .RedisStorage import SingletonRedisStorage
     # from .AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
     # from .FirestoreStorage import SingletonFirestoreStorage
-    # from .SqliteStorage import SingletonSqliteStorage
+    from .SqliteStorage import SingletonSqliteStorage
     # from .MongoStorage import SingletonMongoDBStorage
     from .FileSystemStorage import SingletonFileSystemStorage
     # from .CouchStorage import SingletonCouchDBStorage
@@ -19,7 +19,7 @@ except Exception as e:
     # from RedisStorage import SingletonRedisStorage
     # from AwsStorage import SingletonDynamoDBStorage, SingletonS3Storage
     # from FirestoreStorage import SingletonFirestoreStorage
-    # from SqliteStorage import SingletonSqliteStorage
+    from SqliteStorage import SingletonSqliteStorage
     # from MongoStorage import SingletonMongoDBStorage
     from FileSystemStorage import SingletonFileSystemStorage
     # from CouchStorage import SingletonCouchDBStorage
@@ -39,9 +39,9 @@ class Tests(unittest.TestCase):
 
     def test_all(self,num=1):
         self.test_dict(num)
-        # self.test_sqlite_pymix(num)
-        # self.test_file(num)
-        # self.test_sqlite(num)
+        self.test_sqlite_pymix(num)
+        self.test_file(num)
+        self.test_sqlite(num)
         # self.test_couch(num)
         # self.test_mongo(num)
         # self.test_redis(num)
@@ -49,7 +49,7 @@ class Tests(unittest.TestCase):
 
     def test_file(self,num=1):
         print('###### test_file ######')
-        self.store.switch_backend(SingletonFileSystemStorage.build())
+        self.store.switch_backend(SingletonFileSystemStorage.build('./tmp'))
         for i in range(num):self.test_all_cases()
 
     def test_dict(self,num=1):
@@ -132,12 +132,12 @@ class Tests(unittest.TestCase):
 
     def test_sqlite(self,num=1):
         print('###### test_sqlite ######')
-        self.store.switch_backend(SingletonSqliteStorage.build_pure())
+        self.store.switch_backend(SingletonSqliteStorage.build_pure('test.db'))
         for i in range(num):self.test_all_cases()
 
     def test_sqlite_pymix(self,num=1):
         print('###### test_sqlite_pymix ######')
-        self.store.switch_backend(SingletonSqliteStorage.build())
+        self.store.switch_backend(SingletonSqliteStorage.build('test.db'))
         for i in range(num):self.test_all_cases()
 
     def test_firestore(self,num=1):
