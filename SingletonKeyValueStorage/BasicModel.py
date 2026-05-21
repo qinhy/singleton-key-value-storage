@@ -1,7 +1,7 @@
 # from https://github.com/qinhy/singleton-key-value-storage.git
 from datetime import datetime
 import json
-from typing import Callable, Optional, TypeVar, Type, overload
+from typing import Optional, TypeVar, Type
 import unittest
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -60,7 +60,6 @@ class Controller4Basic:
             return self
 
         def _update_timestamp(self):
-            assert self.model is not None, 'controller has null model!'
             self.model.update_time = now_utc()
             
         def store(self):
@@ -97,10 +96,11 @@ class Controller4Basic:
         def add_child(self, child_id: str):
             if hasattr(child_id,'get_id'):
                 child_id = child_id.get_id()
-            child = self.storage().find(child_id)
+            child: Model4Basic.AbstractGroup = self.storage().find(child_id)
             if child:
                 self.update(children_id= self.model.children_id + [child_id])
-                child.controller.update(depth=self.model.depth+1)
+                child.controller.update(depth=self.model.depth+1,
+                                        parent_id=self.model.get_id())
 
         def delete_child(self, child_id:str):
             if child_id not in self.model.children_id:return self
@@ -145,7 +145,7 @@ class Model4Basic:
 
         def model_copy(self, *, update = None, deep = False):
             res = super().model_copy(update=update, deep=deep)
-            res._id = None
+            setattr(res,'_id',None)
             return res
 
         def set_id(self,id:str):
